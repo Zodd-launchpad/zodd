@@ -160,12 +160,28 @@ export async function heightInfo() {
 export async function messagesFor(address) {
   const out = await runCli(["messages", address], { timeout: 3 * 60_000, waitsync: true });
   const { json, raw } = parseMaybeJson(out);
-  if (Array.isArray(json)) return json;
-  if (Array.isArray(json?.messages)) return json.messages;
-  // Unknown shape -- return nothing rather than guessing, but log so this
-  // gets fixed the first time it's exercised against the real server.
-  console.error(`[zcash-wallet-service] unrecognized messages() output, needs a look: ${raw}`);
-  return [];
+  // The real zingo-cli (confirmed live 2026-09-06) wraps entries as
+  // { "value_transfers": [...] }, not a bare array or { messages: [...] }
+  // like we originally guessed defensively -- same class of bug as the
+  // encoded_address/address mismatch in newAddress().
+  const list = Array.isArray(json)
+    ? json
+    : Array.isArray(json?.messages)
+      ? json.messages
+      : Array.isArray(json?.value_transfers)
+        ? json.value_transfers
+        : null;
+  if (list === null) {
+    console.error(`[zcash-wallet-service] unrecognized messages() output, needs a look: ${raw}`);
+    return [];
+  }
+  if (list.length > 0) {
+    // zingolib's exact field names per entry aren't pinned down on our side
+    // yet -- log the raw shape once so a mismatch in the backend's own
+    // matching logic (zcashReal.ts) can be caught and fixed fast.
+    console.error(`[zcash-wallet-service] messagesFor(${address}) got ${list.length} entrie(s): ${JSON.stringify(list)}`);
+  }
+  return list;
 }
 
 const MAX_MEMO_BYTES = 512; // Zcash shielded memo field hard limit

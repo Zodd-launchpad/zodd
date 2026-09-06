@@ -6,7 +6,7 @@ import { api } from "@/lib/api";
 import { useLanguage } from "@/lib/i18n";
 import { fileToSquareDataUrl } from "@/lib/imageResize";
 
-type Phase = "form" | "waiting" | "failed";
+type Phase = "form" | "waiting" | "created" | "failed";
 
 export default function CreatePage() {
   const { wallet } = useWallet();
@@ -27,6 +27,7 @@ export default function CreatePage() {
   const [isRealMode, setIsRealMode] = useState(false);
   const [createFeeZec, setCreateFeeZec] = useState<number | null>(null);
   const [copied, setCopied] = useState(false);
+  const [createdSymbol, setCreatedSymbol] = useState<string | null>(null);
 
   useEffect(() => {
     api
@@ -79,7 +80,8 @@ export default function CreatePage() {
         const c = await api.getTokenCreation(creationId);
         if (c.status === "CREATED") {
           clearInterval(id);
-          location.href = `/launchpad/token/${(c.resultSymbol ?? symbol).toUpperCase()}`;
+          setCreatedSymbol((c.resultSymbol ?? symbol).toUpperCase());
+          setPhase("created");
         } else if (c.status === "FAILED" || c.status === "EXPIRED") {
           clearInterval(id);
           setPhase("failed");
@@ -115,7 +117,10 @@ export default function CreatePage() {
     return (
       <div className="container" style={{ maxWidth: 480 }}>
         <div className="card">
-          <h2 style={{ marginTop: 0, textAlign: "center" }}>{t("create.waiting.title")}</h2>
+          <p className="muted" style={{ textAlign: "center", marginBottom: 4, textTransform: "uppercase", letterSpacing: 1, fontSize: 11 }}>
+            {t("create.waiting.title")}
+          </p>
+          <h2 style={{ marginTop: 0, textAlign: "center", fontSize: 40, lineHeight: 1.1 }}>{zecAmount} ZEC</h2>
           <p className="muted" style={{ textAlign: "center" }}>
             {t("create.waiting.sendExactly", { amount: zecAmount ?? "", symbol })}
           </p>
@@ -133,6 +138,22 @@ export default function CreatePage() {
           <p className="muted" style={{ marginTop: 14, fontSize: 12 }}>
             {isRealMode ? t("create.waiting.realNote") : t("create.waiting.simulatedNote")}
           </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (phase === "created") {
+    return (
+      <div className="container" style={{ maxWidth: 480 }}>
+        <div className="card" style={{ textAlign: "center" }}>
+          <h2 style={{ marginTop: 0, color: "var(--green)", fontSize: 28, letterSpacing: 1 }}>
+            {t("create.created.title")}
+          </h2>
+          <p className="muted">{t("create.created.body", { symbol: createdSymbol ?? symbol })}</p>
+          <a href={`/launchpad/token/${createdSymbol ?? symbol}`} className="btn btn-gold" style={{ width: "100%", display: "block", marginTop: 12 }}>
+            {t("create.created.viewButton", { symbol: createdSymbol ?? symbol })}
+          </a>
         </div>
       </div>
     );

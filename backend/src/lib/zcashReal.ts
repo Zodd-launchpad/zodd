@@ -75,12 +75,28 @@ function startPolling() {
       }
       try {
         const { messages } = await call(`/wallet/messages?address=${encodeURIComponent(pending.address)}`);
-        const match = (messages ?? []).find(
-          (m: any) => (m.confirmations ?? 0) >= MIN_CONFIRMATIONS && Number(m.amountZatoshis ?? m.amount ?? 0) > 0
-        );
+        if (messages?.length) {
+          console.log(`[zcashReal] order ${pending.orderId}: ${messages.length} message(s) at ${pending.address}: ${JSON.stringify(messages)}`);
+        }
+        // zingolib's ValueTransfer JSON shape isn't pinned down on our side
+        // yet (confirmed live 2026-09-06 that the wrapper key is
+        // value_transfers, not messages) -- match generously across the
+        // plausible field-name variants rather than assuming one, and rely
+        // on the console.log above to tell us fast if this still misses.
+        const match = (messages ?? []).find((m: any) => {
+          const confirmed =
+            Number(m.confirmations ?? 0) >= MIN_CONFIRMATIONS ||
+            m.status === "confirmed" ||
+            (typeof m.blockheight === "number" && m.blockheight > 0) ||
+            (typeof m.block_height === "number" && m.block_height > 0);
+          const amountZats = Number(m.amountZatoshis ?? m.amount ?? m.value ?? m.value_zatoshis ?? 0);
+          const isIncoming = m.kind ? /receiv/i.test(String(m.kind)) : true;
+          return confirmed && amountZats > 0 && isIncoming;
+        });
         if (match) {
           watchers.delete(pending.orderId);
-          const confirmedZecAmount = Number(match.amountZatoshis ?? match.amount) / ZATOSHIS_PER_ZEC;
+          const amountZats = Number(match.amountZatoshis ?? match.amount ?? match.value ?? match.value_zatoshis);
+          const confirmedZecAmount = amountZats / ZATOSHIS_PER_ZEC;
           onPayment?.(pending.orderId, confirmedZecAmount, match.txid);
         }
       } catch (err) {
