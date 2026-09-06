@@ -1,14 +1,16 @@
+"use client";
+import { useLanguage } from "@/lib/i18n";
 import LaunchpadNav from "./LaunchpadNav";
 
 export default function LaunchpadLayout({ children }: { children: React.ReactNode }) {
+  const { t } = useLanguage();
   return (
     <div>
       <div className="section-header">
         <div className="container" style={{ paddingBottom: 0 }}>
-          <h1 className="section-title">Launchpad</h1>
+          <h1 className="section-title">{t("launchpad.title")}</h1>
           <p className="muted" style={{ marginBottom: 16 }}>
-            Shielded meme markets on Zcash. Launch a token, trade it on a bonding curve,
-            pay privately — built for fun, not for finance.
+            {t("launchpad.subtitle")}
           </p>
           <LaunchpadNav />
         </div>

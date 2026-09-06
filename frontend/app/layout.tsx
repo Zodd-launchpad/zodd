@@ -1,5 +1,6 @@
 import "./globals.css";
 import { WalletProvider } from "@/lib/wallet";
+import { LanguageProvider } from "@/lib/i18n";
 import DemoBanner from "./DemoBanner";
 import HeaderBar from "./HeaderBar";
 import DisclaimerBanner from "./DisclaimerBanner";
@@ -12,12 +13,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body>
-        <WalletProvider>
-          <DemoBanner />
-          <HeaderBar />
-          {children}
-          <DisclaimerBanner />
-        </WalletProvider>
+        <LanguageProvider>
+          <WalletProvider>
+            <DemoBanner />
+            <HeaderBar />
+            {children}
+            <DisclaimerBanner />
+          </WalletProvider>
+        </LanguageProvider>
       </body>
     </html>
   );

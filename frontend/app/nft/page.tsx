@@ -1,12 +1,13 @@
+"use client";
+import { useLanguage } from "@/lib/i18n";
+
 export default function NFTPage() {
+  const { t } = useLanguage();
   return (
     <div className="coming-soon">
-      <div className="badge">COMING SOON</div>
-      <h1>NFT Marketplace</h1>
-      <p>
-        A marketplace for ZODD-themed NFTs — mint, browse, and trade. Not built yet.
-        Head to the Launchpad to see what's live today.
-      </p>
+      <div className="badge">{t("comingSoon.badge")}</div>
+      <h1>{t("nft.title")}</h1>
+      <p>{t("nft.body")}</p>
     </div>
   );
 }

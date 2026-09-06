@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { api } from "@/lib/api";
 import { useWallet } from "@/lib/wallet";
+import { useLanguage } from "@/lib/i18n";
 
 type Step = "intro" | "words" | "confirm" | "creating";
 
@@ -12,6 +13,7 @@ export default function WalletOnboardModal({ onClose }: { onClose: () => void })
   const [checkInputs, setCheckInputs] = useState(["", "", ""]);
   const [error, setError] = useState<string | null>(null);
   const { createWallet } = useWallet();
+  const { t } = useLanguage();
 
   // For the demo we show the words before they're persisted anywhere: the
   // real API already generated them, we just need something for the visual
@@ -33,13 +35,13 @@ export default function WalletOnboardModal({ onClose }: { onClose: () => void })
 
   function confirmWords() {
     const pending = (window as any).__pendingWallet;
-    if (!pending) return setError("something went wrong, close this and try again");
+    if (!pending) return setError(t("onboard.error.generic"));
     const ok =
       checkInputs[0].trim().toLowerCase() === pending.words[4] &&
       checkInputs[1].trim().toLowerCase() === pending.words[5] &&
       checkInputs[2].trim().toLowerCase() === pending.words[6];
     if (!ok) {
-      setError("those aren't words 5, 6 and 7. Check the copy you made.");
+      setError(t("onboard.error.wrongWords"));
       return;
     }
     try {
@@ -56,23 +58,19 @@ export default function WalletOnboardModal({ onClose }: { onClose: () => void })
       <div className="modal card" onClick={(e) => e.stopPropagation()}>
         {step === "intro" && (
           <>
-            <div className="badge">BEFORE YOUR FIRST TRADE</div>
-            <h2 style={{ marginTop: 0 }}>Two wallets, both yours</h2>
-            <p className="muted">
-              The token wallet is created by this platform and holds what you buy.
-              Your real Zcash wallet (Zashi, Ywallet, Zingo, Zodl) is the one that pays
-              for every trade — we never touch it.
-            </p>
+            <div className="badge">{t("onboard.badge.intro")}</div>
+            <h2 style={{ marginTop: 0 }}>{t("onboard.title.intro")}</h2>
+            <p className="muted">{t("onboard.body.intro")}</p>
             <button className="btn btn-gold" style={{ width: "100%" }} onClick={startWords}>
-              Create a new wallet
+              {t("onboard.createButton")}
             </button>
           </>
         )}
 
         {step === "words" && (
           <>
-            <div className="badge">WRITE THESE DOWN NOW</div>
-            <h2 style={{ marginTop: 0 }}>Your twelve words</h2>
+            <div className="badge">{t("onboard.badge.words")}</div>
+            <h2 style={{ marginTop: 0 }}>{t("onboard.title.words")}</h2>
             <div
               style={{
                 display: "grid",
@@ -94,22 +92,22 @@ export default function WalletOnboardModal({ onClose }: { onClose: () => void })
             </div>
             <label style={{ display: "flex", gap: 8, fontSize: 13, marginBottom: 14 }}>
               <input type="checkbox" checked={checkboxOk} onChange={(e) => setCheckboxOk(e.target.checked)} />
-              I have written all twelve down, in order.
+              {t("onboard.checkbox")}
             </label>
             <button className="btn btn-gold" style={{ width: "100%" }} disabled={!checkboxOk} onClick={() => setStep("confirm")}>
-              I wrote them down
+              {t("onboard.wroteThemDown")}
             </button>
           </>
         )}
 
         {step === "confirm" && (
           <>
-            <div className="badge">ONE CHECK</div>
-            <h2 style={{ marginTop: 0 }}>Type three of them back</h2>
-            <p className="muted">From the copy you made, not from memory.</p>
+            <div className="badge">{t("onboard.badge.confirm")}</div>
+            <h2 style={{ marginTop: 0 }}>{t("onboard.title.confirm")}</h2>
+            <p className="muted">{t("onboard.confirmHint")}</p>
             {[4, 5, 6].map((idx, i) => (
               <div className="field" key={idx}>
-                <label>WORD {idx + 1}</label>
+                <label>{t("onboard.wordLabel", { n: idx + 1 })}</label>
                 <input
                   value={checkInputs[i]}
                   onChange={(e) => {
@@ -122,7 +120,7 @@ export default function WalletOnboardModal({ onClose }: { onClose: () => void })
             ))}
             {error && <p style={{ color: "var(--red)", fontSize: 13 }}>{error}</p>}
             <button className="btn btn-gold" style={{ width: "100%" }} onClick={confirmWords}>
-              Confirm
+              {t("onboard.confirmButton")}
             </button>
           </>
         )}

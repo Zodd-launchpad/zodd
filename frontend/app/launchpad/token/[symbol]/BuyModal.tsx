@@ -2,10 +2,12 @@
 import { useEffect, useState } from "react";
 import QRCode from "qrcode";
 import { api } from "@/lib/api";
+import { useLanguage } from "@/lib/i18n";
 
 type Phase = "amount" | "waiting" | "filled" | "failed";
 
 export default function BuyModal({ symbol, walletId, onClose }: { symbol: string; walletId: string; onClose: () => void }) {
+  const { t } = useLanguage();
   const [zecAmount, setZecAmount] = useState("0.01");
   const [phase, setPhase] = useState<Phase>("amount");
   const [address, setAddress] = useState<string | null>(null);
@@ -18,7 +20,7 @@ export default function BuyModal({ symbol, walletId, onClose }: { symbol: string
     setError(null);
     try {
       const amount = parseFloat(zecAmount);
-      if (!(amount > 0)) throw new Error("invalid amount");
+      if (!(amount > 0)) throw new Error(t("buy.error.invalidAmount"));
       const order = await api.buy({ walletId, symbol, zecAmount: amount });
       setAddress(order.zecAddress);
       setOrderId(order.orderId);
@@ -51,14 +53,14 @@ export default function BuyModal({ symbol, walletId, onClose }: { symbol: string
       <div className="modal card" onClick={(e) => e.stopPropagation()}>
         {phase === "amount" && (
           <>
-            <h2 style={{ marginTop: 0 }}>Buy {symbol}</h2>
+            <h2 style={{ marginTop: 0 }}>{t("buy.title", { symbol })}</h2>
             <div className="field">
-              <label>You pay (ZEC)</label>
+              <label>{t("buy.youPay")}</label>
               <input value={zecAmount} onChange={(e) => setZecAmount(e.target.value)} />
             </div>
             {error && <p style={{ color: "var(--red)", fontSize: 13 }}>{error}</p>}
             <button className="btn btn-gold" style={{ width: "100%" }} onClick={submitBuy}>
-              Buy
+              {t("buy.button")}
             </button>
           </>
         )}
@@ -66,7 +68,7 @@ export default function BuyModal({ symbol, walletId, onClose }: { symbol: string
         {phase === "waiting" && (
           <>
             <h2 style={{ marginTop: 0, textAlign: "center" }}>{zecAmount} ZEC</h2>
-            <p className="muted" style={{ textAlign: "center" }}>Send at least {zecAmount} ZEC: the address is the order</p>
+            <p className="muted" style={{ textAlign: "center" }}>{t("buy.sendAtLeast", { amount: zecAmount })}</p>
             {qr && (
               <div style={{ background: "#fff", padding: 12, borderRadius: 6, display: "flex", justifyContent: "center", margin: "12px 0" }}>
                 <img src={qr} alt="qr" />
@@ -75,30 +77,26 @@ export default function BuyModal({ symbol, walletId, onClose }: { symbol: string
             <div className="mono-break" style={{ fontSize: 11, color: "var(--accent)", border: "1px solid var(--border)", padding: 8, borderRadius: 4 }}>
               {address}
             </div>
-            <p className="muted" style={{ marginTop: 14, fontSize: 12 }}>
-              Simulated: in this demo the "confirmation" arrives on its own after a few seconds (no real payment needed).
-            </p>
+            <p className="muted" style={{ marginTop: 14, fontSize: 12 }}>{t("buy.simulatedNote")}</p>
           </>
         )}
 
         {phase === "filled" && (
           <>
-            <h2 style={{ marginTop: 0, color: "var(--green)" }}>Filled</h2>
-            <p>
-              You received <strong>{tokensOut?.toFixed(0)}</strong> {symbol}.
-            </p>
+            <h2 style={{ marginTop: 0, color: "var(--green)" }}>{t("buy.filled.title")}</h2>
+            <p>{t("buy.filled.body", { amount: tokensOut?.toFixed(0) ?? "0", symbol })}</p>
             <button className="btn btn-gold" style={{ width: "100%" }} onClick={onClose}>
-              Close
+              {t("buy.close")}
             </button>
           </>
         )}
 
         {phase === "failed" && (
           <>
-            <h2 style={{ marginTop: 0, color: "var(--red)" }}>Failed</h2>
-            <p className="muted">The order could not be executed against the curve.</p>
+            <h2 style={{ marginTop: 0, color: "var(--red)" }}>{t("buy.failed.title")}</h2>
+            <p className="muted">{t("buy.failed.body")}</p>
             <button className="btn btn-outline" style={{ width: "100%" }} onClick={onClose}>
-              Close
+              {t("buy.close")}
             </button>
           </>
         )}

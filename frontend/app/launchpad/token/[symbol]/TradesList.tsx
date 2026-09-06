@@ -1,29 +1,33 @@
+"use client";
 import type { Trade } from "@/lib/api";
-
-function timeAgo(iso: string): string {
-  const diffMs = Date.now() - new Date(iso).getTime();
-  const s = Math.max(0, Math.floor(diffMs / 1000));
-  if (s < 60) return `${s}s ago`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  return `${Math.floor(h / 24)}d ago`;
-}
+import { useLanguage } from "@/lib/i18n";
 
 function fmtTokens(n: number) {
   return n.toLocaleString("en-US", { maximumFractionDigits: 0 });
 }
 
 export default function TradesList({ trades }: { trades: Trade[] }) {
+  const { t } = useLanguage();
+
+  function timeAgo(iso: string): string {
+    const diffMs = Date.now() - new Date(iso).getTime();
+    const s = Math.max(0, Math.floor(diffMs / 1000));
+    if (s < 60) return t("trades.ago.seconds", { n: s });
+    const m = Math.floor(s / 60);
+    if (m < 60) return t("trades.ago.minutes", { n: m });
+    const h = Math.floor(m / 60);
+    if (h < 24) return t("trades.ago.hours", { n: h });
+    return t("trades.ago.days", { n: Math.floor(h / 24) });
+  }
+
   return (
     <div className="card" style={{ marginTop: 16 }}>
-      <label className="muted" style={{ fontSize: 11, letterSpacing: 0.5 }}>RECENT TRADES</label>
+      <label className="muted" style={{ fontSize: 11, letterSpacing: 0.5 }}>{t("trades.heading")}</label>
       {trades.length === 0 && (
-        <p className="muted" style={{ fontSize: 13, marginTop: 8 }}>No trades yet — be the first to buy.</p>
+        <p className="muted" style={{ fontSize: 13, marginTop: 8 }}>{t("trades.none")}</p>
       )}
       <div style={{ marginTop: 8 }}>
-        {trades.map((t, i) => (
+        {trades.map((tr, i) => (
           <div
             key={i}
             style={{
@@ -35,17 +39,17 @@ export default function TradesList({ trades }: { trades: Trade[] }) {
               fontSize: 13,
             }}
           >
-            <span className={t.side === "BUY" ? "pill up" : "pill down"} style={{ fontWeight: 700, minWidth: 42 }}>
-              {t.side}
+            <span className={tr.side === "BUY" ? "pill up" : "pill down"} style={{ fontWeight: 700, minWidth: 42 }}>
+              {tr.side === "BUY" ? t("trades.side.buy") : t("trades.side.sell")}
             </span>
             <span className="mono" style={{ flex: 1, textAlign: "left", marginLeft: 12 }}>
-              {fmtTokens(t.tokenAmount)} tokens
+              {t("trades.tokens", { n: fmtTokens(tr.tokenAmount) })}
             </span>
             <span className="mono muted" style={{ minWidth: 110, textAlign: "right" }}>
-              {t.zecAmount.toFixed(6)} ZEC
+              {tr.zecAmount.toFixed(6)} ZEC
             </span>
             <span className="muted" style={{ minWidth: 70, textAlign: "right", fontSize: 12 }}>
-              {timeAgo(t.createdAt)}
+              {timeAgo(tr.createdAt)}
             </span>
           </div>
         ))}

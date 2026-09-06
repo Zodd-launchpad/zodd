@@ -1,13 +1,14 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { PricePoint, Trade } from "@/lib/api";
+import { useLanguage } from "@/lib/i18n";
 
 const INTERVALS = [
-  { key: "5m", label: "5m", ms: 5 * 60_000 },
-  { key: "15m", label: "15m", ms: 15 * 60_000 },
-  { key: "1h", label: "1H", ms: 60 * 60_000 },
-  { key: "4h", label: "4H", ms: 4 * 60 * 60_000 },
-  { key: "all", label: "ALL", ms: 0 },
+  { key: "5m", tkey: "chart.interval.5m" as const, ms: 5 * 60_000 },
+  { key: "15m", tkey: "chart.interval.15m" as const, ms: 15 * 60_000 },
+  { key: "1h", tkey: "chart.interval.1h" as const, ms: 60 * 60_000 },
+  { key: "4h", tkey: "chart.interval.4h" as const, ms: 4 * 60 * 60_000 },
+  { key: "all", tkey: "chart.interval.all" as const, ms: 0 },
 ] as const;
 
 type IntervalKey = (typeof INTERVALS)[number]["key"];
@@ -70,6 +71,7 @@ function fmtNum(n: number) {
 }
 
 export default function Chart({ history, trades }: { history: PricePoint[]; trades: Trade[] }) {
+  const { t } = useLanguage();
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<any>(null);
   const candleSeriesRef = useRef<any>(null);
@@ -143,14 +145,14 @@ export default function Chart({ history, trades }: { history: PricePoint[]; trad
     <div className="card" style={{ padding: 0, overflow: "hidden" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", borderBottom: "1px solid var(--border)", flexWrap: "wrap", gap: 8 }}>
         <div className="mono" style={{ fontSize: 12, color: "var(--text-dim)", display: "flex", gap: 14, flexWrap: "wrap" }}>
-          <span style={{ color: "var(--text)", fontWeight: 700 }}>{mode}</span>
+          <span style={{ color: "var(--text)", fontWeight: 700 }}>{mode === "MCAP" ? t("chart.mode.mcap") : t("chart.mode.price")}</span>
           {last && (
             <>
-              <span>O <span style={{ color: "var(--text)" }}>{fmtNum(last.open)}</span></span>
-              <span>H <span style={{ color: "var(--text)" }}>{fmtNum(last.high)}</span></span>
-              <span>L <span style={{ color: "var(--text)" }}>{fmtNum(last.low)}</span></span>
-              <span>C <span style={{ color: "var(--text)" }}>{fmtNum(last.close)}</span> ZEC</span>
-              <span>VOL <span style={{ color: "var(--text)" }}>{fmtNum(last.volume)}</span> ZEC</span>
+              <span>{t("chart.o")} <span style={{ color: "var(--text)" }}>{fmtNum(last.open)}</span></span>
+              <span>{t("chart.h")} <span style={{ color: "var(--text)" }}>{fmtNum(last.high)}</span></span>
+              <span>{t("chart.l")} <span style={{ color: "var(--text)" }}>{fmtNum(last.low)}</span></span>
+              <span>{t("chart.c")} <span style={{ color: "var(--text)" }}>{fmtNum(last.close)}</span> ZEC</span>
+              <span>{t("chart.vol")} <span style={{ color: "var(--text)" }}>{fmtNum(last.volume)}</span> ZEC</span>
             </>
           )}
         </div>
@@ -172,7 +174,7 @@ export default function Chart({ history, trades }: { history: PricePoint[]; trad
                 color: interval === i.key ? "var(--accent)" : "var(--text-dim)",
               }}
             >
-              {i.label}
+              {t(i.tkey)}
             </button>
           ))}
         </div>
@@ -189,7 +191,7 @@ export default function Chart({ history, trades }: { history: PricePoint[]; trad
                 color: mode === m ? "var(--accent)" : "var(--text-dim)",
               }}
             >
-              {m}
+              {m === "MCAP" ? t("chart.mode.mcap") : t("chart.mode.price")}
             </button>
           ))}
         </div>

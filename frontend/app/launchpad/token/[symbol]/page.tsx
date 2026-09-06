@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { api, TokenSummary, PricePoint, Trade } from "@/lib/api";
 import { useWallet } from "@/lib/wallet";
+import { useLanguage } from "@/lib/i18n";
 import BuyModal from "./BuyModal";
 import SellModal from "./SellModal";
 import Chart from "./Chart";
@@ -21,6 +22,7 @@ function shortHash(h: string) {
 export default function TokenPage() {
   const { symbol } = useParams<{ symbol: string }>();
   const { wallet } = useWallet();
+  const { t } = useLanguage();
   const [token, setToken] = useState<TokenSummary | null>(null);
   const [history, setHistory] = useState<PricePoint[]>([]);
   const [trades, setTrades] = useState<Trade[]>([]);
@@ -51,7 +53,7 @@ export default function TokenPage() {
   }, [symbol]);
 
   if (error) return <div className="container">{error}</div>;
-  if (!token) return <div className="container muted">Loading…</div>;
+  if (!token) return <div className="container muted">{t("token.loading")}</div>;
 
   const volume24h = trades
     .filter((t) => Date.now() - new Date(t.createdAt).getTime() < 24 * 60 * 60 * 1000)
@@ -72,81 +74,79 @@ export default function TokenPage() {
       <div>
         <div className="card">
           <p style={{ marginTop: 0 }}>
-            Price: <strong>{fmt(token.priceZec, 12)} ZEC</strong>
+            {t("token.price")} <strong>{fmt(token.priceZec, 12)} ZEC</strong>
           </p>
           <button className="btn btn-green" style={{ width: "100%", marginBottom: 8 }} onClick={() => setShowBuy(true)} disabled={!wallet}>
-            BUY
+            {t("token.buy")}
           </button>
           <button className="btn btn-red" style={{ width: "100%" }} onClick={() => setShowSell(true)} disabled={!wallet}>
-            SELL
+            {t("token.sell")}
           </button>
-          {!wallet && <p className="muted" style={{ marginTop: 10, fontSize: 12 }}>Connect your wallet above to trade.</p>}
+          {!wallet && <p className="muted" style={{ marginTop: 10, fontSize: 12 }}>{t("token.connectToTrade")}</p>}
         </div>
 
         <div className="card" style={{ marginTop: 16, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
           <div>
-            <div className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>24h volume</div>
+            <div className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>{t("token.stat.volume24h")}</div>
             <div style={{ fontWeight: 700 }}>{fmt(volume24h)} ZEC</div>
           </div>
           <div>
-            <div className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>Market cap</div>
+            <div className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>{t("token.stat.marketCap")}</div>
             <div style={{ fontWeight: 700 }}>{fmt(token.marketCapZec)} ZEC</div>
           </div>
           <div>
-            <div className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>Real reserve</div>
+            <div className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>{t("token.stat.realReserve")}</div>
             <div style={{ fontWeight: 700 }}>{fmt(token.realZecReserves)} ZEC</div>
           </div>
           <div>
-            <div className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>Tokens sold</div>
+            <div className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>{t("token.stat.tokensSold")}</div>
             <div style={{ fontWeight: 700 }}>{fmt(token.tokensSold, 0)}</div>
           </div>
         </div>
 
         <div className="card" style={{ marginTop: 16 }}>
-          <div className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>Graduation</div>
+          <div className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>{t("token.graduation")}</div>
           <div className="grad-bar">
             <div className="grad-bar-fill" style={{ width: `${gradPct}%` }} />
           </div>
           <p className={token.graduated ? "pill up" : "muted"} style={{ marginTop: 8, marginBottom: 0, fontSize: 12 }}>
-            {token.graduated ? "GRADUATED" : `${gradPct.toFixed(1)}% done`}
+            {token.graduated ? t("token.graduated") : t("token.pctDone", { pct: gradPct.toFixed(1) })}
           </p>
         </div>
 
         <div className="card" style={{ marginTop: 16 }}>
-          <div className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>Token supply</div>
-          <div style={{ fontWeight: 700 }}>{fmt(token.totalSupply, 0)} tokens</div>
+          <div className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>{t("token.supply")}</div>
+          <div style={{ fontWeight: 700 }}>{t("token.supplyUnit", { n: fmt(token.totalSupply, 0) })}</div>
         </div>
 
         <div className="card" style={{ marginTop: 16 }}>
           {token.onChain.simulated ? (
             <>
               <label className="muted" style={{ fontSize: 11, letterSpacing: 0.5 }}>
-                ON CHAIN <span style={{ opacity: 0.6 }}>(simulated)</span>
+                {t("token.onChain.simulatedLabel")} <span style={{ opacity: 0.6 }}>{t("token.onChain.simulatedTag")}</span>
               </label>
               <p className="muted" style={{ fontSize: 13, marginTop: 6 }}>
-                This demo doesn't broadcast to Zcash mainnet yet — these entries are placeholders for what a real
-                shielded-memo inscription will look like.
+                {t("token.onChain.simulatedBody")}
               </p>
               <div style={{ marginTop: 10, fontSize: 13 }}>
-                <div className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>issued</div>
+                <div className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>{t("token.onChain.issued")}</div>
                 <div className="mono-break">{shortHash(token.onChain.issuedTxid)} · block {token.onChain.issuedBlock}</div>
               </div>
               <div style={{ marginTop: 10, fontSize: 13 }}>
-                <div className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>finalized</div>
+                <div className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>{t("token.onChain.finalized")}</div>
                 <div className="mono-break">{shortHash(token.onChain.finalizedTxid)} · block {token.onChain.finalizedBlock}</div>
               </div>
             </>
           ) : (
             <>
               <label className="muted" style={{ fontSize: 11, letterSpacing: 0.5 }}>
-                ON CHAIN <span className="pill up" style={{ marginLeft: 6, fontSize: 10 }}>real</span>
+                {t("token.onChain.simulatedLabel")} <span className="pill up" style={{ marginLeft: 6, fontSize: 10 }}>{t("token.onChain.realTag")}</span>
               </label>
               <p className="muted" style={{ fontSize: 13, marginTop: 6 }}>
-                A real 0.01 ZEC shielded transaction was broadcast on Zcash mainnet to inscribe this token's
-                creation.
+                {t("token.onChain.realBody")}
               </p>
               <div style={{ marginTop: 10, fontSize: 13 }}>
-                <div className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>creation txid</div>
+                <div className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>{t("token.onChain.creationTxid")}</div>
                 <a
                   className="mono-break"
                   href={token.onChain.explorerUrl}
