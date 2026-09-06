@@ -14,6 +14,9 @@
  * with real ZEC has to replace this file, not just assume it "already works".
  */
 
+// No safety cap in the mock -- nothing real can move.
+export const MAX_PAYOUT_ZEC = Infinity;
+
 const FAKE_ADDR_CHARS = "023456789acdefghjklmnpqrstuvwxyz";
 
 function fakeShieldedAddress(): string {

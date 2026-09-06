@@ -19,6 +19,11 @@ const INTERNAL_TOKEN = process.env.ZCASH_WALLET_SERVICE_TOKEN;
 // has been proven out with small amounts.
 const MAX_ZEC_PER_ORDER = Number(process.env.ZCASH_MAX_ZEC_PER_ORDER ?? 0.05);
 
+// Exposed so callers that pay out variable/accumulated amounts (like the
+// creator-fee distributor) can chunk a payout instead of just failing once
+// it exceeds this same safety cap.
+export const MAX_PAYOUT_ZEC = MAX_ZEC_PER_ORDER;
+
 const ZATOSHIS_PER_ZEC = 100_000_000;
 
 async function call(path: string, opts: RequestInit = {}) {
@@ -108,6 +113,16 @@ export async function sendPayout(toAddress: string, zecAmount: number): Promise<
     body: JSON.stringify({ address: toAddress, zatoshis }),
   });
   return { txid };
+}
+
+/** Read-only status check: current spendable balance and chain height, as
+ * seen by zcash-wallet-service. Used by the /api/admin/zcash-status route
+ * so we can confirm the wallet actually has funds without ever touching
+ * the seed or moving anything. */
+export async function getWalletStatus(): Promise<{ zatoshis: number; zec: number; height: unknown }> {
+  const [balance, height] = await Promise.all([call("/wallet/balance"), call("/wallet/height")]);
+  const zatoshis = Number(balance.zatoshis ?? 0);
+  return { zatoshis, zec: zatoshis / ZATOSHIS_PER_ZEC, height };
 }
 
 /**

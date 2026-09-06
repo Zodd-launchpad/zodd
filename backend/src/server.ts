@@ -298,6 +298,18 @@ app.post("/api/orders/sell", async (req, reply) => {
   return reply.send(order);
 });
 
+// Read-only: confirms the real wallet is funded/reachable without ever
+// touching the seed or moving money. 404s outside real mode.
+app.get("/api/admin/zcash-status", async (_req, reply) => {
+  if (ZCASH_MODE !== "real") return reply.code(404).send({ error: "not in real mode" });
+  try {
+    const status = await (zcashService as typeof import("./lib/zcashReal.js")).getWalletStatus();
+    return reply.send(status);
+  } catch (err) {
+    return reply.code(502).send({ error: String((err as Error).message ?? err) });
+  }
+});
+
 // Every 15min, pays out any token's accrued creator fee that hasn't been
 // distributed in the last 24h. Same code path in mock and real mode.
 startFeeDistributor(sendPayout, MAX_PAYOUT_ZEC, app.log);
