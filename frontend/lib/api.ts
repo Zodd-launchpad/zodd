@@ -60,13 +60,24 @@ export interface Trade {
   createdAt: string;
 }
 
+let modePromise: Promise<{ zcashMode: "real" | "mock"; tokenCreateFeeZec: number }> | null = null;
+
 export const api = {
   createWallet: () => req("/api/wallets", { method: "POST" }),
+  // Cached for the life of the page load: this never changes mid-session,
+  // and every "is this simulated?" note (and the create-fee display) needs it.
+  getMode: (): Promise<{ zcashMode: "real" | "mock"; tokenCreateFeeZec: number }> => {
+    if (!modePromise) modePromise = req("/api/mode");
+    return modePromise;
+  },
   portfolio: (walletId: string) => req(`/api/wallets/${walletId}/portfolio`),
   listTokens: (): Promise<TokenSummary[]> => req("/api/tokens"),
   getToken: (symbol: string): Promise<TokenSummary> => req(`/api/tokens/${symbol}`),
   getHistory: (symbol: string): Promise<PricePoint[]> => req(`/api/tokens/${symbol}/history`),
   getTrades: (symbol: string): Promise<Trade[]> => req(`/api/tokens/${symbol}/trades`),
+  // Reserves the symbol/name/profile and returns a one-time address for the
+  // creator to pay the create fee from their own wallet -- the token itself
+  // only actually exists once that payment is detected (poll getTokenCreation).
   createToken: (data: {
     symbol: string;
     name: string;
@@ -76,7 +87,12 @@ export const api = {
     logoDataUrl?: string;
     description?: string;
     twitterUrl?: string;
-  }) => req("/api/tokens", { method: "POST", body: JSON.stringify(data) }),
+  }): Promise<{ creationId: string; zecAddress: string; zecAmount: number; status: "PENDING" }> =>
+    req("/api/tokens", { method: "POST", body: JSON.stringify(data) }),
+  getTokenCreation: (
+    id: string
+  ): Promise<{ status: "PENDING" | "CREATED" | "EXPIRED" | "FAILED"; resultSymbol?: string; zecAddress: string | null; expectedZecAmount: number }> =>
+    req(`/api/token-creations/${id}`),
   buy: (data: { walletId: string; symbol: string; zecAmount: number }) =>
     req("/api/orders/buy", { method: "POST", body: JSON.stringify(data) }),
   sell: (data: { walletId: string; symbol: string; tokenAmount: number; refundAddress: string }) =>

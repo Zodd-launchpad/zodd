@@ -70,8 +70,8 @@ export const translations = {
   // ---------- Create page ----------
   "create.title": { en: "Create a token", zh: "创建代币" },
   "create.feeNote": {
-    en: "Creation fee: 0.01 ZEC (not charged yet in this demo — applies once real payments are wired up).",
-    zh: "创建费用：0.01 ZEC（本演示暂不收取——接入真实支付后生效）。",
+    en: "Pay the one-time {amount} ZEC create fee from any Zcash wallet. No wallet connect needed to create.",
+    zh: "从任意 Zcash 钱包支付一次性 {amount} ZEC 创建费。创建无需连接钱包。",
   },
   "create.symbolLabel": { en: "Symbol", zh: "代号" },
   "create.nameLabel": { en: "Name", zh: "名称" },
@@ -84,11 +84,25 @@ export const translations = {
     zh: "交易费：每笔交易 2%。其中 1% 直接归你（创建者）所有——每 24 小时自动发放一次。1% 归平台所有。",
   },
   "create.creatorPayoutLabel": { en: "Your Zcash payout address (optional)", zh: "你的 Zcash 收款地址（可选）" },
-  "create.creatorPayoutPlaceholder": { en: "u1... (leave blank to skip)", zh: "u1...（留空则跳过）" },
+  "create.creatorPayoutPlaceholder": { en: "u1... or zs1... (leave blank to skip)", zh: "u1... 或 zs1...（留空则跳过）" },
   "create.creatorPayoutHelp": {
-    en: "Where your 1% creator fee share gets sent every 24h. You can leave this blank, but then nobody can claim it.",
-    zh: "你的 1% 创建者分成每 24 小时会发送到这个地址。可以留空，但这样就没人能领取这部分费用。",
+    en: "Where your 1% creator fee share gets sent every 24h. Must be a shielded address (u1... or zs1...) — you can leave this blank, but then nobody can claim it.",
+    zh: "你的 1% 创建者分成每 24 小时会发送到这个地址。必须是屏蔽地址（u1... 或 zs1...）——可以留空，但这样就没人能领取这部分费用。",
   },
+  "create.waiting.title": { en: "Waiting for the create fee", zh: "等待创建费到账" },
+  "create.waiting.sendExactly": { en: "Send {amount} ZEC: this address is bound to {symbol}'s create fee", zh: "发送 {amount} ZEC：此地址与 {symbol} 的创建费绑定" },
+  "create.waiting.simulatedNote": {
+    en: "Simulated: in this demo the \"payment\" confirms on its own after a few seconds (no real payment needed).",
+    zh: "模拟流程：本演示中“付款”会在几秒后自动确认（无需真实付款）。",
+  },
+  "create.waiting.realNote": {
+    en: "Real ZEC: any wallet that sends shielded ZEC works. Your token goes live once the fee confirms, usually a couple of minutes.",
+    zh: "真实 ZEC：任何能发送屏蔽 ZEC 的钱包都可以。费用确认后代币即上线，通常需要几分钟。",
+  },
+  "create.waiting.copyAddress": { en: "Copy address", zh: "复制地址" },
+  "create.failed.title": { en: "Couldn't create the token", zh: "无法创建代币" },
+  "create.failed.body": { en: "Something went wrong waiting for the create fee. Nothing was charged twice — try again.", zh: "等待创建费时出了问题。不会重复扣费——请重试。" },
+  "create.failed.retry": { en: "Try again", zh: "重试" },
   "create.logoLabel": { en: "Token logo (optional)", zh: "代币图标（可选）" },
   "create.logoHelp": { en: "Any image — it'll be cropped to a square automatically.", zh: "任意图片——会自动裁剪为正方形。" },
   "create.logoChoose": { en: "Choose image", zh: "选择图片" },
@@ -125,6 +139,7 @@ export const translations = {
   "onboard.confirmButton": { en: "Confirm", zh: "确认" },
   "onboard.error.generic": { en: "something went wrong, close this and try again", zh: "出了点问题，请关闭后重试" },
   "onboard.error.wrongWords": { en: "those aren't words 5, 6 and 7. Check the copy you made.", zh: "这不是第 5、6、7 个词。请检查你记下的内容。" },
+  "onboard.back": { en: "← Back", zh: "← 返回" },
 
   // ---------- Wallet detail modal ----------
   "detail.badge": { en: "ZODD WALLET", zh: "ZODD 钱包" },
@@ -204,6 +219,10 @@ export const translations = {
   "buy.simulatedNote": {
     en: "Simulated: in this demo the \"confirmation\" arrives on its own after a few seconds (no real payment needed).",
     zh: "模拟流程：本演示中“确认”会在几秒后自动到达（无需真实付款）。",
+  },
+  "buy.realNote": {
+    en: "Real ZEC: this is a live mainnet payment. It confirms automatically once the network detects it (usually a couple of minutes).",
+    zh: "真实 ZEC：这是主网上的真实付款。网络检测到后会自动确认（通常需要几分钟）。",
   },
   "buy.filled.title": { en: "Filled", zh: "已成交" },
   "buy.filled.body": { en: "You received {amount} {symbol}.", zh: "你收到了 {amount} {symbol}。" },

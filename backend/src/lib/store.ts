@@ -433,3 +433,117 @@ export async function failOrder(orderId: string) {
   const o = await prisma.order.update({ where: { id: orderId }, data: { status: "FAILED" } });
   return toOrderView(o);
 }
+
+// ---------- Pending token creations ----------
+// The creator pays the create fee themselves, to a one-time address, same
+// mechanism as a buy order (see generateOrderAddress in zcashReal/zcashMock).
+// The Token row is only created once that payment is detected -- see
+// server.ts's onPaymentDetected handler.
+
+export interface PendingTokenCreationView {
+  id: string;
+  symbol: string;
+  name: string;
+  status: "PENDING" | "CREATED" | "EXPIRED" | "FAILED";
+  zecAddress: string | null;
+  expectedZecAmount: number;
+  resultTokenId: string | null;
+  createdAt: string;
+}
+
+function toPendingTokenCreationView(p: {
+  id: string;
+  symbol: string;
+  name: string;
+  status: string;
+  zecAddress: string | null;
+  expectedZecAmount: unknown;
+  resultTokenId: string | null;
+  createdAt: Date;
+}): PendingTokenCreationView {
+  return {
+    id: p.id,
+    symbol: p.symbol,
+    name: p.name,
+    status: p.status as PendingTokenCreationView["status"],
+    zecAddress: p.zecAddress,
+    expectedZecAmount: num(p.expectedZecAmount),
+    resultTokenId: p.resultTokenId,
+    createdAt: p.createdAt.toISOString(),
+  };
+}
+
+export async function createPendingTokenCreation(input: {
+  symbol: string;
+  name: string;
+  totalSupply: number;
+  creatorWalletId: string;
+  creatorPayoutAddress?: string;
+  logoDataUrl?: string;
+  description?: string;
+  twitterUrl?: string;
+  expectedZecAmount: number;
+}) {
+  const p = await prisma.pendingTokenCreation.create({
+    data: {
+      symbol: input.symbol,
+      name: input.name,
+      totalSupply: BigInt(Math.round(input.totalSupply)),
+      creatorWalletId: input.creatorWalletId,
+      creatorPayoutAddress: input.creatorPayoutAddress ?? null,
+      logoDataUrl: input.logoDataUrl ?? null,
+      description: input.description ?? null,
+      twitterUrl: input.twitterUrl ?? null,
+      expectedZecAmount: input.expectedZecAmount,
+    },
+  });
+  return toPendingTokenCreationView(p);
+}
+
+export async function setPendingTokenCreationAddress(id: string, zecAddress: string) {
+  const p = await prisma.pendingTokenCreation.update({ where: { id }, data: { zecAddress } });
+  return toPendingTokenCreationView(p);
+}
+
+export async function getPendingTokenCreation(id: string): Promise<PendingTokenCreationView | null> {
+  const p = await prisma.pendingTokenCreation.findUnique({ where: { id } });
+  return p ? toPendingTokenCreationView(p) : null;
+}
+
+/** A symbol that's already claimed by another PENDING reservation can't be
+ * reserved again -- same rule as an already-created Token. */
+export async function isSymbolReserved(symbol: string): Promise<boolean> {
+  const existing = await prisma.pendingTokenCreation.findFirst({ where: { symbol, status: "PENDING" } });
+  return existing != null;
+}
+
+/** Fee arrived: create the real Token row from the reserved fields and mark
+ * this reservation CREATED. Returns the new token. */
+export async function completePendingTokenCreation(id: string, genesisMemoTxid: string | undefined) {
+  const p = await prisma.pendingTokenCreation.findUnique({ where: { id } });
+  if (!p || p.status !== "PENDING") return null;
+
+  const token = await createToken({
+    symbol: p.symbol,
+    name: p.name,
+    totalSupply: num(p.totalSupply),
+    creatorWalletId: p.creatorWalletId,
+    genesisMemoTxid,
+    creatorPayoutAddress: p.creatorPayoutAddress ?? undefined,
+    logoDataUrl: p.logoDataUrl ?? undefined,
+    description: p.description ?? undefined,
+    twitterUrl: p.twitterUrl ?? undefined,
+  });
+
+  await prisma.pendingTokenCreation.update({
+    where: { id },
+    data: { status: "CREATED", resultTokenId: token.id, completedAt: new Date() },
+  });
+
+  return token;
+}
+
+export async function failPendingTokenCreation(id: string) {
+  const p = await prisma.pendingTokenCreation.update({ where: { id }, data: { status: "FAILED" } });
+  return toPendingTokenCreationView(p);
+}

@@ -4,7 +4,7 @@ import * as store from "./lib/store.js";
 import { generateTwelveWords } from "./lib/wordlist.js";
 import { quoteBuy, quoteSell, currentPrice, marketCapZec, isGraduated } from "./lib/bondingCurve.js";
 import { simulatedInscriptionFor } from "./lib/simulatedChain.js";
-import { splitFee, TRADE_FEE_BPS, CREATOR_FEE_BPS } from "./lib/fees.js";
+import { splitFee, TRADE_FEE_BPS, CREATOR_FEE_BPS, TOKEN_CREATE_FEE_ZEC } from "./lib/fees.js";
 import { startFeeDistributor } from "./lib/feeDistributor.js";
 
 // ZCASH_MODE=real switches every payment/inscription in this service to
@@ -18,6 +18,12 @@ const app = Fastify({ logger: true });
 app.log.info(`ZCASH_MODE=${ZCASH_MODE} -- ${ZCASH_MODE === "real" ? "REAL ZEC IS LIVE ON THIS DEPLOYMENT" : "using the simulated zcash service, no real funds move"}`);
 
 app.register(import("@fastify/cors"), { origin: true });
+
+// Lets the frontend know whether it's talking to the real or simulated
+// zcash service, so it never shows a "simulated" note on a real payment (or
+// vice versa) -- see BuyModal.tsx and the create-token waiting screen. Also
+// exposes the current create fee so the form can show it before submission.
+app.get("/api/mode", async (_req, reply) => reply.send({ zcashMode: ZCASH_MODE, tokenCreateFeeZec: TOKEN_CREATE_FEE_ZEC }));
 
 // ---------- Wallets ----------
 
@@ -38,6 +44,18 @@ app.get("/api/wallets/:id/portfolio", async (req, reply) => {
 
 // ---------- Tokens / market ----------
 
+// Zcash has transparent (t1.../t3...) and shielded (u1... unified, zs1...
+// sapling) addresses. Sending an automated payout to a transparent address
+// is a "deshielding" transaction: it posts the amount and address publicly
+// on-chain, permanently linking this platform's reserve to that address --
+// exactly what SHLD.fun's own create form refuses ("a create needs a
+// SHIELDED refund address ... the launch fee can only be returned to a
+// shielded destination"). We enforce the same rule for the creator payout
+// address, since it goes through the identical automated-send code path.
+function isShieldedAddress(addr: string): boolean {
+  return /^(u1|zs1)/.test(addr);
+}
+
 const createTokenSchema = z.object({
   symbol: z.string().min(1).max(12),
   name: z.string().min(1).max(64),
@@ -45,7 +63,11 @@ const createTokenSchema = z.object({
   creatorWalletId: z.string(),
   // Where this token's 1% creator trading-fee share gets paid out, every
   // 24h. Optional -- without it, the fee still accrues but nobody claims it.
-  creatorPayoutAddress: z.string().min(10).optional(),
+  creatorPayoutAddress: z
+    .string()
+    .min(10)
+    .refine(isShieldedAddress, "creator payout address must be shielded (starts with u1 or zs1)")
+    .optional(),
   // Token profile, all optional. The logo is resized/encoded to a small
   // square JPEG data URL client-side before it ever reaches here -- this
   // just caps it as a last line of defense against an oversized payload.
@@ -69,6 +91,11 @@ function normalizeTwitter(input: string | undefined): string | undefined {
   return `https://x.com/${handle}`;
 }
 
+// Same model as SHLD.fun and as our own buy orders: the CREATOR pays the
+// one-time create fee from their own wallet, to a one-time address, and the
+// Token only actually gets created once that payment is detected. Nothing
+// is charged to the platform's own wallet for this -- that was a concept
+// error in the original version of this route (fixed 2026-09-06, see chat).
 app.post("/api/tokens", async (req, reply) => {
   const body = createTokenSchema.parse(req.body);
   const symbol = body.symbol.toUpperCase();
@@ -76,39 +103,51 @@ app.post("/api/tokens", async (req, reply) => {
   if (await store.getToken(symbol)) {
     return reply.code(409).send({ error: "symbol already exists" });
   }
+  if (await store.isSymbolReserved(symbol)) {
+    return reply.code(409).send({ error: "symbol is already reserved, waiting on someone else's payment" });
+  }
   if (!(await store.getWallet(body.creatorWalletId))) {
     return reply.code(400).send({ error: "invalid creatorWalletId" });
   }
 
-  let genesisMemoTxid: string | undefined;
-  if (ZCASH_MODE === "real") {
-    // Real mode: the 0.01 ZEC creation fee is charged and inscribed
-    // on-chain BEFORE the token exists in our ledger at all -- if this
-    // fails, nothing is created, same as if a card payment had failed.
-    try {
-      const inscription = await (zcashService as typeof import("./lib/zcashReal.js")).inscribeTokenCreation(
-        symbol,
-        body.name
-      );
-      genesisMemoTxid = inscription.txid;
-    } catch (err) {
-      app.log.error(err, "real on-chain inscription failed, token was not created");
-      return reply.code(502).send({ error: "couldn't broadcast the on-chain creation transaction, try again" });
-    }
-  }
-
-  const token = await store.createToken({
+  const pending = await store.createPendingTokenCreation({
     symbol,
     name: body.name,
     totalSupply: body.totalSupply,
     creatorWalletId: body.creatorWalletId,
-    genesisMemoTxid,
     creatorPayoutAddress: body.creatorPayoutAddress,
     logoDataUrl: body.logoDataUrl,
     description: body.description,
     twitterUrl: normalizeTwitter(body.twitterUrl),
+    expectedZecAmount: TOKEN_CREATE_FEE_ZEC,
   });
-  return reply.send(serializeToken(token));
+
+  let zecAddress: string;
+  try {
+    zecAddress = await generateOrderAddress(pending.id, TOKEN_CREATE_FEE_ZEC);
+  } catch (err) {
+    app.log.error(err, `couldn't generate a create-fee address for pending token creation ${pending.id}`);
+    await store.failPendingTokenCreation(pending.id).catch(() => {});
+    return reply.code(502).send({ error: "couldn't generate a payment address, try again" });
+  }
+  await store.setPendingTokenCreationAddress(pending.id, zecAddress);
+
+  return reply.send({
+    creationId: pending.id,
+    zecAddress,
+    zecAmount: TOKEN_CREATE_FEE_ZEC,
+    status: "PENDING",
+  });
+});
+
+app.get("/api/token-creations/:id", async (req, reply) => {
+  const { id } = req.params as { id: string };
+  const pending = await store.getPendingTokenCreation(id);
+  if (!pending) return reply.code(404).send({ error: "not found" });
+  if (pending.status === "CREATED" && pending.resultTokenId) {
+    return reply.send({ ...pending, resultSymbol: pending.symbol });
+  }
+  return reply.send(pending);
 });
 
 app.get("/api/tokens", async (_req, reply) => {
@@ -219,16 +258,40 @@ app.get("/api/orders/:id", async (req, reply) => {
   return reply.send(order);
 });
 
-// When the zcash-service (here, the mock) detects the payment, the order
-// executes against the bonding curve at that moment's price.
+// Both buy orders AND pending token creations reserve their one-time
+// address through the same generateOrderAddress(id, amount) call, so a
+// single global "a payment landed" callback has to figure out which kind
+// of thing this id refers to before it knows what to do about it.
 onPaymentDetected(async (orderId, confirmedZecAmount, txid) => {
+  const pendingCreation = await store.getPendingTokenCreation(orderId).catch(() => null);
+  if (pendingCreation) {
+    if (pendingCreation.status !== "PENDING") return;
+    try {
+      // Real mode: this payment's own txid becomes the token's genesis
+      // memo -- it's the creator's real fee payment, which is a more
+      // honest "on-chain proof of creation" than the platform inscribing
+      // to itself. Mock mode: no txid is meaningful, same as before.
+      const genesisMemoTxid = ZCASH_MODE === "real" ? txid : undefined;
+      const token = await store.completePendingTokenCreation(orderId, genesisMemoTxid);
+      if (token) {
+        app.log.info(`token ${token.symbol} created: creator paid ${confirmedZecAmount} ZEC create fee (txid ${txid})`);
+      }
+    } catch (err) {
+      await store.failPendingTokenCreation(orderId).catch(() => {});
+      app.log.error(err, `pending token creation ${orderId} failed to finalize`);
+    }
+    return;
+  }
+
+  // When the zcash-service detects a buy order's payment, the order
+  // executes against the bonding curve at that moment's price.
   try {
     const order = await store.getOrder(orderId);
     if (!order || order.status !== "PENDING") return;
     const token = await store.getTokenById(order.tokenId);
     if (!token) return;
 
-    // The 3% trading fee comes off the top; only the net amount actually
+    // The 2% trading fee comes off the top; only the net amount actually
     // moves the curve (the buyer's tokensOut is priced off the net, same
     // as any DEX-style fee-on-top model).
     const { net, creatorFee, platformFee } = splitFee(confirmedZecAmount);

@@ -103,6 +103,42 @@ model Balance {
   @@unique([internalWalletId, tokenId])
 }
 
+enum TokenCreationStatus {
+  PENDING // esperando que el creador mande el fee a zecAddress
+  CREATED // pago detectado, el Token ya existe (resultTokenId)
+  EXPIRED
+  FAILED
+}
+
+// Un token reservado pero todavía no real: igual que SHLD.fun, el creador
+// tiene que pagar el fee de creación DESDE SU PROPIA wallet a una dirección
+// de un solo uso (mismo mecanismo que una orden de compra) antes de que el
+// Token exista de verdad. "No wallet connect needed to create" -- el pago
+// en sí es la prueba. Antes de este cambio (2026-09-06) la plataforma se
+// pagaba a sí misma, lo cual era un error de concepto: no era el creador
+// quien pagaba, y no tenía sentido pedirle plata a la wallet de la
+// plataforma cada vez que alguien creaba un token de prueba.
+model PendingTokenCreation {
+  id                   String              @id @default(cuid())
+  symbol               String
+  name                 String
+  totalSupply          BigInt
+  creatorWalletId      String
+  creatorPayoutAddress String?
+  logoDataUrl          String?             @db.Text
+  description          String?             @db.Text
+  twitterUrl           String?
+  zecAddress           String?
+  expectedZecAmount    Decimal             @db.Decimal(20, 8)
+  status               TokenCreationStatus @default(PENDING)
+  resultTokenId        String?
+  createdAt            DateTime            @default(now())
+  completedAt          DateTime?
+
+  @@index([status])
+  @@index([zecAddress])
+}
+
 enum OrderSide {
   BUY
   SELL

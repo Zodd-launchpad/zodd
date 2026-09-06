@@ -15,6 +15,11 @@ export default function BuyModal({ symbol, walletId, onClose }: { symbol: string
   const [orderId, setOrderId] = useState<string | null>(null);
   const [tokensOut, setTokensOut] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isRealMode, setIsRealMode] = useState(false);
+
+  useEffect(() => {
+    api.getMode().then((m) => setIsRealMode(m.zcashMode === "real")).catch(() => {});
+  }, []);
 
   async function submitBuy() {
     setError(null);
@@ -77,7 +82,7 @@ export default function BuyModal({ symbol, walletId, onClose }: { symbol: string
             <div className="mono-break" style={{ fontSize: 11, color: "var(--accent)", border: "1px solid var(--border)", padding: 8, borderRadius: 4 }}>
               {address}
             </div>
-            <p className="muted" style={{ marginTop: 14, fontSize: 12 }}>{t("buy.simulatedNote")}</p>
+            <p className="muted" style={{ marginTop: 14, fontSize: 12 }}>{isRealMode ? t("buy.realNote") : t("buy.simulatedNote")}</p>
           </>
         )}
 

@@ -31,3 +31,12 @@ export function splitFee(grossZec: number): FeeSplit {
   const platformFee = totalFee - creatorFee;
   return { net: grossZec - totalFee, totalFee, creatorFee, platformFee };
 }
+
+/**
+ * One-time token-creation fee, paid by the CREATOR (from their own wallet,
+ * to a generated one-time address) before the token exists -- same model as
+ * SHLD.fun ("pay the one-time 0.01 ZEC create fee from any Zcash wallet").
+ * Overridable via env var so real-money testing doesn't have to spend a
+ * full 0.01 ZEC every time; the intended production value is 0.01.
+ */
+export const TOKEN_CREATE_FEE_ZEC = Number(process.env.ZCASH_TOKEN_CREATE_FEE_ZEC ?? 0.01);
