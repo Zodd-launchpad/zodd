@@ -105,6 +105,18 @@ const port = Number(process.env.PORT ?? 8080);
 app.listen({ port, host: "0.0.0.0" }).then(async () => {
   app.log.info(`zcash-wallet-service listening on :${port}`);
   try {
+    // Explicit, opt-in escape hatch: after several partial/failed syncs
+    // across different zingo-cli builds today, the persisted wallet.dat may
+    // have been left in a stale or inconsistent state (chain height reads
+    // that inexplicably went backwards between calls). Setting this env var
+    // wipes the data volume so this boot restores fresh from
+    // ZCASH_WALLET_SEED instead of resuming from that questionable state.
+    // Remove the env var again after one successful redeploy with it set --
+    // it is NOT meant to stay on (every boot would re-sync from scratch).
+    if (process.env.ZCASH_FORCE_REWALLET === "true") {
+      app.log.warn("ZCASH_FORCE_REWALLET=true -- wiping wallet data volume before restoring from seed");
+      cli.wipeWalletData();
+    }
     await cli.ensureWalletReady();
     ready = true;
     app.log.info("wallet is ready");

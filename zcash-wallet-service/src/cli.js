@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync, rmSync } from "node:fs";
 import { promisify } from "node:util";
 
 const execFileP = promisify(execFile);
@@ -41,6 +41,21 @@ function parseMaybeJson(text) {
   } catch {
     return { json: null, raw: text };
   }
+}
+
+/** Deletes everything in the persistent data volume so the next boot treats
+ * this as a brand-new deploy and restores fresh from ZCASH_WALLET_SEED,
+ * instead of resuming from a possibly-stale/corrupted wallet.dat. Only ever
+ * called when the operator explicitly opts in via ZCASH_FORCE_REWALLET=true
+ * (see server.js) -- this does not touch the seed itself (that lives only
+ * in the env var), it only clears locally-cached/synced chain state. */
+export function wipeWalletData() {
+  if (!existsSync(DATA_DIR)) return;
+  const entries = readdirSync(DATA_DIR);
+  for (const entry of entries) {
+    rmSync(`${DATA_DIR}/${entry}`, { recursive: true, force: true });
+  }
+  console.log(`[zcash-wallet-service] wiped ${entries.length} entr${entries.length === 1 ? "y" : "ies"} from ${DATA_DIR}: ${entries.join(", ") || "(empty)"}`);
 }
 
 /** Runs once at boot. If no wallet file exists yet in the mounted volume,
