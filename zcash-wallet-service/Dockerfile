@@ -26,7 +26,24 @@ WORKDIR /build
 
 # Pin an exact tagged release so a rebuild never silently pulls in
 # untested upstream changes to the code that moves real money.
-ARG ZINGOLIB_REF=zingolib_v5.0.0
+#
+# TEMPORARY DEVIATION (2026-09-06): zingolib_v5.0.0 (June 10 2026) predates
+# the NU6.3 "Ironwood" mainnet upgrade (activated ~July 28 2026, block
+# 3,428,143 -- see ZIP-258). Our real chain is now past that height, so
+# zingo-cli built from v5.0.0 cannot parse the newer version-6 transactions
+# it encounters while syncing and errors out with "server returned invalid
+# transaction. Unknown transaction format" -- this is why the wallet's
+# balance/height never reflected the real funded state even after the
+# --waitsync fix. zingolib has not cut a new tagged release since v5.0.0
+# (confirmed by checking github.com/zingolabs/zingolib/releases), but the
+# zingo-mobile app *does* ship Ironwood/NU6.3 support, so that work exists
+# upstream on the dev branch even though it hasn't been tagged yet.
+# Building from `dev` is a deliberate, temporary exception to the
+# pin-an-exact-tag rule above -- swap this back to a specific commit SHA
+# (read it from the Railway build log once this succeeds) as soon as
+# zingolib cuts a real tagged release with Ironwood support, so future
+# rebuilds go back to being fully reproducible.
+ARG ZINGOLIB_REF=dev
 RUN git clone --depth 1 --branch ${ZINGOLIB_REF} https://github.com/zingolabs/zingolib.git .
 
 RUN cargo build --release --package zingo-cli

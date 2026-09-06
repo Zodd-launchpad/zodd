@@ -80,6 +80,33 @@ hasn't come up yet at this scale, but if a call starts failing with a
 lock/IO-looking error, that's the likely cause. Worth queuing CLI calls
 through one at a time if real trading volume ever picks up.
 
+**Found and fixed (2026-09-06), bigger than the waitsync bug above:**
+even with `--waitsync`, the balance stayed at 0 against a wallet Brai had
+personally confirmed (via his own Zingo app) held 0.01 ZEC. The real
+cause: `zingolib_v5.0.0` (the tag pinned in this service's Dockerfile,
+cut June 10 2026) predates the **NU6.3 "Ironwood" mainnet upgrade**
+(activated ~July 28 2026 at block 3,428,143 — ZIP-258), which introduced
+new version-6 transactions. Our chain is now well past that height, so
+every sync hit a transaction it didn't understand and errored out early
+with `Sync error. server error. server returned invalid transaction.
+Unknown transaction format` — confirmed directly in this service's own
+deploy logs. (There was also an earlier hard fork, NU6.2, on June 3 2026
+at block 3,364,600, a security fix for an Orchard proof bug — v5.0.0 does
+handle that one, it's specifically the later Ironwood upgrade it misses.)
+
+Fix applied: the Dockerfile now builds `zingo-cli` from zingolib's `dev`
+branch instead of the `zingolib_v5.0.0` tag, since zingolib hasn't cut a
+new tagged release since v5.0.0 but zingo-mobile (a sibling Zingo project)
+already ships Ironwood support, meaning that work exists upstream on
+`dev` even though it isn't tagged yet. This is a deliberate, temporary
+exception to the "always pin an exact tag" rule elsewhere in this doc —
+**once this build succeeds, re-pin `ZINGOLIB_REF` in the Dockerfile to
+the specific commit SHA Railway resolved `dev` to** (visible in the build
+log), so future rebuilds stay reproducible instead of silently tracking a
+moving branch. Re-verify `/api/admin/zcash-status` shows the real balance
+and an advancing height after this redeploy before doing any real
+buy/sell test.
+
 ## Creator trading fee (3%: 1% creator / 2% platform)
 
 Every buy and sell takes a 3% fee (see `backend/src/lib/fees.ts`). 1% of
