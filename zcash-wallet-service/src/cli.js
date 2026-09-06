@@ -13,7 +13,32 @@ const WALLET_FILE = `${DATA_DIR}/zingo-wallet.dat`;
 // a stuck sync should surface as an error, not hang the API forever.
 const CLI_TIMEOUT_MS = 120_000;
 
-async function runCli(args, { timeout = CLI_TIMEOUT_MS, waitsync = false } = {}) {
+// Every API route (balance, height, addresses, messages, send) spawns its
+// own zingo-cli process against the SAME wallet.dat file. Two of those
+// landing at once -- e.g. the admin status route, which used to fire
+// balance/height/addresses concurrently via Promise.all -- were racing on
+// that file. This is exactly the "Known remaining risk" flagged in
+// docs/REAL_MODE_SETUP.md, and it turned out to already be happening: the
+// status route was consistently reading back a stale, long-stuck height
+// (and a 0 balance) even on builds that, run alone, correctly reported a
+// current, advancing height at boot. Fix: force every zingo-cli invocation
+// through this single in-process queue so only one ever touches the wallet
+// file at a time, no matter how many HTTP requests land concurrently.
+let cliQueue = Promise.resolve();
+
+function runCli(args, opts = {}) {
+  const run = () => runCliExclusive(args, opts);
+  const result = cliQueue.then(run, run);
+  // Keep the chain alive even if this call failed -- one failed command
+  // must not permanently jam every call after it.
+  cliQueue = result.then(
+    () => {},
+    () => {}
+  );
+  return result;
+}
+
+async function runCliExclusive(args, { timeout = CLI_TIMEOUT_MS, waitsync = false } = {}) {
   // IMPORTANT: zingo-cli does NOT sync before running a one-shot command by
   // default -- it fires the command against whatever state the wallet
   // already has and exits. Without --waitsync, balance/messages/height are
