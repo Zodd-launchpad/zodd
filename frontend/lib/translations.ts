@@ -79,6 +79,16 @@ export const translations = {
   "create.connectFirst": { en: "Connect or create your wallet first (top right).", zh: "请先连接或创建你的钱包（右上角）。" },
   "create.creating": { en: "Created, redirecting…", zh: "创建成功，正在跳转…" },
   "create.button": { en: "Create", zh: "创建" },
+  "create.tradingFeeNote": {
+    en: "Trading fee: 2% per trade. 1% goes straight to you, the creator — paid out automatically every 24h. 1% goes to the platform.",
+    zh: "交易费：每笔交易 2%。其中 1% 直接归你（创建者）所有——每 24 小时自动发放一次。1% 归平台所有。",
+  },
+  "create.creatorPayoutLabel": { en: "Your Zcash payout address (optional)", zh: "你的 Zcash 收款地址（可选）" },
+  "create.creatorPayoutPlaceholder": { en: "u1... (leave blank to skip)", zh: "u1...（留空则跳过）" },
+  "create.creatorPayoutHelp": {
+    en: "Where your 1% creator fee share gets sent every 24h. You can leave this blank, but then nobody can claim it.",
+    zh: "你的 1% 创建者分成每 24 小时会发送到这个地址。可以留空，但这样就没人能领取这部分费用。",
+  },
 
   // ---------- Portfolio page ----------
   "portfolio.connectFirst": { en: "Connect your wallet above to see your portfolio.", zh: "请先在上方连接钱包以查看你的持仓。" },
@@ -160,6 +170,22 @@ export const translations = {
   "token.onChain.issued": { en: "issued", zh: "发行" },
   "token.onChain.finalized": { en: "finalized", zh: "完成" },
   "token.onChain.creationTxid": { en: "creation txid", zh: "创建交易 ID" },
+
+  // ---------- Creator fee card ----------
+  "token.fee.heading": { en: "CREATOR FEE", zh: "创建者分成" },
+  "token.fee.explain": {
+    en: "1% of every trade (out of a 2% total fee) goes straight to the creator. It accrues through the day and is distributed automatically every 24h.",
+    zh: "每笔交易 2% 总费用中的 1% 直接归创建者所有。全天持续累积，每 24 小时自动发放一次。",
+  },
+  "token.fee.accrued": { en: "Unclaimed", zh: "未发放" },
+  "token.fee.paid": { en: "Paid out so far", zh: "已累计发放" },
+  "token.fee.payoutTo": { en: "Paid automatically to", zh: "自动发放至" },
+  "token.fee.lastPayout": { en: "Last payout {when}", zh: "上次发放：{when}" },
+  "token.fee.neverPaid": { en: "No payout yet", zh: "尚未发放过" },
+  "token.fee.noAddress": {
+    en: "No payout address on file — fees are accruing but nobody can claim them.",
+    zh: "尚未设置收款地址——费用在累积，但没有人可以领取。",
+  },
 
   // ---------- Buy modal ----------
   "buy.title": { en: "Buy {symbol}", zh: "买入 {symbol}" },
