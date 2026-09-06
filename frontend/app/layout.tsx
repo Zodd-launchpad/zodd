@@ -1,5 +1,6 @@
 import "./globals.css";
 import { WalletProvider } from "@/lib/wallet";
+import DemoBanner from "./DemoBanner";
 import HeaderBar from "./HeaderBar";
 import DisclaimerBanner from "./DisclaimerBanner";
 
@@ -12,6 +13,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body>
         <WalletProvider>
+          <DemoBanner />
           <HeaderBar />
           {children}
           <DisclaimerBanner />

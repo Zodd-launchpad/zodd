@@ -322,6 +322,39 @@ tr:hover td { background: #151517; cursor: pointer; }
 .coming-soon h1 { font-size: 32px; margin: 0 0 10px; }
 .coming-soon p { color: var(--text-dim); max-width: 460px; margin: 0 auto; line-height: 1.6; }
 
+/* DEMO ribbon, top of every page */
+.demo-banner {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: linear-gradient(180deg, #ffcc4d, #f5a623);
+  color: #241900;
+  font-weight: 800;
+  font-size: 12px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  text-align: center;
+  box-shadow: 0 2px 18px rgba(245, 166, 35, 0.45);
+}
+.demo-banner-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #b3261e;
+  box-shadow: 0 0 0 0 rgba(179, 38, 30, 0.6);
+  animation: demo-pulse 1.6s ease-in-out infinite;
+}
+@keyframes demo-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(179, 38, 30, 0.55); }
+  70% { box-shadow: 0 0 0 6px rgba(179, 38, 30, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(179, 38, 30, 0); }
+}
+
 /* Big disclaimer banner, footer of every page */
 .disclaimer-banner {
   border-top: 1px solid var(--border);
