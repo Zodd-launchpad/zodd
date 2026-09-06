@@ -1,0 +1,94 @@
+// Schema del ledger off-chain. Esto ES la "blockchain" de la plataforma:
+// no hay contrato, esto es la fuente de verdad de quién tiene qué.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Cuenta interna ("wallet SHLD"). No es una wallet de Zcash real: es el
+// login/identificador que agrupa las tenencias de tokens de un usuario.
+model InternalWallet {
+  id            String   @id @default(cuid())
+  walletTag     String   @unique // ej. "5310f1ce", parte visible corta
+  seedHashHex   String   // hash de las 12 palabras, nunca la frase en claro
+  createdAt     DateTime @default(now())
+
+  balances Balance[]
+  orders   Order[]
+}
+
+model Token {
+  id                String   @id @default(cuid())
+  symbol            String   @unique
+  name              String
+  totalSupply       BigInt   // ej. 1_000_000_000 * 10^decimals
+  decimals          Int      @default(0)
+  creatorWalletId   String
+  genesisMemoTxid   String?  // txid shielded donde se inscribió name/symbol/supply
+  createdAt         DateTime @default(now())
+
+  // Estado de la bonding curve (ver lib/bondingCurve.ts para la matemática)
+  curveReserveZec   Decimal  @db.Decimal(20, 8) // ZEC efectivo acumulado en la curva
+  curveSoldTokens   BigInt   @default(0)        // tokens ya vendidos por la curva
+  graduated         Boolean  @default(false)
+  graduatedAt       DateTime?
+
+  balances Balance[]
+  orders   Order[]
+
+  @@index([graduated])
+}
+
+model Balance {
+  id               String   @id @default(cuid())
+  internalWalletId String
+  tokenId          String
+  amount           BigInt   @default(0)
+
+  internalWallet InternalWallet @relation(fields: [internalWalletId], references: [id])
+  token          Token          @relation(fields: [tokenId], references: [id])
+
+  @@unique([internalWalletId, tokenId])
+}
+
+enum OrderSide {
+  BUY
+  SELL
+}
+
+enum OrderStatus {
+  PENDING   // esperando pago (BUY) o esperando payout (SELL)
+  FILLED
+  EXPIRED
+  FAILED
+}
+
+// Una orden = una dirección Zcash de un solo uso (BUY) o un payout (SELL).
+// La dirección ES la orden, tal cual el modelo de SHLD.fun.
+model Order {
+  id                String      @id @default(cuid())
+  internalWalletId  String
+  tokenId           String
+  side              OrderSide
+  status            OrderStatus @default(PENDING)
+
+  zecAddress        String?     // dirección diversificada generada para esta orden (BUY)
+  refundAddress     String?     // dirección del usuario para el payout (SELL, o refund de sobrepago)
+  zecAmount         Decimal?    @db.Decimal(20, 8) // monto pagado/pagado-de-vuelta, confirmado on-chain
+  tokenAmount       BigInt?     // tokens acreditados/debitados, calculado a precio de ejecución
+  executionTxid     String?     // txid shielded que llenó la orden
+
+  createdAt         DateTime    @default(now())
+  filledAt          DateTime?
+
+  internalWallet InternalWallet @relation(fields: [internalWalletId], references: [id])
+  token          Token          @relation(fields: [tokenId], references: [id])
+
+  @@index([status])
+  @@index([zecAddress])
+}
