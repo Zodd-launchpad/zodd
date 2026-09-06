@@ -118,6 +118,20 @@ export async function generateOrderAddress(orderId: string, expectedZecAmount: n
   return address;
 }
 
+/** Re-registers a watcher for an address that was already generated in a
+ * previous process lifetime (see server.ts's startup call to
+ * store.getPendingOrdersAwaitingPayment / getPendingTokenCreationsAwaitingPayment).
+ * The in-memory `watchers` map does not survive a restart, so without this
+ * a real payment sent while the backend was mid-redeploy would confirm
+ * on-chain with nothing left watching for it. `createdAtMs` is passed
+ * through (rather than reset to now) so the original 30min expiry window
+ * still applies. */
+export function resumeWatching(orderId: string, address: string, expectedZecAmount: number, createdAtMs: number) {
+  if (watchers.has(orderId)) return; // already registered this process lifetime
+  watchers.set(orderId, { orderId, address, expectedZecAmount, createdAt: createdAtMs });
+  startPolling();
+}
+
 /** Sends a real payout (sell proceeds). */
 export async function sendPayout(toAddress: string, zecAmount: number): Promise<{ txid: string }> {
   if (zecAmount > MAX_ZEC_PER_ORDER) {

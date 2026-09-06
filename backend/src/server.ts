@@ -309,6 +309,34 @@ onPaymentDetected(async (orderId, confirmedZecAmount, txid) => {
   }
 });
 
+// The in-memory payment watcher (zcashReal.ts's `watchers` map) does not
+// survive a backend restart/redeploy -- without this, any payment sent
+// while a deploy was in flight would confirm on-chain with nothing left
+// watching for it (found the hard way on 2026-09-06: two real token-create
+// payments went out mid-redeploy and were never picked up). On every boot,
+// re-learn from the DB which orders/token-creations already got an address
+// and are still PENDING, and resume watching them.
+(async () => {
+  try {
+    const resumable = (zcashService as { resumeWatching: typeof import("./lib/zcashReal.js").resumeWatching }).resumeWatching;
+    const [orders, creations] = await Promise.all([
+      store.getPendingOrdersAwaitingPayment(),
+      store.getPendingTokenCreationsAwaitingPayment(),
+    ]);
+    for (const o of orders) {
+      if (o.zecAddress && o.zecAmount) resumable(o.id, o.zecAddress, o.zecAmount, new Date(o.createdAt).getTime());
+    }
+    for (const c of creations) {
+      if (c.zecAddress) resumable(c.id, c.zecAddress, c.expectedZecAmount, new Date(c.createdAt).getTime());
+    }
+    if (orders.length || creations.length) {
+      app.log.info(`resumed watching ${orders.length} pending order(s) and ${creations.length} pending token-creation(s) from before this restart`);
+    }
+  } catch (err) {
+    app.log.error(err, "failed to resume watching pending payments after restart");
+  }
+})();
+
 // ---------- Orders: sell ----------
 
 const sellSchema = z.object({

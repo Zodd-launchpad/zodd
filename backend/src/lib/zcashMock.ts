@@ -61,6 +61,13 @@ export function generateOrderAddress(orderId: string, expectedZecAmount: number)
   return address;
 }
 
+/** No-op in mock mode: a simulated payment always confirms within a few
+ * seconds of generateOrderAddress, so nothing meaningful survives a
+ * restart to resume. Exists only so server.ts can call this the same way
+ * regardless of ZCASH_MODE (see zcashReal.ts's real implementation, which
+ * this mirrors for restart recovery). */
+export function resumeWatching(_orderId: string, _address: string, _expectedZecAmount: number, _createdAtMs: number) {}
+
 /** Simulates sending a real payout (sell / graduation). */
 export function sendPayout(toAddress: string, zecAmount: number): { txid: string } {
   const fakeTxid = [...Array(64)].map(() => "0123456789abcdef"[Math.floor(Math.random() * 16)]).join("");

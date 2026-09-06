@@ -421,6 +421,15 @@ export async function getOrder(id: string): Promise<OrderView | null> {
   return o ? toOrderView(o) : null;
 }
 
+/** Same restart-recovery need as getPendingTokenCreationsAwaitingPayment:
+ * a real buy order's in-memory watcher is gone after any backend restart,
+ * so a payment sent just before a redeploy would otherwise never be
+ * detected even once it confirms on-chain. */
+export async function getPendingOrdersAwaitingPayment(): Promise<OrderView[]> {
+  const rows = await prisma.order.findMany({ where: { status: "PENDING", zecAddress: { not: null } } });
+  return rows.map(toOrderView);
+}
+
 export async function fillBuyOrder(orderId: string, tokenAmount: number, executionTxid: string) {
   const o = await prisma.order.update({
     where: { id: orderId },
@@ -508,6 +517,18 @@ export async function setPendingTokenCreationAddress(id: string, zecAddress: str
 export async function getPendingTokenCreation(id: string): Promise<PendingTokenCreationView | null> {
   const p = await prisma.pendingTokenCreation.findUnique({ where: { id } });
   return p ? toPendingTokenCreationView(p) : null;
+}
+
+/** The in-memory payment watcher (zcashReal.ts) is wiped on every backend
+ * restart/redeploy -- this is how the backend re-learns, on boot, which
+ * token creations were mid-payment when it went down, so a restart during
+ * the 10-15min real confirmation window doesn't silently strand a real
+ * payment nobody is watching for anymore. Only rows that already got a
+ * zecAddress (i.e. actually reached the "waiting for payment" screen)
+ * are worth resuming. */
+export async function getPendingTokenCreationsAwaitingPayment(): Promise<PendingTokenCreationView[]> {
+  const rows = await prisma.pendingTokenCreation.findMany({ where: { status: "PENDING", zecAddress: { not: null } } });
+  return rows.map(toPendingTokenCreationView);
 }
 
 /** A symbol that's already claimed by another PENDING reservation can't be
