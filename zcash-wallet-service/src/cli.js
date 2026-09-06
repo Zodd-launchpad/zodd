@@ -116,9 +116,14 @@ export async function ensureWalletReady() {
 export async function newAddress() {
   const out = await runCli(["new_address", "oz"], { timeout: 30_000 });
   const { json, raw } = parseMaybeJson(out);
-  // Docs show new_address returning the created address, possibly as a
-  // JSON array/object -- handle both shapes defensively.
-  const address = Array.isArray(json) ? json[0] : json?.address ?? raw.replace(/["[\]]/g, "").trim();
+  // Confirmed live (2026-09-06) against this build: new_address returns a
+  // JSON object shaped like { account, address_index, has_orchard,
+  // has_sapling, has_transparent, encoded_address } -- the address itself
+  // is under `encoded_address`, not `address` as we originally guessed
+  // (that guess is what made every real token-creation attempt fail with
+  // "unexpected new_address output"). Still handled defensively in case a
+  // future build reverts to a bare array or a plain `address` key.
+  const address = Array.isArray(json) ? json[0] : json?.encoded_address ?? json?.address ?? raw.replace(/["[\]]/g, "").trim();
   if (!address || !address.startsWith("u1")) {
     throw new Error(`unexpected new_address output, needs a look: ${raw}`);
   }
