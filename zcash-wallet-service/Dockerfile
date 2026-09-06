@@ -46,7 +46,27 @@ WORKDIR /build
 ARG ZINGOLIB_REF=dev
 RUN git clone --depth 1 --branch ${ZINGOLIB_REF} https://github.com/zingolabs/zingolib.git .
 
-RUN cargo build --release --package zingo-cli
+# As of this dev snapshot, zingo-cli's default build makes the Nym mixnet
+# transport mandatory for any online session (ADR 0024/0026) -- without a
+# running Nym proxy pair (which nobody publicly operates alongside the
+# public lightwalletd servers we use, like zec.rocks), it refuses to sync
+# at all ("Mixnet Mode is required for a connected session"). We don't need
+# the network-privacy properties Nym adds (hiding which IP talks to the
+# lightwalletd server) -- we only need working, correct, direct connectivity,
+# which is exactly what this service already had before this feature existed.
+# `clearnet-test-mode` is the escape hatch zingolib's own code comments call
+# "quarantined... for testing and never for use... never a default" -- that
+# warning is about *them* not vouching for it as their supported path, not
+# about fund safety: it only changes which network transport zingo-cli uses
+# to talk to the public lightwalletd server. It does not touch key custody
+# (the seed is signed locally and never leaves this service either way) or
+# payout-address selection (decided entirely by our own backend code in
+# zcashReal.ts / server.ts, unrelated to this transport choice). Discussed
+# explicitly with Brai (2026-09-06): the actual things he was worried about
+# -- theft of funds, or sending to the wrong address -- are unaffected by
+# this flag, so proceeding without Nym is fine; we just don't get the extra
+# IP-privacy layer, which nobody asked for.
+RUN cargo build --release --package zingo-cli --no-default-features --features clearnet-test-mode
 
 # ---------- Stage 2: slim runtime with Node (for the wrapper API) ----------
 FROM node:20-bookworm-slim

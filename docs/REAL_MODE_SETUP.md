@@ -107,13 +107,33 @@ moving branch. Re-verify `/api/admin/zcash-status` shows the real balance
 and an advancing height after this redeploy before doing any real
 buy/sell test.
 
-## Creator trading fee (3%: 1% creator / 2% platform)
+**Also found (2026-09-06):** this `dev` snapshot makes the Nym mixnet
+transport mandatory for any online session by default (ADR 0024/0026) --
+without a Nym proxy pair running alongside the lightwalletd server (which
+nobody publicly operates for public servers like zec.rocks), zingo-cli
+refuses to sync at all: `Mixnet Mode is required for a connected
+session`. The Nym integration itself is still early-stage upstream (their
+own announcement calls it a "first milestone", and the demo repos are
+already marked superseded) -- not something to depend on for production
+right now. We don't need what it adds anyway (it only hides which IP
+talks to the lightwalletd server; it doesn't affect fund custody, spend
+authorization, or payout-address selection, all of which are unrelated
+code paths). Fix: build with `--no-default-features --features
+clearnet-test-mode` (see the Dockerfile comment) to compile zingo-cli
+without the Nym requirement, restoring the same direct connectivity this
+service always had before Nym existed. Note zingolib's own code comments
+call this feature flag "quarantined... for testing and never for use" --
+that's them not vouching for it as *their* supported path, not a fund-
+safety warning; discussed explicitly with Brai and confirmed this is fine
+given what it actually does and doesn't touch.
 
-Every buy and sell takes a 3% fee (see `backend/src/lib/fees.ts`). 1% of
+## Creator trading fee (2%: 1% creator / 1% platform)
+
+Every buy and sell takes a 2% fee (see `backend/src/lib/fees.ts`). 1% of
 that accrues per-token (`Token.creatorFeeAccruedZec`) and is paid out
 automatically to the creator's `creatorPayoutAddress` every 24h by
 `backend/src/lib/feeDistributor.ts` (checks every 15min for tokens due).
-The other 2% just stays in the platform wallet — no separate transfer
+The other 1% just stays in the platform wallet — no separate transfer
 needed, it's already there.
 
 This uses the same `sendPayout` as sells, so in real mode it needs
