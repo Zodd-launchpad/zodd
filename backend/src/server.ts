@@ -3,10 +3,17 @@ import { z } from "zod";
 import * as store from "./lib/store.js";
 import { generateTwelveWords } from "./lib/wordlist.js";
 import { quoteBuy, quoteSell, currentPrice, marketCapZec, isGraduated } from "./lib/bondingCurve.js";
-import { generateOrderAddress, onPaymentDetected, sendPayout } from "./lib/zcashMock.js";
 import { simulatedInscriptionFor } from "./lib/simulatedChain.js";
 
+// ZCASH_MODE=real switches every payment/inscription in this service to
+// actually move ZEC through zcash-wallet-service, instead of the mock.
+// This must be the ONLY place that decides which one is in effect.
+const ZCASH_MODE = process.env.ZCASH_MODE === "real" ? "real" : "mock";
+const zcashService = ZCASH_MODE === "real" ? await import("./lib/zcashReal.js") : await import("./lib/zcashMock.js");
+const { generateOrderAddress, onPaymentDetected, sendPayout } = zcashService;
+
 const app = Fastify({ logger: true });
+app.log.info(`ZCASH_MODE=${ZCASH_MODE} -- ${ZCASH_MODE === "real" ? "REAL ZEC IS LIVE ON THIS DEPLOYMENT" : "using the simulated zcash service, no real funds move"}`);
 
 app.register(import("@fastify/cors"), { origin: true });
 
@@ -47,11 +54,29 @@ app.post("/api/tokens", async (req, reply) => {
     return reply.code(400).send({ error: "invalid creatorWalletId" });
   }
 
+  let genesisMemoTxid: string | undefined;
+  if (ZCASH_MODE === "real") {
+    // Real mode: the 0.01 ZEC creation fee is charged and inscribed
+    // on-chain BEFORE the token exists in our ledger at all -- if this
+    // fails, nothing is created, same as if a card payment had failed.
+    try {
+      const inscription = await (zcashService as typeof import("./lib/zcashReal.js")).inscribeTokenCreation(
+        symbol,
+        body.name
+      );
+      genesisMemoTxid = inscription.txid;
+    } catch (err) {
+      app.log.error(err, "real on-chain inscription failed, token was not created");
+      return reply.code(502).send({ error: "couldn't broadcast the on-chain creation transaction, try again" });
+    }
+  }
+
   const token = await store.createToken({
     symbol,
     name: body.name,
     totalSupply: body.totalSupply,
     creatorWalletId: body.creatorWalletId,
+    genesisMemoTxid,
   });
   return reply.send(serializeToken(token));
 });
@@ -94,7 +119,14 @@ function serializeToken(t: store.TokenWithCurve) {
     graduated: isGraduated(t.curve),
     graduationThresholdZec: store.DEFAULT_CURVE_CONFIG.graduationZecThreshold,
     createdAt: t.createdAt,
-    onChain: simulatedInscriptionFor(t.id),
+    onChain:
+      t.genesisMemoTxid != null
+        ? {
+            simulated: false as const,
+            txid: t.genesisMemoTxid,
+            explorerUrl: `https://mainnet.zcashexplorer.app/transactions/${t.genesisMemoTxid}`,
+          }
+        : simulatedInscriptionFor(t.id),
   };
 }
 
@@ -120,8 +152,15 @@ app.post("/api/orders/buy", async (req, reply) => {
   });
 
   // The address IS the order: any payment that lands there executes at
-  // the price of the block it confirms in (see zcashMock.ts).
-  const zecAddress = generateOrderAddress(order.id, body.zecAmount);
+  // the price of the block it confirms in (see zcashMock.ts / zcashReal.ts).
+  let zecAddress: string;
+  try {
+    zecAddress = await generateOrderAddress(order.id, body.zecAmount);
+  } catch (err) {
+    app.log.error(err, `couldn't generate an order address for ${order.id}`);
+    await store.failOrder(order.id).catch(() => {});
+    return reply.code(502).send({ error: String((err as Error).message ?? err) });
+  }
   await store.setOrderAddress(order.id, zecAddress);
 
   return reply.send({
@@ -183,10 +222,18 @@ app.post("/api/orders/sell", async (req, reply) => {
   }
 
   const { zecOut, newState } = quoteSell(token.curve, body.tokenAmount);
+
+  let txid: string;
+  try {
+    ({ txid } = await sendPayout(body.refundAddress, zecOut));
+  } catch (err) {
+    app.log.error(err, `sell payout failed for wallet ${wallet.id} / token ${token.symbol}`);
+    return reply.code(502).send({ error: String((err as Error).message ?? err) });
+  }
+
   await store.updateTokenCurve(token.id, newState);
   await store.recordPricePoint(token.id, newState, token.totalSupply);
   await store.debitBalance(wallet.id, token.id, body.tokenAmount);
-  const { txid } = sendPayout(body.refundAddress, zecOut);
 
   const order = await store.createSellOrder({
     internalWalletId: wallet.id,

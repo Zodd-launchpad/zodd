@@ -50,6 +50,7 @@ export interface TokenWithCurve {
   creatorWalletId: string;
   curve: CurveState;
   createdAt: string;
+  genesisMemoTxid: string | null;
 }
 
 function toTokenWithCurve(t: {
@@ -61,6 +62,7 @@ function toTokenWithCurve(t: {
   curveReserveZec: unknown;
   curveSoldTokens: bigint;
   createdAt: Date;
+  genesisMemoTxid: string | null;
 }): TokenWithCurve {
   return {
     id: t.id,
@@ -70,6 +72,7 @@ function toTokenWithCurve(t: {
     creatorWalletId: t.creatorWalletId,
     curve: { realZecReserves: num(t.curveReserveZec), tokensSold: num(t.curveSoldTokens) },
     createdAt: t.createdAt.toISOString(),
+    genesisMemoTxid: t.genesisMemoTxid,
   };
 }
 
@@ -78,6 +81,10 @@ export async function createToken(input: {
   name: string;
   totalSupply: number;
   creatorWalletId: string;
+  /** Real shielded txid of the on-chain creation inscription. Only set
+   * when ZCASH_MODE=real; null in demo/simulated mode (the frontend falls
+   * back to the deterministic simulated display in that case). */
+  genesisMemoTxid?: string;
 }): Promise<TokenWithCurve> {
   const t = await prisma.token.create({
     data: {
@@ -87,6 +94,7 @@ export async function createToken(input: {
       creatorWalletId: input.creatorWalletId,
       curveReserveZec: 0,
       curveSoldTokens: 0n,
+      genesisMemoTxid: input.genesisMemoTxid ?? null,
     },
   });
   const token = toTokenWithCurve(t);

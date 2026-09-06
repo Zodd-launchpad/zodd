@@ -118,21 +118,47 @@ export default function TokenPage() {
         </div>
 
         <div className="card" style={{ marginTop: 16 }}>
-          <label className="muted" style={{ fontSize: 11, letterSpacing: 0.5 }}>
-            ON CHAIN <span style={{ opacity: 0.6 }}>(simulated)</span>
-          </label>
-          <p className="muted" style={{ fontSize: 13, marginTop: 6 }}>
-            This demo doesn't broadcast to Zcash mainnet yet — these entries are placeholders for what a real
-            shielded-memo inscription will look like.
-          </p>
-          <div style={{ marginTop: 10, fontSize: 13 }}>
-            <div className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>issued</div>
-            <div className="mono-break">{shortHash(token.onChain.issuedTxid)} · block {token.onChain.issuedBlock}</div>
-          </div>
-          <div style={{ marginTop: 10, fontSize: 13 }}>
-            <div className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>finalized</div>
-            <div className="mono-break">{shortHash(token.onChain.finalizedTxid)} · block {token.onChain.finalizedBlock}</div>
-          </div>
+          {token.onChain.simulated ? (
+            <>
+              <label className="muted" style={{ fontSize: 11, letterSpacing: 0.5 }}>
+                ON CHAIN <span style={{ opacity: 0.6 }}>(simulated)</span>
+              </label>
+              <p className="muted" style={{ fontSize: 13, marginTop: 6 }}>
+                This demo doesn't broadcast to Zcash mainnet yet — these entries are placeholders for what a real
+                shielded-memo inscription will look like.
+              </p>
+              <div style={{ marginTop: 10, fontSize: 13 }}>
+                <div className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>issued</div>
+                <div className="mono-break">{shortHash(token.onChain.issuedTxid)} · block {token.onChain.issuedBlock}</div>
+              </div>
+              <div style={{ marginTop: 10, fontSize: 13 }}>
+                <div className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>finalized</div>
+                <div className="mono-break">{shortHash(token.onChain.finalizedTxid)} · block {token.onChain.finalizedBlock}</div>
+              </div>
+            </>
+          ) : (
+            <>
+              <label className="muted" style={{ fontSize: 11, letterSpacing: 0.5 }}>
+                ON CHAIN <span className="pill up" style={{ marginLeft: 6, fontSize: 10 }}>real</span>
+              </label>
+              <p className="muted" style={{ fontSize: 13, marginTop: 6 }}>
+                A real 0.01 ZEC shielded transaction was broadcast on Zcash mainnet to inscribe this token's
+                creation.
+              </p>
+              <div style={{ marginTop: 10, fontSize: 13 }}>
+                <div className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>creation txid</div>
+                <a
+                  className="mono-break"
+                  href={token.onChain.explorerUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ color: "inherit", textDecoration: "underline" }}
+                >
+                  {shortHash(token.onChain.txid)}
+                </a>
+              </div>
+            </>
+          )}
         </div>
       </div>
 

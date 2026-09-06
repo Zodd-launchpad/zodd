@@ -21,13 +21,19 @@ export interface TokenSummary {
   graduated: boolean;
   graduationThresholdZec: number;
   createdAt: string;
-  onChain: {
-    simulated: true;
-    issuedTxid: string;
-    issuedBlock: number;
-    finalizedTxid: string;
-    finalizedBlock: number;
-  };
+  onChain:
+    | {
+        simulated: true;
+        issuedTxid: string;
+        issuedBlock: number;
+        finalizedTxid: string;
+        finalizedBlock: number;
+      }
+    | {
+        simulated: false;
+        txid: string;
+        explorerUrl: string;
+      };
 }
 
 export interface PricePoint {
