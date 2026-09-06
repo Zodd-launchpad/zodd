@@ -50,6 +50,17 @@ app.get("/wallet/balance", async (_req, reply) => {
   }
 });
 
+app.get("/wallet/addresses", async (_req, reply) => {
+  if (!ready) return reply.code(503).send({ error: "wallet not ready yet", detail: readyError });
+  try {
+    const addresses = await cli.listAddresses();
+    return reply.send({ addresses });
+  } catch (err) {
+    app.log.error(err);
+    return reply.code(500).send({ error: String(err.message ?? err) });
+  }
+});
+
 app.get("/wallet/height", async (_req, reply) => {
   try {
     const info = await cli.heightInfo();

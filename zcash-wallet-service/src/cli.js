@@ -13,8 +13,14 @@ const WALLET_FILE = `${DATA_DIR}/zingo-wallet.dat`;
 // a stuck sync should surface as an error, not hang the API forever.
 const CLI_TIMEOUT_MS = 120_000;
 
-async function runCli(args, { timeout = CLI_TIMEOUT_MS } = {}) {
-  const fullArgs = ["--data-dir", DATA_DIR, "--server", SERVER, ...args];
+async function runCli(args, { timeout = CLI_TIMEOUT_MS, waitsync = false } = {}) {
+  // IMPORTANT: zingo-cli does NOT sync before running a one-shot command by
+  // default -- it fires the command against whatever state the wallet
+  // already has and exits. Without --waitsync, balance/messages/height are
+  // stale (this is exactly the bug that made a real, confirmed deposit
+  // show up as a 0 balance). Any read that needs the current chain state,
+  // or any spend, must pass waitsync: true.
+  const fullArgs = ["--data-dir", DATA_DIR, "--server", SERVER, ...(waitsync ? ["--waitsync"] : []), ...args];
   try {
     const { stdout, stderr } = await execFileP(BIN, fullArgs, { timeout, maxBuffer: 16 * 1024 * 1024 });
     if (stderr?.trim()) console.error(`[zingo-cli stderr] ${stderr.trim()}`);
@@ -45,8 +51,8 @@ function parseMaybeJson(text) {
 export async function ensureWalletReady() {
   if (existsSync(WALLET_FILE)) {
     console.log("[zcash-wallet-service] existing wallet found, loading it");
-    const out = await runCli(["height"], { timeout: 180_000 });
-    console.log(`[zcash-wallet-service] wallet loaded, chain height: ${out}`);
+    const out = await runCli(["height"], { timeout: 10 * 60_000, waitsync: true });
+    console.log(`[zcash-wallet-service] wallet loaded and synced, chain height: ${out}`);
     return;
   }
 
@@ -63,7 +69,7 @@ export async function ensureWalletReady() {
   const args = ["--seed", seed];
   if (birthday) args.push("--birthday", birthday);
   args.push("height");
-  await runCli(args, { timeout: 20 * 60_000 }); // first sync from a birthday can take a while
+  await runCli(args, { timeout: 20 * 60_000, waitsync: true }); // first sync from a birthday can take a while
   console.log("[zcash-wallet-service] wallet restored and synced for the first time");
 }
 
@@ -80,7 +86,7 @@ export async function newAddress() {
 }
 
 export async function spendableBalanceZatoshis() {
-  const out = await runCli(["spendable_balance"], { timeout: 60_000 });
+  const out = await runCli(["spendable_balance"], { timeout: 3 * 60_000, waitsync: true });
   const { json, raw } = parseMaybeJson(out);
   const value = json?.spendable_balance ?? json;
   const n = Number(value);
@@ -88,16 +94,26 @@ export async function spendableBalanceZatoshis() {
   return n;
 }
 
+/** Lists this wallet's existing receiving addresses (the same ones Zingo!
+ * shows) -- used only for a one-time sanity check ("did you send to the
+ * right address"), never for generating a fresh order address. */
+export async function listAddresses() {
+  const out = await runCli(["addresses"], { timeout: 30_000 });
+  const { json, raw } = parseMaybeJson(out);
+  return json ?? raw;
+}
+
 export async function heightInfo() {
-  const out = await runCli(["height"], { timeout: 30_000 });
+  const out = await runCli(["height"], { timeout: 3 * 60_000, waitsync: true });
   return parseMaybeJson(out);
 }
 
 /** Filters messages/value transfers received at a specific address -- this
  * is how we detect a buy order's payment landing, since every order gets
- * its own one-time address (see docs/ARCHITECTURE.md). */
+ * its own one-time address (see docs/ARCHITECTURE.md). Needs waitsync: true,
+ * otherwise a payment that just confirmed on-chain won't show up here yet. */
 export async function messagesFor(address) {
-  const out = await runCli(["messages", address], { timeout: 60_000 });
+  const out = await runCli(["messages", address], { timeout: 3 * 60_000, waitsync: true });
   const { json, raw } = parseMaybeJson(out);
   if (Array.isArray(json)) return json;
   if (Array.isArray(json?.messages)) return json.messages;
@@ -121,7 +137,7 @@ export async function send(address, zatoshis, memo = "") {
   if (zatoshis > cap) {
     throw new Error(`refusing to send ${zatoshis} zatoshis: exceeds this service's safety cap of ${cap}`);
   }
-  const out = await runCli(["quicksend", address, String(zatoshis), memo], { timeout: 120_000 });
+  const out = await runCli(["quicksend", address, String(zatoshis), memo], { timeout: 3 * 60_000, waitsync: true });
   const { json, raw } = parseMaybeJson(out);
   const txid = json?.txid ?? (Array.isArray(json) ? json[0]?.txid : null) ?? extractTxidFromText(raw);
   if (!txid) throw new Error(`quicksend succeeded but couldn't find a txid in output, needs a look: ${raw}`);

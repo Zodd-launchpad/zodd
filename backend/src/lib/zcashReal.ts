@@ -119,10 +119,14 @@ export async function sendPayout(toAddress: string, zecAmount: number): Promise<
  * seen by zcash-wallet-service. Used by the /api/admin/zcash-status route
  * so we can confirm the wallet actually has funds without ever touching
  * the seed or moving anything. */
-export async function getWalletStatus(): Promise<{ zatoshis: number; zec: number; height: unknown }> {
-  const [balance, height] = await Promise.all([call("/wallet/balance"), call("/wallet/height")]);
+export async function getWalletStatus(): Promise<{ zatoshis: number; zec: number; height: unknown; addresses: unknown }> {
+  const [balance, height, addressesRes] = await Promise.all([
+    call("/wallet/balance"),
+    call("/wallet/height"),
+    call("/wallet/addresses").catch((err) => ({ error: String(err.message ?? err) })),
+  ]);
   const zatoshis = Number(balance.zatoshis ?? 0);
-  return { zatoshis, zec: zatoshis / ZATOSHIS_PER_ZEC, height };
+  return { zatoshis, zec: zatoshis / ZATOSHIS_PER_ZEC, height, addresses: (addressesRes as any).addresses ?? addressesRes };
 }
 
 /**

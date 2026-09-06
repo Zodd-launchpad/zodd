@@ -56,7 +56,42 @@ Same code as the demo backend, different env vars:
 
 `zcash-wallet-service/src/cli.js` parses zingo-cli's command output
 defensively (tries JSON, falls back to raw text) because the exact output
-shape for `new_address`, `messages`, and `quicksend` wasn't verified against
-a live instance while building this — this sandbox can't compile Rust or
-reach a lightwalletd server. Expect one debugging pass once step 1 above
-runs for real, using whatever `/health` and the service's logs show.
+shape for `new_address` and `quicksend` still hasn't been verified against
+a live instance producing a real, spendable transaction — this sandbox
+can't compile Rust or reach a lightwalletd server, so this is confirmed
+only up to what `/api/admin/zcash-status` and `messages`/`height` have
+shown against the real funded wallet so far.
+
+**Found and fixed already:** zingo-cli does NOT sync before running a
+one-shot command by default — you must pass `--waitsync`, or `balance`/
+`height`/`messages` return stale data instead of the wallet's real
+current state. This is why a confirmed 0.01 ZEC deposit first showed up
+as a 0 balance. Every CLI call that needs current chain state now passes
+`waitsync: true` (see `runCli`'s `waitsync` option) — `spendable_balance`,
+`height`, `messages`, `quicksend`, and the initial restore/load in
+`ensureWalletReady()`. `new_address` doesn't need it (it's not
+sync-dependent).
+
+**Known remaining risk:** each API call spawns its own short-lived
+`zingo-cli` process against the same wallet file. Two calls landing at
+the same moment (e.g. two pending buy orders polled in the same tick)
+could both try to touch `/data/zingo-wallet.dat` concurrently — this
+hasn't come up yet at this scale, but if a call starts failing with a
+lock/IO-looking error, that's the likely cause. Worth queuing CLI calls
+through one at a time if real trading volume ever picks up.
+
+## Creator trading fee (3%: 1% creator / 2% platform)
+
+Every buy and sell takes a 3% fee (see `backend/src/lib/fees.ts`). 1% of
+that accrues per-token (`Token.creatorFeeAccruedZec`) and is paid out
+automatically to the creator's `creatorPayoutAddress` every 24h by
+`backend/src/lib/feeDistributor.ts` (checks every 15min for tokens due).
+The other 2% just stays in the platform wallet — no separate transfer
+needed, it's already there.
+
+This uses the same `sendPayout` as sells, so in real mode it needs
+`zcash-wallet-service` to be healthy. A payout is capped per-cycle at the
+same `ZCASH_MAX_ZEC_PER_ORDER` used for orders; if accrued fees exceed it,
+it pays what fits and leaves the rest for the next cycle instead of
+failing outright. A token created without a `creatorPayoutAddress` still
+accrues creator fees, they just never get claimed.
