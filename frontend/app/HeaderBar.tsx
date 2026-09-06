@@ -8,9 +8,9 @@ import WalletDetailModal from "./WalletDetailModal";
 import ZMark from "./ZMark";
 
 const NAV = [
-  { href: "/nft", label: "NFT" },
-  { href: "/bridge", label: "Bridge" },
   { href: "/launchpad", label: "Launchpad" },
+  { href: "/bridge", label: "Bridge" },
+  { href: "/nft", label: "NFT" },
 ];
 
 export default function HeaderBar() {

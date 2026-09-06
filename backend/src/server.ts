@@ -1,6 +1,5 @@
 import Fastify from "fastify";
 import { z } from "zod";
-import { randomUUID } from "node:crypto";
 import * as store from "./lib/store.js";
 import { generateTwelveWords } from "./lib/wordlist.js";
 import { quoteBuy, quoteSell, currentPrice, marketCapZec, isGraduated } from "./lib/bondingCurve.js";
@@ -14,28 +13,16 @@ app.register(import("@fastify/cors"), { origin: true });
 
 app.post("/api/wallets", async (_req, reply) => {
   const words = generateTwelveWords();
-  const wallet: store.InternalWallet = {
-    id: randomUUID(),
-    walletTag: store.newWalletTag(),
-    words,
-    createdAt: new Date().toISOString(),
-  };
-  store.wallets.set(wallet.id, wallet);
+  const wallet = await store.createWallet(words);
   return reply.send({ walletId: wallet.id, walletTag: wallet.walletTag, words });
 });
 
 app.get("/api/wallets/:id/portfolio", async (req, reply) => {
   const { id } = req.params as { id: string };
-  const wallet = store.wallets.get(id);
+  const wallet = await store.getWallet(id);
   if (!wallet) return reply.code(404).send({ error: "wallet not found" });
 
-  const holdings = [...store.tokens.values()].map((t) => ({
-    symbol: t.symbol,
-    name: t.name,
-    amount: store.getBalance(id, t.symbol),
-    priceZec: currentPrice(t.curve),
-  })).filter((h) => h.amount > 0);
-
+  const holdings = await store.getPortfolio(id);
   return reply.send({ walletTag: wallet.walletTag, holdings });
 });
 
@@ -50,37 +37,37 @@ const createTokenSchema = z.object({
 
 app.post("/api/tokens", async (req, reply) => {
   const body = createTokenSchema.parse(req.body);
-  if (store.tokens.has(body.symbol.toUpperCase())) {
+  const symbol = body.symbol.toUpperCase();
+
+  if (await store.getToken(symbol)) {
     return reply.code(409).send({ error: "symbol already exists" });
   }
-  if (!store.wallets.has(body.creatorWalletId)) {
+  if (!(await store.getWallet(body.creatorWalletId))) {
     return reply.code(400).send({ error: "invalid creatorWalletId" });
   }
-  const token: store.Token = {
-    id: randomUUID(),
-    symbol: body.symbol.toUpperCase(),
+
+  const token = await store.createToken({
+    symbol,
     name: body.name,
     totalSupply: body.totalSupply,
     creatorWalletId: body.creatorWalletId,
-    curve: store.freshCurveState(),
-    createdAt: new Date().toISOString(),
-  };
-  store.tokens.set(token.symbol, token);
+  });
   return reply.send(serializeToken(token));
 });
 
 app.get("/api/tokens", async (_req, reply) => {
-  return reply.send([...store.tokens.values()].map(serializeToken));
+  const tokens = await store.listTokens();
+  return reply.send(tokens.map(serializeToken));
 });
 
 app.get("/api/tokens/:symbol", async (req, reply) => {
   const { symbol } = req.params as { symbol: string };
-  const token = store.tokens.get(symbol.toUpperCase());
+  const token = await store.getToken(symbol.toUpperCase());
   if (!token) return reply.code(404).send({ error: "token not found" });
   return reply.send(serializeToken(token));
 });
 
-function serializeToken(t: store.Token) {
+function serializeToken(t: store.TokenWithCurve) {
   return {
     symbol: t.symbol,
     name: t.name,
@@ -104,60 +91,54 @@ const buySchema = z.object({
 
 app.post("/api/orders/buy", async (req, reply) => {
   const body = buySchema.parse(req.body);
-  const wallet = store.wallets.get(body.walletId);
-  const token = store.tokens.get(body.symbol.toUpperCase());
+  const wallet = await store.getWallet(body.walletId);
+  const token = await store.getToken(body.symbol.toUpperCase());
   if (!wallet) return reply.code(400).send({ error: "invalid wallet" });
   if (!token) return reply.code(404).send({ error: "token not found" });
 
-  const order: store.Order = {
-    id: randomUUID(),
+  const order = await store.createBuyOrder({
     internalWalletId: wallet.id,
     tokenId: token.id,
-    side: "BUY",
-    status: "PENDING",
     zecAmount: body.zecAmount,
-    createdAt: new Date().toISOString(),
-  };
+  });
+
   // The address IS the order: any payment that lands there executes at
   // the price of the block it confirms in (see zcashMock.ts).
-  order.zecAddress = generateOrderAddress(order.id, body.zecAmount);
-  store.orders.set(order.id, order);
+  const zecAddress = generateOrderAddress(order.id, body.zecAmount);
+  await store.setOrderAddress(order.id, zecAddress);
 
   return reply.send({
     orderId: order.id,
-    zecAddress: order.zecAddress,
-    zecAmount: order.zecAmount,
-    status: order.status,
+    zecAddress,
+    zecAmount: body.zecAmount,
+    status: "PENDING",
   });
 });
 
 app.get("/api/orders/:id", async (req, reply) => {
   const { id } = req.params as { id: string };
-  const order = store.orders.get(id);
+  const order = await store.getOrder(id);
   if (!order) return reply.code(404).send({ error: "order not found" });
   return reply.send(order);
 });
 
 // When the zcash-service (here, the mock) detects the payment, the order
 // executes against the bonding curve at that moment's price.
-onPaymentDetected((orderId, confirmedZecAmount, txid) => {
-  const order = store.orders.get(orderId);
-  if (!order || order.status !== "PENDING") return;
-  const token = [...store.tokens.values()].find((t) => t.id === order.tokenId);
-  if (!token) return;
-
+onPaymentDetected(async (orderId, confirmedZecAmount, txid) => {
   try {
-    const { tokensOut, newState } = quoteBuy(token.curve, confirmedZecAmount);
-    token.curve = newState;
-    store.creditBalance(order.internalWalletId, token.symbol, tokensOut);
+    const order = await store.getOrder(orderId);
+    if (!order || order.status !== "PENDING") return;
+    const token = await store.getTokenById(order.tokenId);
+    if (!token) return;
 
-    order.status = "FILLED";
-    order.tokenAmount = tokensOut;
-    order.executionTxid = txid;
-    order.filledAt = new Date().toISOString();
+    const { tokensOut, newState } = quoteBuy(token.curve, confirmedZecAmount);
+    await store.updateTokenCurve(token.id, newState);
+    await store.creditBalance(order.internalWalletId, token.id, tokensOut);
+    await store.fillBuyOrder(order.id, tokensOut, txid);
+
     app.log.info(`order ${orderId} filled: ${confirmedZecAmount} ZEC -> ${tokensOut.toFixed(0)} ${token.symbol}`);
   } catch (err) {
-    order.status = "FAILED";
+    await store.failOrder(orderId).catch(() => {});
     app.log.error(err, `order ${orderId} failed to execute against the curve`);
   }
 });
@@ -173,40 +154,34 @@ const sellSchema = z.object({
 
 app.post("/api/orders/sell", async (req, reply) => {
   const body = sellSchema.parse(req.body);
-  const wallet = store.wallets.get(body.walletId);
-  const token = store.tokens.get(body.symbol.toUpperCase());
+  const wallet = await store.getWallet(body.walletId);
+  const token = await store.getToken(body.symbol.toUpperCase());
   if (!wallet) return reply.code(400).send({ error: "invalid wallet" });
   if (!token) return reply.code(404).send({ error: "token not found" });
 
-  const balance = store.getBalance(wallet.id, token.symbol);
+  const balance = await store.getBalance(wallet.id, token.id);
   if (balance < body.tokenAmount) {
     return reply.code(400).send({ error: "insufficient balance" });
   }
 
   const { zecOut, newState } = quoteSell(token.curve, body.tokenAmount);
-  token.curve = newState;
-  store.debitBalance(wallet.id, token.symbol, body.tokenAmount);
+  await store.updateTokenCurve(token.id, newState);
+  await store.debitBalance(wallet.id, token.id, body.tokenAmount);
   const { txid } = sendPayout(body.refundAddress, zecOut);
 
-  const order: store.Order = {
-    id: randomUUID(),
+  const order = await store.createSellOrder({
     internalWalletId: wallet.id,
     tokenId: token.id,
-    side: "SELL",
-    status: "FILLED",
+    tokenAmount: body.tokenAmount,
     refundAddress: body.refundAddress,
     zecAmount: zecOut,
-    tokenAmount: body.tokenAmount,
     executionTxid: txid,
-    createdAt: new Date().toISOString(),
-    filledAt: new Date().toISOString(),
-  };
-  store.orders.set(order.id, order);
+  });
 
   return reply.send(order);
 });
 
 const port = Number(process.env.PORT ?? 8787);
 app.listen({ port, host: "0.0.0.0" }).then(() => {
-  app.log.info(`zcash-launchpad backend (demo, in-memory) listening on :${port}`);
+  app.log.info(`zcash-launchpad backend (Postgres-backed) listening on :${port}`);
 });

@@ -29,20 +29,20 @@ export default function HomePage() {
       </div>
 
       <div className="explore-grid">
-        <Link href="/nft" className="explore-card">
-          <div className="tag">Marketplace</div>
-          <h3>NFT</h3>
-          <p>Buy, sell, and browse ZODD-themed NFTs.</p>
+        <Link href="/launchpad" className="explore-card">
+          <div className="tag">Meme markets</div>
+          <h3>Launchpad</h3>
+          <p>Launch and trade shielded meme tokens on Zcash.</p>
         </Link>
         <Link href="/bridge" className="explore-card">
           <div className="tag">Cross-chain</div>
           <h3>Bridge</h3>
           <p>Move assets in and out privately.</p>
         </Link>
-        <Link href="/launchpad" className="explore-card">
-          <div className="tag">Meme markets</div>
-          <h3>Launchpad</h3>
-          <p>Launch and trade shielded meme tokens on Zcash.</p>
+        <Link href="/nft" className="explore-card">
+          <div className="tag">Marketplace</div>
+          <h3>NFT</h3>
+          <p>Buy, sell, and browse ZODD-themed NFTs.</p>
         </Link>
       </div>
     </>

@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "test": "tsx src/lib/bondingCurve.test.ts",
-    "prisma:generate": "prisma generate"
+    "prisma:generate": "prisma generate",
+    "postinstall": "prisma generate",
+    "start": "prisma db push --accept-data-loss && tsx src/server.ts"
   },
   "dependencies": {
     "@fastify/cors": "^9.0.1",
