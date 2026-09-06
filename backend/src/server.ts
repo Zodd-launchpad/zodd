@@ -4,6 +4,7 @@ import * as store from "./lib/store.js";
 import { generateTwelveWords } from "./lib/wordlist.js";
 import { quoteBuy, quoteSell, currentPrice, marketCapZec, isGraduated } from "./lib/bondingCurve.js";
 import { generateOrderAddress, onPaymentDetected, sendPayout } from "./lib/zcashMock.js";
+import { simulatedInscriptionFor } from "./lib/simulatedChain.js";
 
 const app = Fastify({ logger: true });
 
@@ -78,6 +79,7 @@ function serializeToken(t: store.TokenWithCurve) {
     tokensSold: t.curve.tokensSold,
     graduated: isGraduated(t.curve),
     createdAt: t.createdAt,
+    onChain: simulatedInscriptionFor(t.id),
   };
 }
 

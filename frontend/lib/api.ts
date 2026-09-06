@@ -20,6 +20,13 @@ export interface TokenSummary {
   tokensSold: number;
   graduated: boolean;
   createdAt: string;
+  onChain: {
+    simulated: true;
+    issuedTxid: string;
+    issuedBlock: number;
+    finalizedTxid: string;
+    finalizedBlock: number;
+  };
 }
 
 export const api = {

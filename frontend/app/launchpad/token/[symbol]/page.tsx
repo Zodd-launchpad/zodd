@@ -12,6 +12,10 @@ function fmt(n: number, digits = 6) {
   return n.toLocaleString("en-US", { maximumFractionDigits: digits });
 }
 
+function shortHash(h: string) {
+  return `${h.slice(0, 8)}…${h.slice(-6)}`;
+}
+
 export default function TokenPage() {
   const { symbol } = useParams<{ symbol: string }>();
   const { wallet } = useWallet();
@@ -54,6 +58,24 @@ export default function TokenPage() {
           <p className="muted">Real reserve: {fmt(token.realZecReserves)} ZEC</p>
           <p className="muted">Tokens sold by the curve: {fmt(token.tokensSold, 0)}</p>
           <p className={token.graduated ? "pill up" : "muted"}>{token.graduated ? "GRADUATED" : "bonding curve active"}</p>
+        </div>
+
+        <div className="card" style={{ marginTop: 16 }}>
+          <label className="muted" style={{ fontSize: 11, letterSpacing: 0.5 }}>
+            ON CHAIN <span style={{ opacity: 0.6 }}>(simulated)</span>
+          </label>
+          <p className="muted" style={{ fontSize: 13, marginTop: 6 }}>
+            This demo doesn't broadcast to Zcash mainnet yet — these entries are placeholders for what a real
+            shielded-memo inscription will look like.
+          </p>
+          <div style={{ marginTop: 10, fontSize: 13 }}>
+            <div className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>issued</div>
+            <div className="mono-break">{shortHash(token.onChain.issuedTxid)} · block {token.onChain.issuedBlock}</div>
+          </div>
+          <div style={{ marginTop: 10, fontSize: 13 }}>
+            <div className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>finalized</div>
+            <div className="mono-break">{shortHash(token.onChain.finalizedTxid)} · block {token.onChain.finalizedBlock}</div>
+          </div>
         </div>
       </div>
 
