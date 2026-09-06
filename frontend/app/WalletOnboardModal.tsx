@@ -97,6 +97,13 @@ export default function WalletOnboardModal({ onClose }: { onClose: () => void })
             <button className="btn btn-gold" style={{ width: "100%" }} disabled={!checkboxOk} onClick={() => setStep("confirm")}>
               {t("onboard.wroteThemDown")}
             </button>
+            <button
+              className="btn"
+              style={{ width: "100%", marginTop: 8, background: "transparent" }}
+              onClick={() => setStep("intro")}
+            >
+              {t("onboard.back")}
+            </button>
           </>
         )}
 
@@ -121,6 +128,16 @@ export default function WalletOnboardModal({ onClose }: { onClose: () => void })
             {error && <p style={{ color: "var(--red)", fontSize: 13 }}>{error}</p>}
             <button className="btn btn-gold" style={{ width: "100%" }} onClick={confirmWords}>
               {t("onboard.confirmButton")}
+            </button>
+            <button
+              className="btn"
+              style={{ width: "100%", marginTop: 8, background: "transparent" }}
+              onClick={() => {
+                setError(null);
+                setStep("words");
+              }}
+            >
+              {t("onboard.back")}
             </button>
           </>
         )}
