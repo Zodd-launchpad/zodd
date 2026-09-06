@@ -5,7 +5,6 @@ import { usePathname } from "next/navigation";
 import { useWallet } from "@/lib/wallet";
 import WalletOnboardModal from "./WalletOnboardModal";
 import WalletDetailModal from "./WalletDetailModal";
-import ZMark from "./ZMark";
 
 const NAV = [
   { href: "/launchpad", label: "Launchpad" },
@@ -22,7 +21,7 @@ export default function HeaderBar() {
   return (
     <div className="header">
       <Link href="/" className="logo">
-        <ZMark />
+        <img src="/zodd-logo.png" alt="ZODD" width={30} height={30} style={{ borderRadius: 6, display: "block" }} />
         ZODD<span className="accent">.FUN</span>
       </Link>
       <div className="nav">

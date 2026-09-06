@@ -48,10 +48,10 @@ RUN npm install --omit=dev
 COPY src ./src
 
 # Wallet data (synced chain state + the encrypted-at-rest wallet file) lives
-# on a mounted volume so it survives redeploys instead of resyncing from
-# scratch every time.
+# on a Railway Volume mounted at /data (attached via the Railway dashboard/API,
+# not a Dockerfile VOLUME directive -- Railway's build rejects those) so it
+# survives redeploys instead of resyncing from scratch every time.
 ENV WALLET_DATA_DIR=/data
-VOLUME ["/data"]
 
 EXPOSE 8080
 CMD ["node", "src/server.js"]
