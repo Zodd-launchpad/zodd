@@ -4,13 +4,15 @@ import * as store from "./lib/store.js";
 import { generateTwelveWords } from "./lib/wordlist.js";
 import { quoteBuy, quoteSell, currentPrice, marketCapZec, isGraduated } from "./lib/bondingCurve.js";
 import { simulatedInscriptionFor } from "./lib/simulatedChain.js";
+import { splitFee, TRADE_FEE_BPS, CREATOR_FEE_BPS } from "./lib/fees.js";
+import { startFeeDistributor } from "./lib/feeDistributor.js";
 
 // ZCASH_MODE=real switches every payment/inscription in this service to
 // actually move ZEC through zcash-wallet-service, instead of the mock.
 // This must be the ONLY place that decides which one is in effect.
 const ZCASH_MODE = process.env.ZCASH_MODE === "real" ? "real" : "mock";
 const zcashService = ZCASH_MODE === "real" ? await import("./lib/zcashReal.js") : await import("./lib/zcashMock.js");
-const { generateOrderAddress, onPaymentDetected, sendPayout } = zcashService;
+const { generateOrderAddress, onPaymentDetected, sendPayout, MAX_PAYOUT_ZEC } = zcashService;
 
 const app = Fastify({ logger: true });
 app.log.info(`ZCASH_MODE=${ZCASH_MODE} -- ${ZCASH_MODE === "real" ? "REAL ZEC IS LIVE ON THIS DEPLOYMENT" : "using the simulated zcash service, no real funds move"}`);
@@ -41,7 +43,31 @@ const createTokenSchema = z.object({
   name: z.string().min(1).max(64),
   totalSupply: z.number().positive().default(1_000_000_000),
   creatorWalletId: z.string(),
+  // Where this token's 1% creator trading-fee share gets paid out, every
+  // 24h. Optional -- without it, the fee still accrues but nobody claims it.
+  creatorPayoutAddress: z.string().min(10).optional(),
+  // Token profile, all optional. The logo is resized/encoded to a small
+  // square JPEG data URL client-side before it ever reaches here -- this
+  // just caps it as a last line of defense against an oversized payload.
+  logoDataUrl: z
+    .string()
+    .max(400_000)
+    .regex(/^data:image\/(png|jpeg|jpg|webp|gif);base64,/, "logo must be a png/jpeg/webp/gif data URL")
+    .optional(),
+  description: z.string().max(500).optional(),
+  twitterUrl: z.string().max(200).optional(),
 });
+
+/** Accepts "@handle", "handle", or a full URL and normalizes to a full
+ * https://x.com/... link so the frontend can just render it as a link. */
+function normalizeTwitter(input: string | undefined): string | undefined {
+  if (!input) return undefined;
+  const trimmed = input.trim();
+  if (!trimmed) return undefined;
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  const handle = trimmed.replace(/^@/, "");
+  return `https://x.com/${handle}`;
+}
 
 app.post("/api/tokens", async (req, reply) => {
   const body = createTokenSchema.parse(req.body);
@@ -77,6 +103,10 @@ app.post("/api/tokens", async (req, reply) => {
     totalSupply: body.totalSupply,
     creatorWalletId: body.creatorWalletId,
     genesisMemoTxid,
+    creatorPayoutAddress: body.creatorPayoutAddress,
+    logoDataUrl: body.logoDataUrl,
+    description: body.description,
+    twitterUrl: normalizeTwitter(body.twitterUrl),
   });
   return reply.send(serializeToken(token));
 });
@@ -119,6 +149,17 @@ function serializeToken(t: store.TokenWithCurve) {
     graduated: isGraduated(t.curve),
     graduationThresholdZec: store.DEFAULT_CURVE_CONFIG.graduationZecThreshold,
     createdAt: t.createdAt,
+    logoDataUrl: t.logoDataUrl,
+    description: t.description,
+    twitterUrl: t.twitterUrl,
+    fee: {
+      tradeFeeBps: TRADE_FEE_BPS,
+      creatorFeeBps: CREATOR_FEE_BPS,
+      creatorPayoutAddress: t.creatorPayoutAddress,
+      creatorFeeAccruedZec: t.creatorFeeAccruedZec,
+      creatorFeeTotalPaidZec: t.creatorFeeTotalPaidZec,
+      lastFeePayoutAt: t.lastFeePayoutAt,
+    },
     onChain:
       t.genesisMemoTxid != null
         ? {
@@ -187,13 +228,18 @@ onPaymentDetected(async (orderId, confirmedZecAmount, txid) => {
     const token = await store.getTokenById(order.tokenId);
     if (!token) return;
 
-    const { tokensOut, newState } = quoteBuy(token.curve, confirmedZecAmount);
+    // The 3% trading fee comes off the top; only the net amount actually
+    // moves the curve (the buyer's tokensOut is priced off the net, same
+    // as any DEX-style fee-on-top model).
+    const { net, creatorFee, platformFee } = splitFee(confirmedZecAmount);
+    const { tokensOut, newState } = quoteBuy(token.curve, net);
     await store.updateTokenCurve(token.id, newState);
     await store.recordPricePoint(token.id, newState, token.totalSupply);
     await store.creditBalance(order.internalWalletId, token.id, tokensOut);
+    await store.accrueFees(token.id, creatorFee, platformFee);
     await store.fillBuyOrder(order.id, tokensOut, txid);
 
-    app.log.info(`order ${orderId} filled: ${confirmedZecAmount} ZEC -> ${tokensOut.toFixed(0)} ${token.symbol}`);
+    app.log.info(`order ${orderId} filled: ${confirmedZecAmount} ZEC -> ${tokensOut.toFixed(0)} ${token.symbol} (fee ${(creatorFee + platformFee).toFixed(8)} ZEC)`);
   } catch (err) {
     await store.failOrder(orderId).catch(() => {});
     app.log.error(err, `order ${orderId} failed to execute against the curve`);
@@ -222,10 +268,14 @@ app.post("/api/orders/sell", async (req, reply) => {
   }
 
   const { zecOut, newState } = quoteSell(token.curve, body.tokenAmount);
+  // Same 3% fee, taken off the seller's proceeds this time: they receive
+  // the net amount, the curve/reserve accounting still reflects the full
+  // gross zecOut (kept internally consistent with how the buy side works).
+  const { net: netPayout, creatorFee, platformFee } = splitFee(zecOut);
 
   let txid: string;
   try {
-    ({ txid } = await sendPayout(body.refundAddress, zecOut));
+    ({ txid } = await sendPayout(body.refundAddress, netPayout));
   } catch (err) {
     app.log.error(err, `sell payout failed for wallet ${wallet.id} / token ${token.symbol}`);
     return reply.code(502).send({ error: String((err as Error).message ?? err) });
@@ -234,6 +284,7 @@ app.post("/api/orders/sell", async (req, reply) => {
   await store.updateTokenCurve(token.id, newState);
   await store.recordPricePoint(token.id, newState, token.totalSupply);
   await store.debitBalance(wallet.id, token.id, body.tokenAmount);
+  await store.accrueFees(token.id, creatorFee, platformFee);
 
   const order = await store.createSellOrder({
     internalWalletId: wallet.id,
@@ -246,6 +297,10 @@ app.post("/api/orders/sell", async (req, reply) => {
 
   return reply.send(order);
 });
+
+// Every 15min, pays out any token's accrued creator fee that hasn't been
+// distributed in the last 24h. Same code path in mock and real mode.
+startFeeDistributor(sendPayout, MAX_PAYOUT_ZEC, app.log);
 
 const port = Number(process.env.PORT ?? 8787);
 app.listen({ port, host: "0.0.0.0" }).then(() => {

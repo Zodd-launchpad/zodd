@@ -32,17 +32,49 @@ model Token {
   genesisMemoTxid   String?  // txid shielded donde se inscribió name/symbol/supply
   createdAt         DateTime @default(now())
 
+  // Perfil del token (todo opcional, lo carga el creador al crearlo)
+  logoDataUrl       String?  @db.Text // imagen como data URL (base64), ya redimensionada en el navegador
+  description       String?  @db.Text
+  twitterUrl        String?
+
   // Estado de la bonding curve (ver lib/bondingCurve.ts para la matemática)
   curveReserveZec   Decimal  @db.Decimal(20, 8) // ZEC efectivo acumulado en la curva
   curveSoldTokens   BigInt   @default(0)        // tokens ya vendidos por la curva
   graduated         Boolean  @default(false)
   graduatedAt       DateTime?
 
+  // Fee de trading (ver lib/fees.ts): 3% por operación, de los cuales 1
+  // punto porcentual se acumula acá y se reparte al creador cada 24hs;
+  // el resto queda en la wallet de la plataforma (solo se lleva la cuenta
+  // acá para mostrar el total, no requiere un movimiento aparte).
+  creatorPayoutAddress   String?   // dirección Zcash del creador (puesta al crear el token)
+  creatorFeeAccruedZec   Decimal   @default(0) @db.Decimal(20, 8) // sin repartir todavía
+  creatorFeeTotalPaidZec Decimal   @default(0) @db.Decimal(20, 8) // repartido históricamente
+  platformFeeTotalZec    Decimal   @default(0) @db.Decimal(20, 8) // fee de plataforma acumulado (solo informativo)
+  lastFeePayoutAt        DateTime? // último reparto al creador
+
   balances    Balance[]
   orders      Order[]
   pricePoints PricePoint[]
+  feePayouts  CreatorFeePayout[]
 
   @@index([graduated])
+}
+
+// Historial de repartos de fee al creador (para mostrar transparencia:
+// "se pagaron X ZEC hace Y horas"). Se corre cada ~15min y reparte a
+// cualquier token con fee acumulado que no cobró en las últimas 24hs.
+model CreatorFeePayout {
+  id        String   @id @default(cuid())
+  tokenId   String
+  amountZec Decimal  @db.Decimal(20, 8)
+  toAddress String
+  txid      String?
+  createdAt DateTime @default(now())
+
+  token Token @relation(fields: [tokenId], references: [id])
+
+  @@index([tokenId, createdAt])
 }
 
 // One row per trade (and one at token creation), so the chart has real

@@ -89,6 +89,14 @@ export const translations = {
     en: "Where your 1% creator fee share gets sent every 24h. You can leave this blank, but then nobody can claim it.",
     zh: "你的 1% 创建者分成每 24 小时会发送到这个地址。可以留空，但这样就没人能领取这部分费用。",
   },
+  "create.logoLabel": { en: "Token logo (optional)", zh: "代币图标（可选）" },
+  "create.logoHelp": { en: "Any image — it'll be cropped to a square automatically.", zh: "任意图片——会自动裁剪为正方形。" },
+  "create.logoChoose": { en: "Choose image", zh: "选择图片" },
+  "create.logoError": { en: "couldn't read that image, try a different file", zh: "无法读取该图片，请换一张试试" },
+  "create.descriptionLabel": { en: "Description (optional)", zh: "描述（可选）" },
+  "create.descriptionPlaceholder": { en: "What's this token about?", zh: "这个代币是关于什么的？" },
+  "create.twitterLabel": { en: "Twitter / X (optional)", zh: "Twitter / X（可选）" },
+  "create.twitterPlaceholder": { en: "@handle or full link", zh: "@用户名 或完整链接" },
 
   // ---------- Portfolio page ----------
   "portfolio.connectFirst": { en: "Connect your wallet above to see your portfolio.", zh: "请先在上方连接钱包以查看你的持仓。" },
@@ -170,6 +178,7 @@ export const translations = {
   "token.onChain.issued": { en: "issued", zh: "发行" },
   "token.onChain.finalized": { en: "finalized", zh: "完成" },
   "token.onChain.creationTxid": { en: "creation txid", zh: "创建交易 ID" },
+  "token.viewOnX": { en: "View on X", zh: "在 X 上查看" },
 
   // ---------- Creator fee card ----------
   "token.fee.heading": { en: "CREATOR FEE", zh: "创建者分成" },

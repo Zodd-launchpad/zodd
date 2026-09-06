@@ -65,8 +65,17 @@ export default function MarketPage() {
             {tokens.map((t2) => (
               <tr key={t2.symbol} onClick={() => (location.href = `/launchpad/token/${t2.symbol}`)}>
                 <td>
-                  <strong>{t2.symbol}</strong>
-                  <div className="muted">{t2.name}</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    {t2.logoDataUrl ? (
+                      <img src={t2.logoDataUrl} alt="" width={28} height={28} style={{ borderRadius: 6, objectFit: "cover", flexShrink: 0 }} />
+                    ) : (
+                      <div style={{ width: 28, height: 28, borderRadius: 6, background: "var(--border)", flexShrink: 0 }} />
+                    )}
+                    <div>
+                      <strong>{t2.symbol}</strong>
+                      <div className="muted">{t2.name}</div>
+                    </div>
+                  </div>
                 </td>
                 <td className="mono">{fmt(t2.priceZec, 12)}</td>
                 <td className="mono">{fmt(t2.marketCapZec)} ZEC</td>

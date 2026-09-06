@@ -21,6 +21,17 @@ export interface TokenSummary {
   graduated: boolean;
   graduationThresholdZec: number;
   createdAt: string;
+  logoDataUrl: string | null;
+  description: string | null;
+  twitterUrl: string | null;
+  fee: {
+    tradeFeeBps: number;
+    creatorFeeBps: number;
+    creatorPayoutAddress: string | null;
+    creatorFeeAccruedZec: number;
+    creatorFeeTotalPaidZec: number;
+    lastFeePayoutAt: string | null;
+  };
   onChain:
     | {
         simulated: true;
@@ -56,8 +67,16 @@ export const api = {
   getToken: (symbol: string): Promise<TokenSummary> => req(`/api/tokens/${symbol}`),
   getHistory: (symbol: string): Promise<PricePoint[]> => req(`/api/tokens/${symbol}/history`),
   getTrades: (symbol: string): Promise<Trade[]> => req(`/api/tokens/${symbol}/trades`),
-  createToken: (data: { symbol: string; name: string; totalSupply?: number; creatorWalletId: string }) =>
-    req("/api/tokens", { method: "POST", body: JSON.stringify(data) }),
+  createToken: (data: {
+    symbol: string;
+    name: string;
+    totalSupply?: number;
+    creatorWalletId: string;
+    creatorPayoutAddress?: string;
+    logoDataUrl?: string;
+    description?: string;
+    twitterUrl?: string;
+  }) => req("/api/tokens", { method: "POST", body: JSON.stringify(data) }),
   buy: (data: { walletId: string; symbol: string; zecAmount: number }) =>
     req("/api/orders/buy", { method: "POST", body: JSON.stringify(data) }),
   sell: (data: { walletId: string; symbol: string; tokenAmount: number; refundAddress: string }) =>

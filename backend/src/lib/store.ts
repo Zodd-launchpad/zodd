@@ -51,6 +51,14 @@ export interface TokenWithCurve {
   curve: CurveState;
   createdAt: string;
   genesisMemoTxid: string | null;
+  creatorPayoutAddress: string | null;
+  creatorFeeAccruedZec: number;
+  creatorFeeTotalPaidZec: number;
+  platformFeeTotalZec: number;
+  lastFeePayoutAt: string | null;
+  logoDataUrl: string | null;
+  description: string | null;
+  twitterUrl: string | null;
 }
 
 function toTokenWithCurve(t: {
@@ -63,6 +71,14 @@ function toTokenWithCurve(t: {
   curveSoldTokens: bigint;
   createdAt: Date;
   genesisMemoTxid: string | null;
+  creatorPayoutAddress: string | null;
+  creatorFeeAccruedZec: unknown;
+  creatorFeeTotalPaidZec: unknown;
+  platformFeeTotalZec: unknown;
+  lastFeePayoutAt: Date | null;
+  logoDataUrl: string | null;
+  description: string | null;
+  twitterUrl: string | null;
 }): TokenWithCurve {
   return {
     id: t.id,
@@ -73,6 +89,14 @@ function toTokenWithCurve(t: {
     curve: { realZecReserves: num(t.curveReserveZec), tokensSold: num(t.curveSoldTokens) },
     createdAt: t.createdAt.toISOString(),
     genesisMemoTxid: t.genesisMemoTxid,
+    creatorPayoutAddress: t.creatorPayoutAddress,
+    creatorFeeAccruedZec: num(t.creatorFeeAccruedZec),
+    creatorFeeTotalPaidZec: num(t.creatorFeeTotalPaidZec),
+    platformFeeTotalZec: num(t.platformFeeTotalZec),
+    lastFeePayoutAt: t.lastFeePayoutAt ? t.lastFeePayoutAt.toISOString() : null,
+    logoDataUrl: t.logoDataUrl,
+    description: t.description,
+    twitterUrl: t.twitterUrl,
   };
 }
 
@@ -85,6 +109,14 @@ export async function createToken(input: {
    * when ZCASH_MODE=real; null in demo/simulated mode (the frontend falls
    * back to the deterministic simulated display in that case). */
   genesisMemoTxid?: string;
+  /** Zcash address that receives this token's 1% creator fee share,
+   * distributed automatically every 24h. Optional -- if not set, the
+   * creator's fee still accrues but is never paid out. */
+  creatorPayoutAddress?: string;
+  /** Token logo as a data URL (already resized/encoded client-side). */
+  logoDataUrl?: string;
+  description?: string;
+  twitterUrl?: string;
 }): Promise<TokenWithCurve> {
   const t = await prisma.token.create({
     data: {
@@ -95,6 +127,10 @@ export async function createToken(input: {
       curveReserveZec: 0,
       curveSoldTokens: 0n,
       genesisMemoTxid: input.genesisMemoTxid ?? null,
+      creatorPayoutAddress: input.creatorPayoutAddress ?? null,
+      logoDataUrl: input.logoDataUrl ?? null,
+      description: input.description ?? null,
+      twitterUrl: input.twitterUrl ?? null,
     },
   });
   const token = toTokenWithCurve(t);
@@ -156,6 +192,74 @@ export async function debitBalance(walletId: string, tokenId: string, amount: nu
     where: { internalWalletId_tokenId: { internalWalletId: walletId, tokenId } },
     data: { amount: { decrement: BigInt(Math.round(amount)) } },
   });
+}
+
+// ---------- Trading fees (3% per trade: 1% creator / 2% platform) ----------
+
+/** Called on every filled buy/sell: adds this trade's fee split to the
+ * token's running counters. The creator's share sits here unpaid until
+ * the fee distributor sends it out (every 24h, see feeDistributor.ts). */
+export async function accrueFees(tokenId: string, creatorFeeZec: number, platformFeeZec: number) {
+  await prisma.token.update({
+    where: { id: tokenId },
+    data: {
+      creatorFeeAccruedZec: { increment: creatorFeeZec },
+      platformFeeTotalZec: { increment: platformFeeZec },
+    },
+  });
+}
+
+/** Tokens with an unpaid creator fee balance, a payout address on file,
+ * and whose last payout (or creation, if never paid) is at least
+ * `intervalMs` in the past -- i.e. due for their next 24h distribution. */
+export async function getTokensDueForFeePayout(intervalMs: number): Promise<TokenWithCurve[]> {
+  const cutoff = new Date(Date.now() - intervalMs);
+  const rows = await prisma.token.findMany({
+    where: {
+      creatorFeeAccruedZec: { gt: 0 },
+      creatorPayoutAddress: { not: null },
+      OR: [{ lastFeePayoutAt: null, createdAt: { lte: cutoff } }, { lastFeePayoutAt: { lte: cutoff } }],
+    },
+  });
+  return rows.map(toTokenWithCurve);
+}
+
+/** Records one creator-fee payout and decrements the token's accrued
+ * balance by exactly what was paid (a payout can be a partial chunk if
+ * the amount due exceeds the per-payout safety cap). */
+export async function recordFeePayout(tokenId: string, amountZec: number, toAddress: string, txid: string | null) {
+  await prisma.$transaction([
+    prisma.creatorFeePayout.create({ data: { tokenId, amountZec, toAddress, txid } }),
+    prisma.token.update({
+      where: { id: tokenId },
+      data: {
+        creatorFeeAccruedZec: { decrement: amountZec },
+        creatorFeeTotalPaidZec: { increment: amountZec },
+        lastFeePayoutAt: new Date(),
+      },
+    }),
+  ]);
+}
+
+export interface FeePayoutView {
+  amountZec: number;
+  toAddress: string;
+  txid: string | null;
+  createdAt: string;
+}
+
+export async function getFeePayoutHistory(tokenId: string, limit = 20): Promise<FeePayoutView[]> {
+  const rows = await prisma.creatorFeePayout.findMany({
+    where: { tokenId },
+    orderBy: { createdAt: "desc" },
+    take: limit,
+  });
+  return rows.map((r) => ({
+    amountZec: num(r.amountZec),
+    toAddress: r.toAddress,
+    txid: r.txid,
+    createdAt: r.createdAt.toISOString(),
+  }));
 }
 
 // ---------- Price history (for the chart) ----------

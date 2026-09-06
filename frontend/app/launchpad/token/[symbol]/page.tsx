@@ -64,8 +64,25 @@ export default function TokenPage() {
   return (
     <div className="container" style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 24, alignItems: "start" }}>
       <div>
-        <h1 style={{ marginBottom: 0 }}>{token.symbol}</h1>
-        <p className="muted">{token.name}</p>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          {token.logoDataUrl && (
+            <img src={token.logoDataUrl} alt="" width={48} height={48} style={{ borderRadius: 10, objectFit: "cover" }} />
+          )}
+          <div>
+            <h1 style={{ marginBottom: 0 }}>{token.symbol}</h1>
+            <p className="muted" style={{ margin: 0 }}>{token.name}</p>
+          </div>
+        </div>
+        {(token.description || token.twitterUrl) && (
+          <div style={{ marginTop: 10 }}>
+            {token.description && <p className="muted" style={{ fontSize: 13 }}>{token.description}</p>}
+            {token.twitterUrl && (
+              <a href={token.twitterUrl} target="_blank" rel="noreferrer" className="btn btn-outline" style={{ fontSize: 12, display: "inline-block" }}>
+                {t("token.viewOnX")}
+              </a>
+            )}
+          </div>
+        )}
 
         <Chart history={history} trades={trades} />
         <TradesList trades={trades} />
@@ -117,6 +134,32 @@ export default function TokenPage() {
         <div className="card" style={{ marginTop: 16 }}>
           <div className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>{t("token.supply")}</div>
           <div style={{ fontWeight: 700 }}>{t("token.supplyUnit", { n: fmt(token.totalSupply, 0) })}</div>
+        </div>
+
+        <div className="card" style={{ marginTop: 16 }}>
+          <label className="muted" style={{ fontSize: 11, letterSpacing: 0.5 }}>{t("token.fee.heading")}</label>
+          <p className="muted" style={{ fontSize: 13, marginTop: 6 }}>{t("token.fee.explain")}</p>
+          <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            <div>
+              <div className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>{t("token.fee.accrued")}</div>
+              <div style={{ fontWeight: 700 }}>{fmt(token.fee.creatorFeeAccruedZec, 8)} ZEC</div>
+            </div>
+            <div>
+              <div className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>{t("token.fee.paid")}</div>
+              <div style={{ fontWeight: 700 }}>{fmt(token.fee.creatorFeeTotalPaidZec, 8)} ZEC</div>
+            </div>
+          </div>
+          {token.fee.creatorPayoutAddress ? (
+            <div style={{ marginTop: 10, fontSize: 12 }}>
+              <div className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>{t("token.fee.payoutTo")}</div>
+              <div className="mono-break">{shortHash(token.fee.creatorPayoutAddress)}</div>
+              <div className="muted" style={{ marginTop: 4 }}>
+                {token.fee.lastFeePayoutAt ? t("token.fee.lastPayout", { when: new Date(token.fee.lastFeePayoutAt).toLocaleString() }) : t("token.fee.neverPaid")}
+              </div>
+            </div>
+          ) : (
+            <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>{t("token.fee.noAddress")}</p>
+          )}
         </div>
 
         <div className="card" style={{ marginTop: 16 }}>
