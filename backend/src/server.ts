@@ -68,6 +68,20 @@ app.get("/api/tokens/:symbol", async (req, reply) => {
   return reply.send(serializeToken(token));
 });
 
+app.get("/api/tokens/:symbol/history", async (req, reply) => {
+  const { symbol } = req.params as { symbol: string };
+  const token = await store.getToken(symbol.toUpperCase());
+  if (!token) return reply.code(404).send({ error: "token not found" });
+  return reply.send(await store.getPriceHistory(token.id));
+});
+
+app.get("/api/tokens/:symbol/trades", async (req, reply) => {
+  const { symbol } = req.params as { symbol: string };
+  const token = await store.getToken(symbol.toUpperCase());
+  if (!token) return reply.code(404).send({ error: "token not found" });
+  return reply.send(await store.getRecentTrades(token.id, 100));
+});
+
 function serializeToken(t: store.TokenWithCurve) {
   return {
     symbol: t.symbol,
@@ -78,6 +92,7 @@ function serializeToken(t: store.TokenWithCurve) {
     realZecReserves: t.curve.realZecReserves,
     tokensSold: t.curve.tokensSold,
     graduated: isGraduated(t.curve),
+    graduationThresholdZec: store.DEFAULT_CURVE_CONFIG.graduationZecThreshold,
     createdAt: t.createdAt,
     onChain: simulatedInscriptionFor(t.id),
   };
@@ -135,6 +150,7 @@ onPaymentDetected(async (orderId, confirmedZecAmount, txid) => {
 
     const { tokensOut, newState } = quoteBuy(token.curve, confirmedZecAmount);
     await store.updateTokenCurve(token.id, newState);
+    await store.recordPricePoint(token.id, newState, token.totalSupply);
     await store.creditBalance(order.internalWalletId, token.id, tokensOut);
     await store.fillBuyOrder(order.id, tokensOut, txid);
 
@@ -168,6 +184,7 @@ app.post("/api/orders/sell", async (req, reply) => {
 
   const { zecOut, newState } = quoteSell(token.curve, body.tokenAmount);
   await store.updateTokenCurve(token.id, newState);
+  await store.recordPricePoint(token.id, newState, token.totalSupply);
   await store.debitBalance(wallet.id, token.id, body.tokenAmount);
   const { txid } = sendPayout(body.refundAddress, zecOut);
 

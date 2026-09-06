@@ -322,6 +322,21 @@ tr:hover td { background: #151517; cursor: pointer; }
 .coming-soon h1 { font-size: 32px; margin: 0 0 10px; }
 .coming-soon p { color: var(--text-dim); max-width: 460px; margin: 0 auto; line-height: 1.6; }
 
+/* Graduation progress bar (token page sidebar) */
+.grad-bar {
+  height: 8px;
+  border-radius: 4px;
+  background: #17171a;
+  overflow: hidden;
+  margin-top: 8px;
+}
+.grad-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #ffcc4d, #f5a623);
+  box-shadow: 0 0 10px rgba(245, 166, 35, 0.5);
+  transition: width 0.4s ease;
+}
+
 /* DEMO ribbon, top of every page */
 .demo-banner {
   position: sticky;

@@ -89,7 +89,9 @@ export async function createToken(input: {
       curveSoldTokens: 0n,
     },
   });
-  return toTokenWithCurve(t);
+  const token = toTokenWithCurve(t);
+  await recordPricePoint(token.id, token.curve, token.totalSupply);
+  return token;
 }
 
 export async function getToken(symbol: string): Promise<TokenWithCurve | null> {
@@ -146,6 +148,52 @@ export async function debitBalance(walletId: string, tokenId: string, amount: nu
     where: { internalWalletId_tokenId: { internalWalletId: walletId, tokenId } },
     data: { amount: { decrement: BigInt(Math.round(amount)) } },
   });
+}
+
+// ---------- Price history (for the chart) ----------
+
+export async function recordPricePoint(tokenId: string, curve: CurveState, totalSupply: number) {
+  const priceZec = currentPrice(curve);
+  await prisma.pricePoint.create({
+    data: { tokenId, priceZec, mcapZec: priceZec * totalSupply },
+  });
+}
+
+export interface PricePointView {
+  priceZec: number;
+  mcapZec: number;
+  createdAt: string;
+}
+
+export async function getPriceHistory(tokenId: string): Promise<PricePointView[]> {
+  const points = await prisma.pricePoint.findMany({
+    where: { tokenId },
+    orderBy: { createdAt: "asc" },
+  });
+  return points.map((p) => ({ priceZec: num(p.priceZec), mcapZec: num(p.mcapZec), createdAt: p.createdAt.toISOString() }));
+}
+
+// ---------- Recent trades (for the trade feed) ----------
+
+export interface TradeView {
+  side: OrderSide;
+  tokenAmount: number;
+  zecAmount: number;
+  createdAt: string;
+}
+
+export async function getRecentTrades(tokenId: string, limit = 50): Promise<TradeView[]> {
+  const orders = await prisma.order.findMany({
+    where: { tokenId, status: "FILLED" },
+    orderBy: { createdAt: "desc" },
+    take: limit,
+  });
+  return orders.map((o) => ({
+    side: o.side as OrderSide,
+    tokenAmount: num(o.tokenAmount),
+    zecAmount: num(o.zecAmount),
+    createdAt: (o.filledAt ?? o.createdAt).toISOString(),
+  }));
 }
 
 export async function getPortfolio(walletId: string) {
