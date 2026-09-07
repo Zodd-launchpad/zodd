@@ -696,6 +696,32 @@ app.post("/api/admin/withdraw-platform-fee", async (req, reply) => {
   return reply.send({ ok: true, amountZec, toAddress: body.data.toAddress, txid, claimableBefore: status.claimableZec, claimableAfter: after.claimableZec });
 });
 
+// Brai, 2026-09-07: after a real sell failed with "insufficient balance"
+// even though the token's own reserve looked like it should cover it --
+// "no me gusta, ahi tenes que tener un chequeo". Every token shares ONE
+// real wallet, so this sums what every token's ledger says is owed
+// (reserve + creator fee + claimable platform fee) and compares it
+// against the wallet's actual real balance, so a shortfall shows up here
+// instead of only being discovered when someone's sell fails. Read-only,
+// never moves funds or touches stored numbers.
+app.get("/api/admin/financial-audit", async (req, reply) => {
+  if (!ADMIN_TOKEN) return reply.code(503).send({ error: "ADMIN_TOKEN is not configured" });
+  if (req.headers["x-admin-token"] !== ADMIN_TOKEN) return reply.code(401).send({ error: "unauthorized" });
+  const audit = await store.getFinancialAudit();
+  let realWalletZec: number | null = null;
+  let shortfallZec: number | null = null;
+  if (ZCASH_MODE === "real") {
+    try {
+      const status = await (zcashService as typeof import("./lib/zcashReal.js")).getWalletStatus();
+      realWalletZec = status.zec;
+      shortfallZec = audit.totalOwed - status.zec;
+    } catch {
+      // leave realWalletZec/shortfallZec null rather than fail the whole audit
+    }
+  }
+  return reply.send({ ok: true, ...audit, realWalletZec, shortfallZec });
+});
+
 // Read-only: confirms the real wallet is funded/reachable without ever
 // touching the seed or moving money. 404s outside real mode.
 app.get("/api/admin/zcash-status", async (_req, reply) => {

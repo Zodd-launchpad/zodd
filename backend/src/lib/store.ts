@@ -281,6 +281,76 @@ export async function recordPlatformWithdrawal(amountZec: number, toAddress: str
   await prisma.platformWithdrawal.create({ data: { amountZec, toAddress, txid } });
 }
 
+/**
+ * Brai, 2026-09-07: a real sell failed with "insufficient balance" even
+ * though the token's own curveReserveZec looked like it should cover it
+ * ("no me gusta, ahi tenes que tener un chequeo"). Every token shares ONE
+ * real Zcash wallet -- curveReserveZec, creatorFeeAccruedZec and
+ * platformFeeTotalZec are all logical/off-chain ledger numbers that
+ * together represent everything the platform "owes" out of that one real
+ * balance (reserve owed to future sellers, fee owed to creators, fee
+ * claimable by the platform). This is a pure read-only audit: sum what's
+ * owed across every token so it can be compared against the wallet's
+ * actual real spendable balance (see the /api/admin/financial-audit route
+ * in server.ts, which adds that real-balance comparison). Never moves
+ * funds or changes any stored number -- if it finds a shortfall, that's a
+ * real thing to go investigate (e.g. via recomputeCurveFromOrders per
+ * token), not something this function fixes on its own. */
+export async function getFinancialAudit() {
+  const tokens = await prisma.token.findMany({
+    select: {
+      symbol: true,
+      name: true,
+      createdAt: true,
+      curveReserveZec: true,
+      curveSoldTokens: true,
+      graduated: true,
+      creatorFeeAccruedZec: true,
+      creatorFeeTotalPaidZec: true,
+      platformFeeTotalZec: true,
+    },
+    orderBy: { createdAt: "asc" },
+  });
+  const withdrawn = await prisma.platformWithdrawal.aggregate({ _sum: { amountZec: true } });
+  type TokenAuditRow = {
+    symbol: string;
+    name: string;
+    createdAt: string;
+    curveReserveZec: number;
+    curveSoldTokens: string;
+    graduated: boolean;
+    creatorFeeAccruedZec: number;
+    creatorFeeTotalPaidZec: number;
+    platformFeeTotalZec: number;
+  };
+  const rows: TokenAuditRow[] = tokens.map((t: (typeof tokens)[number]) => ({
+    symbol: t.symbol,
+    name: t.name,
+    createdAt: t.createdAt.toISOString(),
+    curveReserveZec: num(t.curveReserveZec),
+    curveSoldTokens: t.curveSoldTokens.toString(),
+    graduated: t.graduated,
+    creatorFeeAccruedZec: num(t.creatorFeeAccruedZec),
+    creatorFeeTotalPaidZec: num(t.creatorFeeTotalPaidZec),
+    platformFeeTotalZec: num(t.platformFeeTotalZec),
+  }));
+  const totalReserveOwed = rows.reduce((s: number, r: TokenAuditRow) => s + r.curveReserveZec, 0);
+  const totalCreatorFeeOwed = rows.reduce((s: number, r: TokenAuditRow) => s + r.creatorFeeAccruedZec, 0);
+  const totalPlatformFeeEarned = rows.reduce((s: number, r: TokenAuditRow) => s + r.platformFeeTotalZec, 0);
+  const totalPlatformFeeWithdrawn = num(withdrawn._sum.amountZec ?? 0);
+  const totalPlatformFeeClaimable = Math.max(0, totalPlatformFeeEarned - totalPlatformFeeWithdrawn);
+  const totalOwed = totalReserveOwed + totalCreatorFeeOwed + totalPlatformFeeClaimable;
+  return {
+    tokens: rows,
+    totalReserveOwed,
+    totalCreatorFeeOwed,
+    totalPlatformFeeEarned,
+    totalPlatformFeeWithdrawn,
+    totalPlatformFeeClaimable,
+    totalOwed,
+  };
+}
+
 /** Tokens with an unpaid creator fee balance, a payout address on file,
  * and whose last payout (or creation, if never paid) is at least
  * `intervalMs` in the past -- i.e. due for their next 24h distribution.
