@@ -10,6 +10,18 @@ import * as store from "./store.js";
 const PAYOUT_INTERVAL_MS = 24 * 60 * 60_000; // distribute at most once per 24h per token
 const CHECK_INTERVAL_MS = 15 * 60_000; // how often we look for tokens that are due
 
+// Found 2026-09-07 (Brai, after ZODDTY's 0.0000003 ZEC payout landed): the
+// Zcash network/miner fee on a real send (paid by the platform wallet, see
+// zcashReal.ts's `call("/wallet/send", ...)` -> zingo-cli `quicksend`, which
+// deducts its own fee from the wallet's balance separately from the amount
+// sent) is on the order of 0.0001 ZEC -- multiple times bigger than a dust
+// payout like that one. Below this line, a payout would just be burning
+// more in network fees than the creator actually receives, so nothing gets
+// paid until a token's accrued creator fee reaches this amount; it simply
+// keeps accumulating across cycles (creatorFeeAccruedZec is never reset)
+// until it crosses the line.
+export const MIN_CREATOR_PAYOUT_ZEC = 0.001;
+
 type SendPayout = (toAddress: string, zecAmount: number) => Promise<{ txid: string }> | { txid: string };
 
 interface Logger {
@@ -36,7 +48,7 @@ export async function runFeeDistributionOnce(
 ) {
   let due: Awaited<ReturnType<typeof store.getTokensDueForFeePayout>>;
   try {
-    due = await store.getTokensDueForFeePayout(PAYOUT_INTERVAL_MS, ignoreInterval);
+    due = await store.getTokensDueForFeePayout(PAYOUT_INTERVAL_MS, ignoreInterval, MIN_CREATOR_PAYOUT_ZEC);
   } catch (err) {
     log.error(err, "failed to query tokens due for creator fee payout");
     return { paid: [] as { symbol: string; amount: number; txid: string }[], skipped: [] as string[] };
@@ -51,7 +63,11 @@ export async function runFeeDistributionOnce(
   const skipped: string[] = [];
 
   for (const token of due) {
-    if (!token.creatorPayoutAddress || token.creatorFeeAccruedZec <= 0) continue;
+    // Belt-and-suspenders: the query above already filters by
+    // MIN_CREATOR_PAYOUT_ZEC, but this stays as a second guard against any
+    // future direct call to getTokensDueForFeePayout that forgets to pass
+    // the minimum.
+    if (!token.creatorPayoutAddress || token.creatorFeeAccruedZec < MIN_CREATOR_PAYOUT_ZEC) continue;
     // Pay out in one chunk if it fits under the per-payout safety cap;
     // otherwise pay what fits now and leave the rest accrued for the
     // next cycle rather than failing the whole payout outright.

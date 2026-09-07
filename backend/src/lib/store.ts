@@ -252,11 +252,11 @@ export async function accrueFees(tokenId: string, creatorFeeZec: number, platfor
  * payout, no matter how many times the admin route was hit. A manual
  * trigger is Brai choosing the moment on purpose; there's no reason for
  * an internal 24h-since-creation clock to override that. */
-export async function getTokensDueForFeePayout(intervalMs: number, ignoreInterval = false): Promise<TokenWithCurve[]> {
+export async function getTokensDueForFeePayout(intervalMs: number, ignoreInterval = false, minAccruedZec = 0): Promise<TokenWithCurve[]> {
   const cutoff = new Date(Date.now() - intervalMs);
   const rows = await prisma.token.findMany({
     where: {
-      creatorFeeAccruedZec: { gt: 0 },
+      creatorFeeAccruedZec: minAccruedZec > 0 ? { gte: minAccruedZec } : { gt: 0 },
       creatorPayoutAddress: { not: null },
       ...(ignoreInterval
         ? {}
