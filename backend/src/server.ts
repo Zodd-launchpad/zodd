@@ -5,7 +5,7 @@ import { generateTwelveWords } from "./lib/wordlist.js";
 import { quoteBuy, quoteSell, currentPrice, marketCapZec, isGraduated } from "./lib/bondingCurve.js";
 import { simulatedInscriptionFor } from "./lib/simulatedChain.js";
 import { splitFee, TRADE_FEE_BPS, CREATOR_FEE_BPS, TOKEN_CREATE_FEE_ZEC } from "./lib/fees.js";
-import { startFeeDistributor } from "./lib/feeDistributor.js";
+import { startFeeDistributor, runFeeDistributionOnce } from "./lib/feeDistributor.js";
 
 // ZCASH_MODE=real switches every payment/inscription in this service to
 // actually move ZEC through zcash-wallet-service, instead of the mock.
@@ -13,6 +13,11 @@ import { startFeeDistributor } from "./lib/feeDistributor.js";
 const ZCASH_MODE = process.env.ZCASH_MODE === "real" ? "real" : "mock";
 const zcashService = ZCASH_MODE === "real" ? await import("./lib/zcashReal.js") : await import("./lib/zcashMock.js");
 const { generateOrderAddress, onPaymentDetected, sendPayout, MAX_PAYOUT_ZEC } = zcashService;
+
+// Guards /api/admin/run-fee-distribution (real ZEC payouts) -- unset by
+// default, so that route stays refused until Brai deliberately sets this in
+// Railway's variables and only he knows the value.
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 
 const app = Fastify({ logger: true });
 app.log.info(`ZCASH_MODE=${ZCASH_MODE} -- ${ZCASH_MODE === "real" ? "REAL ZEC IS LIVE ON THIS DEPLOYMENT" : "using the simulated zcash service, no real funds move"}`);
@@ -502,6 +507,25 @@ app.post("/api/admin/force-complete-token-creation", async (req, reply) => {
   if (!token) return reply.code(500).send({ error: "completion failed" });
   app.log.info(`[admin] force-completed pending creation ${body.data.creationId} -> token ${token.symbol} (manual recovery, txid ${body.data.genesisMemoTxid})`);
   return reply.send({ ok: true, token });
+});
+
+// Brai (2026-09-07): wants to run the creator-fee distribution himself, on
+// demand, instead of only via the automatic 24h/15min-check cycle
+// (startFeeDistributor below) -- "quiero hacerlo manual yo, para mas
+// seguridad". This runs the EXACT same logic as that automatic cycle (same
+// runFeeDistributionOnce), it just runs it right now instead of waiting for
+// the next tick -- it still only pays tokens actually due (nothing paid in
+// the last 24h) and respects the same per-payout safety cap. This moves
+// REAL ZEC in real mode, so it's gated behind ADMIN_TOKEN (set it in
+// Railway's variables; unset means this route always refuses) rather than
+// being open like the recovery route above, which never moves funds.
+app.post("/api/admin/run-fee-distribution", async (req, reply) => {
+  if (ZCASH_MODE !== "real") return reply.code(404).send({ error: "not in real mode" });
+  if (!ADMIN_TOKEN) return reply.code(503).send({ error: "ADMIN_TOKEN is not configured" });
+  if (req.headers["x-admin-token"] !== ADMIN_TOKEN) return reply.code(401).send({ error: "unauthorized" });
+  const result = await runFeeDistributionOnce(sendPayout, MAX_PAYOUT_ZEC, app.log);
+  app.log.info(`[admin] manual fee distribution run: paid ${result.paid.length}, skipped ${result.skipped.length}`);
+  return reply.send({ ok: true, ...result });
 });
 
 // Read-only: confirms the real wallet is funded/reachable without ever

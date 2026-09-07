@@ -17,31 +17,46 @@ interface Logger {
   error: (err: unknown, msg: string) => void;
 }
 
-export function startFeeDistributor(sendPayout: SendPayout, maxPayoutZec: number, log: Logger) {
-  async function tick() {
-    let due: Awaited<ReturnType<typeof store.getTokensDueForFeePayout>>;
-    try {
-      due = await store.getTokensDueForFeePayout(PAYOUT_INTERVAL_MS);
-    } catch (err) {
-      log.error(err, "failed to query tokens due for creator fee payout");
-      return;
-    }
+/** One pass: pay out every token whose creator fee is due (see
+ * PAYOUT_INTERVAL_MS) and has a registered payout address and something
+ * accrued. Exported on its own -- separate from the setInterval loop below
+ * -- so an admin route can trigger a single run on demand (Brai, 2026-09-07:
+ * wants to run it manually himself instead of waiting for the 24h clock,
+ * "para mas seguridad"), without duplicating this logic. */
+export async function runFeeDistributionOnce(sendPayout: SendPayout, maxPayoutZec: number, log: Logger) {
+  let due: Awaited<ReturnType<typeof store.getTokensDueForFeePayout>>;
+  try {
+    due = await store.getTokensDueForFeePayout(PAYOUT_INTERVAL_MS);
+  } catch (err) {
+    log.error(err, "failed to query tokens due for creator fee payout");
+    return { paid: [] as { symbol: string; amount: number; txid: string }[], skipped: [] as string[] };
+  }
 
-    for (const token of due) {
-      if (!token.creatorPayoutAddress || token.creatorFeeAccruedZec <= 0) continue;
-      // Pay out in one chunk if it fits under the per-payout safety cap;
-      // otherwise pay what fits now and leave the rest accrued for the
-      // next cycle rather than failing the whole payout outright.
-      const amount = Math.min(token.creatorFeeAccruedZec, maxPayoutZec);
-      try {
-        const { txid } = await sendPayout(token.creatorPayoutAddress, amount);
-        await store.recordFeePayout(token.id, amount, token.creatorPayoutAddress, txid);
-        log.info(`creator fee payout: ${amount.toFixed(8)} ZEC -> ${token.symbol} creator (${token.creatorPayoutAddress}), txid ${txid}`);
-      } catch (err) {
-        log.error(err, `creator fee payout failed for ${token.symbol}`);
-      }
+  const paid: { symbol: string; amount: number; txid: string }[] = [];
+  const skipped: string[] = [];
+
+  for (const token of due) {
+    if (!token.creatorPayoutAddress || token.creatorFeeAccruedZec <= 0) continue;
+    // Pay out in one chunk if it fits under the per-payout safety cap;
+    // otherwise pay what fits now and leave the rest accrued for the
+    // next cycle rather than failing the whole payout outright.
+    const amount = Math.min(token.creatorFeeAccruedZec, maxPayoutZec);
+    try {
+      const { txid } = await sendPayout(token.creatorPayoutAddress, amount);
+      await store.recordFeePayout(token.id, amount, token.creatorPayoutAddress, txid);
+      log.info(`creator fee payout: ${amount.toFixed(8)} ZEC -> ${token.symbol} creator (${token.creatorPayoutAddress}), txid ${txid}`);
+      paid.push({ symbol: token.symbol, amount, txid });
+    } catch (err) {
+      log.error(err, `creator fee payout failed for ${token.symbol}`);
+      skipped.push(token.symbol);
     }
   }
 
-  setInterval(tick, CHECK_INTERVAL_MS);
+  return { paid, skipped };
+}
+
+export function startFeeDistributor(sendPayout: SendPayout, maxPayoutZec: number, log: Logger) {
+  setInterval(() => {
+    runFeeDistributionOnce(sendPayout, maxPayoutZec, log).catch((err) => log.error(err, "fee distribution tick failed"));
+  }, CHECK_INTERVAL_MS);
 }
