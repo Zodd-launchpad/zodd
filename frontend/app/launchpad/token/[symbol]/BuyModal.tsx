@@ -39,6 +39,7 @@ export default function BuyModal({ symbol, walletId, onClose }: { symbol: string
   const [error, setError] = useState<string | null>(null);
   const [isRealMode, setIsRealMode] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [copiedTwoLine, setCopiedTwoLine] = useState(false);
 
   // Brai, 2026-09-07: "esa wallet que te aparece ahi para pagar cualquier
   // compra tiene que ser un boton que si lo clickeas se auto copia" -- the
@@ -52,6 +53,26 @@ export default function BuyModal({ symbol, walletId, onClose }: { symbol: string
       setTimeout(() => setCopied(false), 1500);
     } catch {
       // clipboard not available -- the address is still selectable/visible
+    }
+  }
+
+  // Brai, 2026-09-07: "cuando vas a copiar el ID del memo se te cerro la
+  // noir y no podes pegar el memo" -- a SEPARATE memo-only copy button
+  // meant switching to Noir twice (once to paste the address, once more to
+  // paste the memo), and the second app-switch was closing/resetting
+  // Noir's send screen before the memo could be pasted. Fix: one clipboard
+  // copy with the address AND memo together (address, newline, memo) --
+  // Noir splits a pasted "address\nmemo" itself, so this is ONE copy, ONE
+  // switch to Noir, ONE paste, both fields filled. orderId is already the
+  // plain, un-base64'd memo text.
+  async function copyAddressAndMemo() {
+    if (!address || !orderId) return;
+    try {
+      await navigator.clipboard.writeText(`${address}\n${orderId}`);
+      setCopiedTwoLine(true);
+      setTimeout(() => setCopiedTwoLine(false), 1500);
+    } catch {
+      // clipboard not available -- address/memo are still visible above
     }
   }
 
@@ -178,6 +199,48 @@ export default function BuyModal({ symbol, walletId, onClose }: { symbol: string
             </button>
             {isRealMode && (
               <p className="muted" style={{ fontSize: 11, marginTop: 4 }}>{t("payment.copyHint")}</p>
+            )}
+            {/* Brai, 2026-09-07: "un cartel grande que diga SI TENES NOIR
+                USA MEMO..." then found switching to Noir twice (once per
+                copy button) closes Noir before the second paste. Fixed:
+                still big and unmissable, but now ONE button that copies
+                address+memo together -- one switch to Noir, one paste. */}
+            {isRealMode && orderId && address && (
+              <div
+                style={{
+                  marginTop: 12,
+                  padding: "12px 14px",
+                  borderRadius: 8,
+                  border: "2px solid var(--bronze, #c9a24b)",
+                  background: "rgba(201,162,75,0.1)",
+                  textAlign: "center",
+                }}
+              >
+                <p style={{ margin: "0 0 6px", fontWeight: 800, fontSize: 14, letterSpacing: 0.3, color: "var(--bronze, #c9a24b)" }}>
+                  {t("payment.noirBanner.title")}
+                </p>
+                <p className="muted" style={{ margin: "0 0 8px", fontSize: 12 }}>{t("payment.noirBanner.body")}</p>
+                <button
+                  type="button"
+                  onClick={copyAddressAndMemo}
+                  className="mono"
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    fontSize: 22,
+                    fontWeight: 800,
+                    padding: "12px 8px",
+                    borderRadius: 6,
+                    border: `1px solid ${copiedTwoLine ? "var(--green)" : "var(--border)"}`,
+                    background: "transparent",
+                    color: copiedTwoLine ? "var(--green)" : "var(--text)",
+                    cursor: "pointer",
+                    wordBreak: "break-all",
+                  }}
+                >
+                  {copiedTwoLine ? `✓ ${t("buy.addressCopied")}` : orderId}
+                </button>
+              </div>
             )}
             <p className="muted" style={{ marginTop: 14, fontSize: 12 }}>{isRealMode ? t("buy.realNote") : t("buy.simulatedNote")}</p>
             {isRealMode && (

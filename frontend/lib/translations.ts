@@ -129,6 +129,28 @@ export const translations = {
     en: "Copies the full payment link (address + amount + your unique order ID) — pasting it into a compatible wallet is as safe as scanning the QR.",
     zh: "会复制完整的付款链接（地址 + 金额 + 你的唯一订单 ID）——粘贴到兼容的钱包里和扫描二维码一样安全。",
   },
+  // Brai, 2026-09-07: "noir acepta memo pero va en la segunda linea" -- some
+  // wallets (confirmed with Noir) don't parse the zcash: URI when pasted --
+  // they treat the whole string as an invalid address and the send fails.
+  // What they DO support is their own separate MEMO field on the send
+  // screen. First tried a quiet "copy address+memo as 2 lines" button;
+  // Brai wanted it impossible to miss instead -- "un cartel grande" -- so
+  // now the memo itself is shown big, front and center (see the bronze box
+  // in BuyModal.tsx/create/page.tsx's waiting screen).
+  "payment.noirBanner.title": {
+    en: "GOT NOIR? TAP ONCE BELOW",
+    zh: "用 NOIR 钱包？点一下下面",
+  },
+  // Brai, 2026-09-07 (round 2): "cuando vas a copiar el ID del memo se te
+  // cerro la noir y no podes pegar el memo" -- copying the address, then
+  // separately copying the memo, meant switching to Noir twice, and the
+  // second switch was closing Noir before the memo could be pasted. Now
+  // one tap copies BOTH (address + memo, Noir splits it on its own) so the
+  // whole thing is one switch to Noir, one paste.
+  "payment.noirBanner.body": {
+    en: "This copies the address AND the memo (shown below) together — paste it once into Noir and don't switch back here until it's sent, switching apps again can close Noir before it pastes.",
+    zh: "这会把地址和下面显示的备注一起复制——粘贴到 Noir 一次就行，发送之前不要切回这里，再次切换应用可能会导致 Noir 在粘贴前关闭。",
+  },
   "create.created.title": { en: "TOKEN DEPLOYED", zh: "代币已部署" },
   "create.created.body": { en: "{symbol} is live.", zh: "{symbol} 已上线。" },
   "create.created.viewButton": { en: "View {symbol}", zh: "查看 {symbol}" },
