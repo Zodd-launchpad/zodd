@@ -270,6 +270,9 @@ export const translations = {
   "buy.failed.title": { en: "Failed", zh: "失败" },
   "buy.failed.body": { en: "The order could not be executed against the curve.", zh: "该订单未能根据曲线成交。" },
   "buy.error.invalidAmount": { en: "invalid amount", zh: "金额无效" },
+  "buy.refundAddressLabel": { en: "Refund address (yours; kept on this device only)", zh: "退款地址（你的地址，仅保存在本设备）" },
+  "buy.refundAddressHint": { en: "Must start with u1... or zs1... (transparent t1... addresses aren't accepted). If this order ever needs a manual refund, this is where it goes.", zh: "必须以 u1... 或 zs1... 开头（不接受透明的 t1... 地址）。如果这笔订单日后需要人工退款，会退到这个地址。" },
+  "buy.error.invalidAddress": { en: "enter a valid shielded refund address (u1... or zs1...)", zh: "请输入有效的屏蔽式退款地址（u1... 或 zs1...）" },
 
   // ---------- Sell modal ----------
   "sell.title": { en: "Sell {symbol}", zh: "卖出 {symbol}" },

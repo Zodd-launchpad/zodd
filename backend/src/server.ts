@@ -259,10 +259,23 @@ async function serializeToken(t: store.TokenWithCurve) {
 
 // ---------- Orders: buy ----------
 
+// Brai, 2026-09-07: "que la gente cuando vaya a comprar te deje la
+// wallet... asi tenemos registrado el comprador y le enviamos el dinero en
+// caso de problemas" -- a shielded refund address, same as the one Sell
+// already requires, now also collected up front on a buy. Required (not
+// optional) so it's actually there to use if this specific order ever
+// needs manual recovery -- see the big comment on generateOrderAddress's
+// amount-only matching in zcashReal.ts for why an automatic refund isn't
+// safely buildable, and why a per-order address on file is the realistic
+// improvement instead.
 const buySchema = z.object({
   walletId: z.string(),
   symbol: z.string(),
   zecAmount: z.number().positive(),
+  refundAddress: z
+    .string()
+    .min(10)
+    .refine(isShieldedAddress, "refund address must be shielded (starts with u1 or zs1)"),
 });
 
 app.post("/api/orders/buy", async (req, reply) => {
@@ -280,7 +293,11 @@ app.post("/api/orders/buy", async (req, reply) => {
     internalWalletId: wallet.id,
     tokenId: token.id,
     zecAmount: body.zecAmount,
+    refundAddress: body.refundAddress,
   });
+  // Best-effort, same as the sell/create-token flows: remember this address
+  // so it pre-fills next time, in any of the three flows.
+  await store.setDefaultRefundAddress(wallet.id, body.refundAddress).catch((err) => app.log.error(err, "failed to remember buy refund address"));
 
   // The address IS the order: any payment that lands there executes at
   // the price of the block it confirms in (see zcashMock.ts / zcashReal.ts).

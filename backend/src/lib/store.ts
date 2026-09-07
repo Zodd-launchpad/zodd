@@ -574,7 +574,7 @@ function toOrderView(o: {
   };
 }
 
-export async function createBuyOrder(input: { internalWalletId: string; tokenId: string; zecAmount: number }) {
+export async function createBuyOrder(input: { internalWalletId: string; tokenId: string; zecAmount: number; refundAddress?: string }) {
   const o = await prisma.order.create({
     data: {
       internalWalletId: input.internalWalletId,
@@ -582,6 +582,12 @@ export async function createBuyOrder(input: { internalWalletId: string; tokenId:
       side: "BUY",
       status: "PENDING",
       zecAmount: input.zecAmount,
+      // Brai, 2026-09-07: "que la gente cuando vaya a comprar te deje la
+      // wallet... asi tenemos registrado el comprador y le enviamos el
+      // dinero en caso de problemas" -- recorded on the order itself (not
+      // just the wallet-level default) so admin recovery for a stray/
+      // wrong-amount note has a specific address to work from, per order.
+      refundAddress: input.refundAddress ?? null,
     },
   });
   return toOrderView(o);

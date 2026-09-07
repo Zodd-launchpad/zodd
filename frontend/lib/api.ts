@@ -107,7 +107,7 @@ export const api = {
     id: string
   ): Promise<{ status: "PENDING" | "CREATED" | "EXPIRED" | "FAILED"; resultSymbol?: string; zecAddress: string | null; expectedZecAmount: number }> =>
     req(`/api/token-creations/${id}`),
-  buy: (data: { walletId: string; symbol: string; zecAmount: number }) =>
+  buy: (data: { walletId: string; symbol: string; zecAmount: number; refundAddress: string }) =>
     req("/api/orders/buy", { method: "POST", body: JSON.stringify(data) }),
   sell: (data: { walletId: string; symbol: string; tokenAmount: number; refundAddress: string }) =>
     req("/api/orders/sell", { method: "POST", body: JSON.stringify(data) }),

@@ -6,9 +6,16 @@ import { useLanguage } from "@/lib/i18n";
 
 type Phase = "amount" | "waiting" | "filled" | "failed";
 
+// Mirrors the backend's isShieldedAddress check (server.ts) so the error
+// shows up immediately instead of after a round trip.
+function isShieldedAddress(addr: string): boolean {
+  return /^(u1|zs1)/.test(addr);
+}
+
 export default function BuyModal({ symbol, walletId, onClose }: { symbol: string; walletId: string; onClose: () => void }) {
   const { t } = useLanguage();
   const [zecAmount, setZecAmount] = useState("0.01");
+  const [refundAddress, setRefundAddress] = useState("");
   // The exact amount the backend is actually watching for -- can be a hair
   // above what was typed (see pickUniqueAmount in zcashReal.ts, which
   // nudges the amount by a few thousand zatoshis when needed so two orders
@@ -28,12 +35,26 @@ export default function BuyModal({ symbol, walletId, onClose }: { symbol: string
     api.getMode().then((m) => setIsRealMode(m.zcashMode === "real")).catch(() => {});
   }, []);
 
+  useEffect(() => {
+    // Brai, 2026-09-07: "que la gente cuando vaya a comprar te deje la
+    // wallet" -- pre-fill with the address this wallet already has on file
+    // (from a previous buy, sell, or token creation), same mechanism as
+    // SellModal/create's defaultRefundAddress. Still fully editable.
+    api
+      .portfolio(walletId)
+      .then((p) => {
+        if (p.defaultRefundAddress) setRefundAddress((prev) => prev || p.defaultRefundAddress!);
+      })
+      .catch(() => {});
+  }, [walletId]);
+
   async function submitBuy() {
     setError(null);
     try {
       const amount = parseFloat(zecAmount);
       if (!(amount > 0)) throw new Error(t("buy.error.invalidAmount"));
-      const order = await api.buy({ walletId, symbol, zecAmount: amount });
+      if (refundAddress.length < 10 || !isShieldedAddress(refundAddress)) throw new Error(t("buy.error.invalidAddress"));
+      const order = await api.buy({ walletId, symbol, zecAmount: amount, refundAddress });
       setAddress(order.zecAddress);
       setOrderId(order.orderId);
       setExactZecAmount(order.zecAmount);
@@ -70,6 +91,11 @@ export default function BuyModal({ symbol, walletId, onClose }: { symbol: string
             <div className="field">
               <label>{t("buy.youPay")}</label>
               <input value={zecAmount} onChange={(e) => setZecAmount(e.target.value)} />
+            </div>
+            <div className="field">
+              <label>{t("buy.refundAddressLabel")}</label>
+              <input value={refundAddress} onChange={(e) => setRefundAddress(e.target.value)} placeholder="u1... / zs1..." />
+              <span className="muted" style={{ fontSize: 11, marginTop: 4, display: "block" }}>{t("buy.refundAddressHint")}</span>
             </div>
             {error && <p style={{ color: "var(--red)", fontSize: 13 }}>{error}</p>}
             <button className="btn btn-gold" style={{ width: "100%" }} onClick={submitBuy}>
