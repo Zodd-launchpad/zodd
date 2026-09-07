@@ -123,12 +123,28 @@ export async function generateOrderAddress(orderId: string, expectedZecAmount: n
  * store.getPendingOrdersAwaitingPayment / getPendingTokenCreationsAwaitingPayment).
  * The in-memory `watchers` map does not survive a restart, so without this
  * a real payment sent while the backend was mid-redeploy would confirm
- * on-chain with nothing left watching for it. `createdAtMs` is passed
- * through (rather than reset to now) so the original 30min expiry window
- * still applies. */
+ * on-chain with nothing left watching for it.
+ *
+ * IMPORTANT (found 2026-09-07): this used to pass the ORIGINAL createdAtMs
+ * straight through "so the 30min expiry window still applies" -- but that
+ * silently defeated the entire point of restart-recovery for exactly the
+ * case it exists for. Two real token-creation payments sat un-detected
+ * across several redeploys (fixing the messages()-parsing bugs) that
+ * together took longer than 30 minutes; every resumed watcher was then
+ * deleted by the very first poll tick's expiry check -- before it ever got
+ * a chance to check for the payment -- because Date.now() - createdAtMs was
+ * already past ORDER_EXPIRY_MS at the moment it was re-added. The DB is the
+ * source of truth for whether an order is still worth watching (status
+ * PENDING); an order this function is asked to resume is, by definition,
+ * still PENDING, so it earns a fresh 30min window here rather than
+ * inheriting a clock that may already be expired. `createdAtMs` is kept in
+ * the signature (still useful to callers/logs) but no longer used for the
+ * expiry clock. */
 export function resumeWatching(orderId: string, address: string, expectedZecAmount: number, createdAtMs: number) {
   if (watchers.has(orderId)) return; // already registered this process lifetime
-  watchers.set(orderId, { orderId, address, expectedZecAmount, createdAt: createdAtMs });
+  const ageMs = Date.now() - createdAtMs;
+  watchers.set(orderId, { orderId, address, expectedZecAmount, createdAt: Date.now() });
+  console.log(`[zcashReal] resumed watching ${orderId} (originally created ${Math.round(ageMs / 60_000)}min ago) with a fresh ${ORDER_EXPIRY_MS / 60_000}min window`);
   startPolling();
 }
 
