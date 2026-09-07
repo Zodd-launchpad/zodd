@@ -710,6 +710,39 @@ export async function failOrder(orderId: string) {
   return toOrderView(o);
 }
 
+/** Brai, 2026-09-07: "revisa A FONDO esto no puede pasar" -- two real buy
+ * payments (0.2 ZEC on ZODD, 0.05 ZEC on ZOOKCAT) landed in the wallet as
+ * unclaimed notes instead of filling their orders. Forensics for that needs
+ * the actual order row(s) those payments were meant for: status, exact
+ * zecAmount (may have been bumped a few thousand zatoshis by
+ * pickAndReserveAmount), zecAddress, and timestamps, to compare against the
+ * unclaimed note's on-chain time. A small tolerance band (not an exact
+ * match) is deliberate, since the persisted amount can be the bumped one,
+ * not the round number the buyer typed. Read-only.
+ */
+export async function findOrdersNearAmount(zecAmount: number, toleranceZec = 0.001) {
+  const rows = await prisma.order.findMany({
+    where: {
+      side: "BUY",
+      zecAmount: { gte: zecAmount - toleranceZec, lte: zecAmount + toleranceZec },
+    },
+    orderBy: { createdAt: "desc" },
+    take: 25,
+    include: { token: { select: { symbol: true } } },
+  });
+  return rows.map((o: (typeof rows)[number]) => ({
+    id: o.id,
+    status: o.status,
+    symbol: o.token.symbol,
+    zecAddress: o.zecAddress,
+    zecAmount: o.zecAmount ? Number(o.zecAmount) : null,
+    refundAddress: o.refundAddress,
+    executionTxid: o.executionTxid,
+    createdAt: o.createdAt,
+    filledAt: o.filledAt,
+  }));
+}
+
 // ---------- Pending token creations ----------
 // The creator pays the create fee themselves, to a one-time address, same
 // mechanism as a buy order (see generateOrderAddress in zcashReal/zcashMock).

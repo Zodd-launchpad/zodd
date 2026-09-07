@@ -801,6 +801,27 @@ app.get("/api/admin/unclaimed-notes", async (req, reply) => {
   }
 });
 
+// Brai (2026-09-07): "revisa A FONDO esto no puede pasar" -- forensics
+// companion to /api/admin/unclaimed-notes: given a ZEC amount, finds the
+// actual BUY order row(s) it was meant for (any status), so an unclaimed
+// note's timing/amount can be compared against what the order actually
+// expected and when it was created/expired. Read-only.
+const orderLookupSchema = z.object({
+  amount: z.coerce.number().positive(),
+  tolerance: z.coerce.number().positive().optional(),
+});
+app.get("/api/admin/orders-by-amount", async (req, reply) => {
+  if (!ADMIN_TOKEN) return reply.code(503).send({ error: "ADMIN_TOKEN is not configured" });
+  if (req.headers["x-admin-token"] !== ADMIN_TOKEN) return reply.code(401).send({ error: "unauthorized" });
+  try {
+    const q = orderLookupSchema.parse(req.query);
+    const orders = await store.findOrdersNearAmount(q.amount, q.tolerance ?? 0.001);
+    return reply.send({ ok: true, count: orders.length, orders });
+  } catch (err) {
+    return reply.code(400).send({ error: String((err as Error).message ?? err) });
+  }
+});
+
 // Brai (2026-09-07): "quiero hacerlo yo solo el claim... quiero estar
 // seguro que se hace, de otra forma no lo controlo" -- the automatic 24h
 // cycle is intentionally OFF. Real ZEC creator-fee payouts only ever move

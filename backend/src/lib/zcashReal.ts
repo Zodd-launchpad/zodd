@@ -293,12 +293,23 @@ export async function generateOrderAddress(orderId: string, expectedZecAmount: n
 // getAllKnownPaymentTxids in store.ts, the same source resumeWatching's
 // consumedTxids seeding uses), so a human can decide what to do with a
 // surplus payment instead of it silently staying unclaimed forever.
-export async function listUnclaimedNotes(knownTxids: string[]): Promise<{ txid: string; zatoshis: number; zec: number }[]> {
+export async function listUnclaimedNotes(
+  knownTxids: string[]
+): Promise<{ txid: string; zatoshis: number; zec: number; status: string; timeRaw: number }[]> {
   const { notes } = await call(`/wallet/notes`);
   const known = new Set(knownTxids);
   return (notes ?? [])
     .filter((n: any) => typeof n.status === "string" && n.status.toLowerCase().includes("confirmed") && !known.has(n.txid))
-    .map((n: any) => ({ txid: n.txid, zatoshis: Number(n.valueZatoshis), zec: Number(n.valueZatoshis) / ZATOSHIS_PER_ZEC }));
+    .map((n: any) => ({
+      txid: n.txid,
+      zatoshis: Number(n.valueZatoshis),
+      zec: Number(n.valueZatoshis) / ZATOSHIS_PER_ZEC,
+      status: n.status,
+      // zingo-cli's note `time` field -- seconds-since-epoch when observed,
+      // per cli.js's unspentNotes(). Kept raw (not converted) here so the
+      // caller can decide how to interpret it; 0 if the field was missing.
+      timeRaw: Number(n.time ?? 0),
+    }));
 }
 
 /** Re-registers a watcher for an address that was already generated in a
