@@ -177,8 +177,26 @@ export async function getTokenById(id: string): Promise<TokenWithCurve | null> {
 }
 
 export async function listTokens(): Promise<TokenWithCurve[]> {
-  const ts = await prisma.token.findMany({ orderBy: { createdAt: "asc" } });
+  const ts = await prisma.token.findMany({ where: { hidden: false }, orderBy: { createdAt: "asc" } });
   return ts.map(toTokenWithCurve);
+}
+
+/** Sets (or clears) the `hidden` flag on a batch of tokens by symbol --
+ * see the big comment on Token.hidden in schema.prisma. Not a delete:
+ * only affects listTokens (the public boards/search), a hidden token is
+ * still directly reachable by symbol (buy/sell/history keep working) in
+ * case that's ever needed. Returns which symbols were actually found and
+ * updated, so the caller can flag any typo'd symbol. */
+export async function setTokensHidden(symbols: string[], hidden: boolean): Promise<{ updated: string[]; notFound: string[] }> {
+  const upper = symbols.map((s) => s.toUpperCase());
+  const existing = await prisma.token.findMany({ where: { symbol: { in: upper } }, select: { symbol: true } });
+  const foundSymbols: Set<string> = new Set(existing.map((t: { symbol: string }) => t.symbol));
+  const notFound = upper.filter((s) => !foundSymbols.has(s));
+  const updated: string[] = [...foundSymbols];
+  if (updated.length > 0) {
+    await prisma.token.updateMany({ where: { symbol: { in: updated } }, data: { hidden } });
+  }
+  return { updated, notFound };
 }
 
 export async function updateTokenCurve(tokenId: string, curve: CurveState) {

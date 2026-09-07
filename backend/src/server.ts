@@ -722,6 +722,21 @@ app.get("/api/admin/financial-audit", async (req, reply) => {
   return reply.send({ ok: true, ...audit, realWalletZec, shortfallZec });
 });
 
+// Brai, 2026-09-07: "blanquea todos los tokens... que no se vean todos
+// esos tokens de prueba" -- pre-launch cleanup. Deliberately NOT a delete
+// (see Token.hidden's comment in schema.prisma): toggles the `hidden`
+// flag so test tokens drop out of every public listing while their real
+// ZEC history stays intact for the audit. Pass hidden:false to un-hide.
+app.post("/api/admin/hide-tokens", async (req, reply) => {
+  if (!ADMIN_TOKEN) return reply.code(503).send({ error: "ADMIN_TOKEN is not configured" });
+  if (req.headers["x-admin-token"] !== ADMIN_TOKEN) return reply.code(401).send({ error: "unauthorized" });
+  const body = z.object({ symbols: z.array(z.string()).min(1), hidden: z.boolean().default(true) }).safeParse(req.body);
+  if (!body.success) return reply.code(400).send({ error: "expected { symbols: string[], hidden? }" });
+  const result = await store.setTokensHidden(body.data.symbols, body.data.hidden);
+  app.log.info(`[admin] set hidden=${body.data.hidden} for tokens: ${result.updated.join(", ")}${result.notFound.length ? ` (not found: ${result.notFound.join(", ")})` : ""}`);
+  return reply.send({ ok: true, ...result, hidden: body.data.hidden });
+});
+
 // Read-only: confirms the real wallet is funded/reachable without ever
 // touching the seed or moving money. 404s outside real mode.
 app.get("/api/admin/zcash-status", async (_req, reply) => {

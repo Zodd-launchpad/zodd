@@ -60,12 +60,23 @@ model Token {
   platformFeeTotalZec    Decimal   @default(0) @db.Decimal(20, 8) // fee de plataforma acumulado (solo informativo)
   lastFeePayoutAt        DateTime? // último reparto al creador
 
+  // Brai, 2026-09-07: "blanquea todos los tokens... que no se vean todos
+  // esos tokens de prueba" -- pre-launch cleanup. NOT a delete: these test
+  // tokens moved real ZEC (fees, sells), so wiping their rows would lose
+  // that history from the financial audit (see getFinancialAudit in
+  // store.ts). `hidden` just drops a token out of every public listing
+  // (see listTokens) while its data -- and the real ZEC it's tied to --
+  // stays exactly where it was. Reversible via the same admin route that
+  // sets it.
+  hidden      Boolean  @default(false)
+
   balances    Balance[]
   orders      Order[]
   pricePoints PricePoint[]
   feePayouts  CreatorFeePayout[]
 
   @@index([graduated])
+  @@index([hidden])
 }
 
 // Historial de repartos de fee al creador (para mostrar transparencia:
