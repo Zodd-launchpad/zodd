@@ -140,6 +140,16 @@ app.get("/wallet/value-to-address-raw-debug", async (req, reply) => {
   }
 });
 
+app.get("/wallet/value-to-address-help-raw-debug", async (_req, reply) => {
+  try {
+    const raw = await cli.rawValueToAddressHelpDebug();
+    return reply.send({ raw });
+  } catch (err) {
+    app.log.error(err);
+    return reply.code(500).send({ error: String(err.message ?? err) });
+  }
+});
+
 app.get("/wallet/addresses-raw-debug", async (_req, reply) => {
   if (!ready) return reply.code(503).send({ error: "wallet not ready yet", detail: readyError });
   try {

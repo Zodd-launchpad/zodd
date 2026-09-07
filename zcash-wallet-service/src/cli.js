@@ -232,6 +232,18 @@ export async function rawValueToAddressDebug(address) {
   return json ?? raw;
 }
 
+// Temporary: "value_to_address <addr>" as two argv elements gets rejected
+// with "unexpected argument ... found -- Usage: zingo-cli value_to_address"
+// (no args shown in that usage line), which suggests this subcommand's argv
+// parsing differs from quicksend's (which does take multiple bare argv
+// elements successfully). Getting the subcommand's own --help to see its
+// real expected form (a named flag? a single quoted string?) before
+// guessing further. Remove once answered.
+export async function rawValueToAddressHelpDebug() {
+  const out = await runCli(["value_to_address", "--help"], { timeout: 30_000 });
+  return out;
+}
+
 export async function rawAddressesDebug() {
   return listAddresses();
 }
