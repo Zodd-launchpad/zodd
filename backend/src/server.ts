@@ -62,7 +62,7 @@ app.get("/api/wallets/:id/portfolio", async (req, reply) => {
   if (!wallet) return reply.code(404).send({ error: "wallet not found" });
 
   const holdings = await store.getPortfolio(id);
-  return reply.send({ walletTag: wallet.walletTag, holdings });
+  return reply.send({ walletTag: wallet.walletTag, holdings, defaultRefundAddress: wallet.defaultRefundAddress });
 });
 
 // ---------- Tokens / market ----------
@@ -470,6 +470,11 @@ app.post("/api/orders/sell", async (req, reply) => {
   await store.recordPricePoint(token.id, newState, token.totalSupply);
   await store.debitBalance(wallet.id, token.id, body.tokenAmount);
   await store.accrueFees(token.id, creatorFee, platformFee);
+  // Remember this address so the Sell modal can pre-fill it next time,
+  // for a different token, without asking the payer to paste it in again
+  // (Brai, 2026-09-07). Best-effort: never let this fail a sell whose
+  // actual payout already went through.
+  await store.setDefaultRefundAddress(wallet.id, body.refundAddress).catch((err) => app.log.error(err, "failed to remember refund address"));
 
   const order = await store.createSellOrder({
     internalWalletId: wallet.id,

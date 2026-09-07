@@ -76,8 +76,13 @@ export const api = {
   },
   portfolio: (
     walletId: string
-  ): Promise<{ walletTag: string; holdings: { symbol: string; name: string; amount: number; priceZec: number }[] }> =>
-    req(`/api/wallets/${walletId}/portfolio`),
+  ): Promise<{
+    walletTag: string;
+    holdings: { symbol: string; name: string; amount: number; priceZec: number }[];
+    // Last ZEC address this wallet used for a sell payout, if any -- lets
+    // the Sell modal pre-fill it instead of asking to paste it in again.
+    defaultRefundAddress: string | null;
+  }> => req(`/api/wallets/${walletId}/portfolio`),
   listTokens: (): Promise<TokenSummary[]> => req("/api/tokens"),
   getToken: (symbol: string): Promise<TokenSummary> => req(`/api/tokens/${symbol}`),
   getHistory: (symbol: string): Promise<PricePoint[]> => req(`/api/tokens/${symbol}/history`),

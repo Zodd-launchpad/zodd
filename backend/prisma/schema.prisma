@@ -17,6 +17,12 @@ model InternalWallet {
   walletTag     String   @unique // ej. "5310f1ce", parte visible corta
   seedHashHex   String   // hash de las 12 palabras, nunca la frase en claro
   createdAt     DateTime @default(now())
+  // Last real Zcash address used to receive a sell payout from this
+  // wallet -- remembered so the Sell modal can pre-fill it instead of
+  // asking the payer to paste it in again for every token (Brai,
+  // 2026-09-07: "cuando toco SELL ya me queda asociada... asi no tengo
+  // que pegar cada vez que voy a pagar un token diferente").
+  defaultRefundAddress String?
 
   balances Balance[]
   orders   Order[]

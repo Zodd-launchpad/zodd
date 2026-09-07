@@ -41,6 +41,11 @@ export default function SellModal({ symbol, walletId, onClose }: { symbol: strin
         if (stop) return;
         const held = p.holdings.find((h) => h.symbol === symbol);
         setBalance(held?.amount ?? 0);
+        // Pre-fill with the address this wallet used last time it sold
+        // something -- one less thing to paste in for every token (Brai,
+        // 2026-09-07). Still fully editable; this only sets the initial
+        // value, so it never fights with what's typed.
+        if (p.defaultRefundAddress) setRefundAddress((prev) => prev || p.defaultRefundAddress!);
       })
       .catch(() => {
         if (!stop) setBalance(0);

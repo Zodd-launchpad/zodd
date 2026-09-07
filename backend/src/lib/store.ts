@@ -37,7 +37,18 @@ export async function createWallet(words: string[]) {
 
 export async function getWallet(id: string) {
   const wallet = await prisma.internalWallet.findUnique({ where: { id } });
-  return wallet ? { id: wallet.id, walletTag: wallet.walletTag, createdAt: wallet.createdAt.toISOString() } : null;
+  return wallet
+    ? { id: wallet.id, walletTag: wallet.walletTag, createdAt: wallet.createdAt.toISOString(), defaultRefundAddress: wallet.defaultRefundAddress }
+    : null;
+}
+
+/** Remembers the ZEC address a wallet last used to receive a sell payout,
+ * so the Sell modal can pre-fill it next time instead of asking the payer
+ * to paste it in again for every token (Brai, 2026-09-07). Called after
+ * every successful sell with whatever refundAddress was actually used --
+ * always overwrites, so it tracks the most recently used address. */
+export async function setDefaultRefundAddress(walletId: string, address: string) {
+  await prisma.internalWallet.update({ where: { id: walletId }, data: { defaultRefundAddress: address } });
 }
 
 /** "Log back in" to a wallet created earlier on another device/session: the
@@ -222,14 +233,28 @@ export async function accrueFees(tokenId: string, creatorFeeZec: number, platfor
 
 /** Tokens with an unpaid creator fee balance, a payout address on file,
  * and whose last payout (or creation, if never paid) is at least
- * `intervalMs` in the past -- i.e. due for their next 24h distribution. */
-export async function getTokensDueForFeePayout(intervalMs: number): Promise<TokenWithCurve[]> {
+ * `intervalMs` in the past -- i.e. due for their next 24h distribution.
+ *
+ * `intervalMs` is skipped entirely when `ignoreInterval` is true: every
+ * token with something accrued and a payout address counts as due,
+ * regardless of when it was created or last paid. Found 2026-09-07 (Brai
+ * ran the new manual admin trigger and got "paid":[] even though he was
+ * sure fees had accrued): the interval check was written for the
+ * *automatic* 24h cycle, but was also (wrongly) applied to a MANUAL,
+ * deliberately-triggered run -- so a token created less than 24h ago
+ * (true for everything in this test session) could never have its first
+ * payout, no matter how many times the admin route was hit. A manual
+ * trigger is Brai choosing the moment on purpose; there's no reason for
+ * an internal 24h-since-creation clock to override that. */
+export async function getTokensDueForFeePayout(intervalMs: number, ignoreInterval = false): Promise<TokenWithCurve[]> {
   const cutoff = new Date(Date.now() - intervalMs);
   const rows = await prisma.token.findMany({
     where: {
       creatorFeeAccruedZec: { gt: 0 },
       creatorPayoutAddress: { not: null },
-      OR: [{ lastFeePayoutAt: null, createdAt: { lte: cutoff } }, { lastFeePayoutAt: { lte: cutoff } }],
+      ...(ignoreInterval
+        ? {}
+        : { OR: [{ lastFeePayoutAt: null, createdAt: { lte: cutoff } }, { lastFeePayoutAt: { lte: cutoff } }] }),
     },
   });
   return rows.map(toTokenWithCurve);
