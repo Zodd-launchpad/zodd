@@ -322,9 +322,19 @@ export interface TradeView {
 }
 
 export async function getRecentTrades(tokenId: string, limit = 50): Promise<TradeView[]> {
+  // Sort by filledAt, not createdAt: an order can sit PENDING for a while
+  // waiting on payment (createdAt = when the buy was initiated / address
+  // requested), so createdAt and "when this trade actually happened" can
+  // diverge a lot -- especially for a repeat-payment clone (see
+  // createRepeatBuyOrder), which is born already FILLED. The list below is
+  // displayed using filledAt (see `createdAt: (o.filledAt ?? ...)` further
+  // down), so it has to be sorted by that same field or trades render out
+  // of chronological order (found 2026-09-07, Brai: "quedaron desordenados
+  // los tiempos"). Every row here is status FILLED, and every code path
+  // that sets that status also sets filledAt, so it's never null here.
   const orders = await prisma.order.findMany({
     where: { tokenId, status: "FILLED" },
-    orderBy: { createdAt: "desc" },
+    orderBy: { filledAt: "desc" },
     take: limit,
   });
   return orders.map((o) => ({

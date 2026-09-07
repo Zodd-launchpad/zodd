@@ -22,7 +22,7 @@ export const DEFAULT_CURVE_CONFIG: CurveConfig = {
   // but in ZEC. Adjustable per token if a custom curve is ever needed.
   virtualZecReserves: 3,
   virtualTokenReserves: 1_073_000_000,
-  graduationZecThreshold: 21,
+  graduationZecThreshold: 10,
 };
 
 export interface CurveState {
