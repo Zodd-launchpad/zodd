@@ -10,14 +10,21 @@ export default function HomePage() {
       <div className="hero-banner">
         <img src="/zodd-hero.jpg" alt="ZODD, the unofficial Zodl mascot" />
         <div className="hero-banner-fade" />
+        <div className="home-hero">
+          <h1>ZODD</h1>
+          <div className="tagline">{t("home.tagline")}</div>
+        </div>
       </div>
 
-      <div className="home-hero">
-        <h1>ZODD</h1>
-        <div className="tagline">{t("home.tagline")}</div>
+      {/* Pulled up to overlap the tail of the hero image (see
+          .home-boards-overlap / the opaque .board-frame background below) so
+          the token boards -- the actual point of the page -- are visible in
+          the first viewport instead of requiring a scroll past the hero.
+          Brai, 2026-09-07: "la idea es entrar y tener los tokens, puede la
+          esfinge pasar por detras de la caja de los tokens". */}
+      <div className="home-boards-overlap">
+        <HomeTokenBoards />
       </div>
-
-      <HomeTokenBoards />
 
       <div className="explore-grid">
         <Link href="/launchpad" className="explore-card">

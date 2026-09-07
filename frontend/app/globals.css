@@ -203,13 +203,21 @@ tr:hover td { background: #151517; cursor: pointer; }
 .muted { color: var(--text-dim); font-size: 13px; }
 .mono-break { word-break: break-all; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; letter-spacing: 0; }
 
-/* Home page */
+/* Home page. Found 2026-09-07 (Brai): the hero image + title used to take
+   the whole first viewport, so a visitor had to scroll before seeing any
+   tokens -- "la idea es entrar y tener los tokens". Shrunk the hero and
+   moved the title onto the image itself (over the existing fade, which
+   already darkens that area for contrast) so the token boards below can be
+   pulled up to overlap the hero's bottom edge and land in view immediately;
+   see .home-boards-overlap and the now-opaque .board-frame below, which is
+   what makes the sphinx read as passing BEHIND the token boxes rather than
+   showing through them ("y que se vea igual" -- same box style, just solid). */
 .hero-banner {
   position: relative;
   width: 100%;
-  height: 46vw;
-  max-height: 460px;
-  min-height: 220px;
+  height: 30vw;
+  max-height: 320px;
+  min-height: 190px;
   overflow: hidden;
 }
 .hero-banner img {
@@ -222,27 +230,42 @@ tr:hover td { background: #151517; cursor: pointer; }
 .hero-banner-fade {
   position: absolute;
   inset: 0;
-  background: linear-gradient(180deg, rgba(5,5,5,0) 55%, var(--bg) 100%);
+  background: linear-gradient(180deg, rgba(5,5,5,0) 40%, var(--bg) 100%);
   pointer-events: none;
 }
 
 .home-hero {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
   text-align: center;
-  padding: 8px 24px 32px;
-  margin-top: -8px;
+  padding: 8px 24px 18px;
+  margin: 0;
 }
 .home-hero h1 {
-  font-size: 40px;
+  font-size: 34px;
   font-weight: 700;
   letter-spacing: 0.06em;
-  margin: 0 0 6px;
+  margin: 0 0 4px;
   text-shadow: 0 0 30px var(--glow-soft);
 }
 .home-hero .tagline {
   color: var(--text-dim);
-  font-size: 14px;
+  font-size: 13px;
   text-transform: uppercase;
   letter-spacing: 2px;
+}
+
+/* Pulls the token boards up to overlap the hero's faded bottom edge --
+   the negative margin is what actually brings them into the first
+   viewport; the sphinx stays visible in the space around/above the
+   (now-opaque) board-frame boxes. */
+.home-boards-overlap {
+  position: relative;
+  z-index: 3;
+  margin-top: -56px;
 }
 
 .lore {
@@ -294,16 +317,19 @@ tr:hover td { background: #151517; cursor: pointer; }
   .explore-grid { grid-template-columns: 1fr; }
 }
 
-/* Home: Graduated / Explore token boards. Same sober black frame as the
-   rest of the site -- no tinted background on the frame, only the border,
-   per the brief (the sphinx hero stays the only imagery on the page). */
+/* Home: Graduated / Explore token boards. Solid (opaque) background --
+   not the old near-transparent gradient -- because this frame now
+   overlaps the hero image (see .home-boards-overlap above): opaque is
+   what makes the sphinx read as passing BEHIND the box instead of
+   showing through it, while everywhere else on the page (below the fold)
+   this box sits on the plain --bg anyway so it looks identical to before. */
 .board-frame {
   max-width: 940px;
   margin: 0 auto 20px;
   padding: 20px 22px 22px;
   border: 1px solid var(--border);
   border-radius: 12px;
-  background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent);
+  background: var(--bg);
 }
 .board-header { display: flex; align-items: center; }
 .board-header h2 {

@@ -12,6 +12,26 @@ function fmtMcap(n: number) {
   return n.toLocaleString("en-US", { maximumFractionDigits: 4 });
 }
 
+// Same tiny icon pattern as the market list (frontend/app/launchpad/page.tsx)
+// -- kept as its own local copy here rather than shared, matching how that
+// file does it. Brai, 2026-09-07: "aca quiero que me aparezca tambien si
+// tiene twitter y website abajo en chiquito" (home board cards too).
+function TwitterIcon() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+    </svg>
+  );
+}
+function WebsiteIcon() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M3 12h18M12 3c2.5 2.5 3.8 5.6 3.8 9s-1.3 6.5-3.8 9c-2.5-2.5-3.8-5.6-3.8-9s1.3-6.5 3.8-9z" />
+    </svg>
+  );
+}
+
 function TokenCard({ token, graduatedTag }: { token: TokenSummary; graduatedTag?: boolean }) {
   return (
     <Link href={`/launchpad/token/${token.symbol}`} className="board-card">
@@ -24,6 +44,36 @@ function TokenCard({ token, graduatedTag }: { token: TokenSummary; graduatedTag?
       <div className="sym">{token.symbol}</div>
       <div className="name">{token.name}</div>
       <div className="mc">{fmtMcap(token.marketCapZec)} ZEC</div>
+      {(token.twitterUrl || token.websiteUrl) && (
+        <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+          {token.twitterUrl && (
+            <a
+              href={token.twitterUrl}
+              target="_blank"
+              rel="noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              className="muted"
+              style={{ display: "inline-flex", color: "inherit" }}
+              title="Twitter / X"
+            >
+              <TwitterIcon />
+            </a>
+          )}
+          {token.websiteUrl && (
+            <a
+              href={token.websiteUrl}
+              target="_blank"
+              rel="noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              className="muted"
+              style={{ display: "inline-flex", color: "inherit" }}
+              title="Website"
+            >
+              <WebsiteIcon />
+            </a>
+          )}
+        </div>
+      )}
     </Link>
   );
 }
