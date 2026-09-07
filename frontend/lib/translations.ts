@@ -73,6 +73,9 @@ export const translations = {
   "market.col.graduation": { en: "Graduation", zh: "毕业状态" },
   "market.graduated": { en: "graduated", zh: "已毕业" },
   "market.bonding": { en: "bonding", zh: "曲线中" },
+  "market.filter.new": { en: "New", zh: "最新" },
+  "market.filter.marketCap": { en: "Market cap", zh: "市值" },
+  "market.filter.graduated": { en: "Graduated", zh: "已毕业" },
 
   // ---------- Create page ----------
   "create.title": { en: "Create a token", zh: "创建代币" },

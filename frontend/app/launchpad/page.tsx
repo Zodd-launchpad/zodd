@@ -32,10 +32,19 @@ function fmtPrice(n: number) {
   );
 }
 
+type FilterKey = "new" | "marketCap" | "graduated";
+
+const FILTERS: { key: FilterKey; labelKey: "market.filter.new" | "market.filter.marketCap" | "market.filter.graduated" }[] = [
+  { key: "new", labelKey: "market.filter.new" },
+  { key: "marketCap", labelKey: "market.filter.marketCap" },
+  { key: "graduated", labelKey: "market.filter.graduated" },
+];
+
 export default function MarketPage() {
   const { t } = useLanguage();
   const [tokens, setTokens] = useState<TokenSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState<FilterKey>("new");
 
   useEffect(() => {
     let stop = false;
@@ -55,6 +64,18 @@ export default function MarketPage() {
     };
   }, []);
 
+  const visibleTokens = (() => {
+    if (!tokens) return null;
+    if (filter === "graduated") {
+      return tokens.filter((t2) => t2.graduated).sort((a, b) => b.marketCapZec - a.marketCapZec);
+    }
+    if (filter === "marketCap") {
+      return [...tokens].sort((a, b) => b.marketCapZec - a.marketCapZec);
+    }
+    // "new": newest first
+    return [...tokens].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  })();
+
   return (
     <div className="container">
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
@@ -66,13 +87,36 @@ export default function MarketPage() {
         </Link>
       </div>
 
+      <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
+        {FILTERS.map((f) => (
+          <button
+            key={f.key}
+            onClick={() => setFilter(f.key)}
+            className="btn btn-outline"
+            style={{
+              fontSize: 12,
+              padding: "6px 14px",
+              borderColor: filter === f.key ? "var(--accent-dim)" : "var(--border)",
+              background: filter === f.key ? "var(--border)" : "transparent",
+              color: filter === f.key ? "var(--text)" : "var(--text-dim)",
+            }}
+          >
+            {t(f.labelKey)}
+          </button>
+        ))}
+      </div>
+
       {error && (
         <p style={{ color: "var(--red)" }}>{t("market.backendError", { error })}</p>
       )}
 
       {tokens && tokens.length === 0 && <p className="muted">{t("market.noTokens")}</p>}
 
-      {tokens && tokens.length > 0 && (
+      {visibleTokens && visibleTokens.length === 0 && tokens && tokens.length > 0 && (
+        <p className="muted">{t("market.noTokens")}</p>
+      )}
+
+      {visibleTokens && visibleTokens.length > 0 && (
         <table>
           <thead>
             <tr>
@@ -84,7 +128,7 @@ export default function MarketPage() {
             </tr>
           </thead>
           <tbody>
-            {tokens.map((t2) => (
+            {visibleTokens.map((t2) => (
               <tr key={t2.symbol} onClick={() => (location.href = `/launchpad/token/${t2.symbol}`)}>
                 <td>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
