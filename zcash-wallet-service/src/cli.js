@@ -156,14 +156,21 @@ export async function heightInfo() {
 /** Filters messages/value transfers received at a specific address -- this
  * is how we detect a buy order's payment landing, since every order gets
  * its own one-time address (see docs/ARCHITECTURE.md). Needs waitsync: true,
- * otherwise a payment that just confirmed on-chain won't show up here yet. */
+ * otherwise a payment that just confirmed on-chain won't show up here yet.
+ *
+ * IMPORTANT (found 2026-09-07): `zingo-cli messages <address>` consistently
+ * returns an empty value_transfers list even once the wallet's own balance
+ * has genuinely gone up by the expected amount -- confirmed live against
+ * two real 0.0001 ZEC payments that landed in the wallet's balance but
+ * never showed up via this address-filtered call. Per-diversified-address
+ * filtering on this subcommand isn't behaving the way we assumed. Fix:
+ * call `messages` with NO address argument (get every value transfer this
+ * wallet knows about) and filter for the address ourselves in JS, matching
+ * anywhere in the entry's JSON since zingolib's exact field name for the
+ * receiving address on each entry isn't pinned down on our side yet. */
 export async function messagesFor(address) {
-  const out = await runCli(["messages", address], { timeout: 3 * 60_000, waitsync: true });
+  const out = await runCli(["messages"], { timeout: 3 * 60_000, waitsync: true });
   const { json, raw } = parseMaybeJson(out);
-  // The real zingo-cli (confirmed live 2026-09-06) wraps entries as
-  // { "value_transfers": [...] }, not a bare array or { messages: [...] }
-  // like we originally guessed defensively -- same class of bug as the
-  // encoded_address/address mismatch in newAddress().
   const list = Array.isArray(json)
     ? json
     : Array.isArray(json?.messages)
@@ -177,11 +184,16 @@ export async function messagesFor(address) {
   }
   if (list.length > 0) {
     // zingolib's exact field names per entry aren't pinned down on our side
-    // yet -- log the raw shape once so a mismatch in the backend's own
-    // matching logic (zcashReal.ts) can be caught and fixed fast.
-    console.error(`[zcash-wallet-service] messagesFor(${address}) got ${list.length} entrie(s): ${JSON.stringify(list)}`);
+    // yet -- log the raw shape every time (not just once) while this is
+    // still being nailed down, so a mismatch in the backend's own matching
+    // logic (zcashReal.ts) can be caught and fixed fast.
+    console.error(`[zcash-wallet-service] messages() got ${list.length} total entrie(s), filtering for ${address}: ${JSON.stringify(list)}`);
   }
-  return list;
+  const matches = list.filter((m) => JSON.stringify(m).includes(address));
+  if (matches.length > 0) {
+    console.error(`[zcash-wallet-service] matched ${matches.length} entrie(s) for ${address}`);
+  }
+  return matches;
 }
 
 const MAX_MEMO_BYTES = 512; // Zcash shielded memo field hard limit
