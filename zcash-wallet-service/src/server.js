@@ -127,6 +127,19 @@ app.get("/wallet/value-transfers-raw-debug", async (_req, reply) => {
   }
 });
 
+app.get("/wallet/value-to-address-raw-debug", async (req, reply) => {
+  if (!ready) return reply.code(503).send({ error: "wallet not ready yet", detail: readyError });
+  const address = req.query?.address;
+  if (!address) return reply.code(400).send({ error: "address query param required" });
+  try {
+    const raw = await cli.rawValueToAddressDebug(address);
+    return reply.send(raw);
+  } catch (err) {
+    app.log.error(err);
+    return reply.code(500).send({ error: String(err.message ?? err) });
+  }
+});
+
 app.get("/wallet/addresses-raw-debug", async (_req, reply) => {
   if (!ready) return reply.code(503).send({ error: "wallet not ready yet", detail: readyError });
   try {

@@ -888,6 +888,21 @@ app.get("/api/admin/addresses-raw-debug", async (req, reply) => {
   }
 });
 
+app.get("/api/admin/value-to-address-raw-debug", async (req, reply) => {
+  if (ZCASH_MODE !== "real") return reply.code(404).send({ error: "not in real mode" });
+  if (!DEBUG_NOTES_TOKEN) return reply.code(503).send({ error: "DEBUG_NOTES_TOKEN is not configured" });
+  const suppliedToken = req.headers["x-debug-token"] ?? (req.query as any)?.token;
+  if (suppliedToken !== DEBUG_NOTES_TOKEN) return reply.code(401).send({ error: "unauthorized" });
+  const address = (req.query as any)?.address;
+  if (!address) return reply.code(400).send({ error: "address query param required" });
+  try {
+    const raw = await (zcashService as typeof import("./lib/zcashReal.js")).rawValueToAddressDebug(address);
+    return reply.send(raw);
+  } catch (err) {
+    return reply.code(502).send({ error: String((err as Error).message ?? err) });
+  }
+});
+
 app.get("/api/admin/unclaimed-notes", async (req, reply) => {
   if (ZCASH_MODE !== "real") return reply.code(404).send({ error: "not in real mode" });
   if (!ADMIN_TOKEN) return reply.code(503).send({ error: "ADMIN_TOKEN is not configured" });
