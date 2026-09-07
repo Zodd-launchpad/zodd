@@ -181,6 +181,27 @@ export async function heightInfo() {
 // ones. If this still comes back empty, the next thing to try is `notes` or
 // `list` (raw note-level view) instead of `messages`.
 let lastLoggedRaw = null;
+// CONFIRMED 2026-09-07: `messages` (no address) reliably returns
+// `{"value_transfers": []}` -- genuinely empty, not a parsing bug -- even
+// though spendable_balance is confirmed nonzero and includes two real
+// incoming payments. So `messages`/value_transfers appears to track only
+// transfers THIS wallet itself initiated via send/quicksend, not arbitrary
+// deposits received from outside. Falling back to `notes`, which lists the
+// wallet's actual shielded notes (received UTXO-equivalents) and should
+// include incoming deposits regardless of who sent them. Logged
+// unconditionally (throttled to once per distinct raw output) until the
+// real field shape is confirmed live, same pattern as messages() above.
+let lastLoggedNotesRaw = null;
+async function notesRaw() {
+  const out = await runCli(["notes"], { timeout: 3 * 60_000, waitsync: true });
+  const { json, raw } = parseMaybeJson(out);
+  if (raw !== lastLoggedNotesRaw) {
+    lastLoggedNotesRaw = raw;
+    console.error(`[zcash-wallet-service] notes() raw output changed, full dump: ${raw}`);
+  }
+  return json;
+}
+
 export async function messagesFor(address) {
   const out = await runCli(["messages"], { timeout: 3 * 60_000, waitsync: true });
   const { json, raw } = parseMaybeJson(out);
@@ -195,6 +216,10 @@ export async function messagesFor(address) {
       : Array.isArray(json?.value_transfers)
         ? json.value_transfers
         : null;
+  // Always also pull notes(), even while messages() is still the primary
+  // source, purely for the debug dump above -- this is the fallback we'll
+  // switch to once its shape is confirmed live.
+  await notesRaw().catch((err) => console.error(`[zcash-wallet-service] notes() call failed: ${String(err.message ?? err)}`));
   if (list === null) {
     console.error(`[zcash-wallet-service] unrecognized messages() output, needs a look: ${raw}`);
     return [];
