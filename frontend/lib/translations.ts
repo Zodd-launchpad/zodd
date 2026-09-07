@@ -249,6 +249,14 @@ export const translations = {
     en: "Real ZEC: this is a live mainnet payment. It confirms automatically once the network detects it (usually a couple of minutes).",
     zh: "真实 ZEC：这是主网上的真实付款。网络检测到后会自动确认（通常需要几分钟）。",
   },
+  "buy.alreadyPaidAck": {
+    en: "OK, I've paid — I understand it can take 10-15 minutes to reflect in my balance, depending on the Zcash blockchain",
+    zh: "好的，我已支付 —— 我知道这可能需要 10-15 分钟才能反映到我的余额，具体取决于 Zcash 区块链",
+  },
+  "buy.alreadyPaidAck.confirmed": {
+    en: "Got it. Still watching for your payment — this can take 10-15 minutes.",
+    zh: "已确认。仍在等待你的付款确认，这可能需要 10-15 分钟。",
+  },
   "buy.filled.title": { en: "Filled", zh: "已成交" },
   "buy.filled.body": { en: "You received {amount} {symbol}.", zh: "你收到了 {amount} {symbol}。" },
   "buy.close": { en: "Close", zh: "关闭" },

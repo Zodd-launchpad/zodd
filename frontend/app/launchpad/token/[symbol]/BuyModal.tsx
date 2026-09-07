@@ -23,6 +23,7 @@ export default function BuyModal({ symbol, walletId, onClose }: { symbol: string
   const [tokensOut, setTokensOut] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isRealMode, setIsRealMode] = useState(false);
+  const [paidAck, setPaidAck] = useState(false);
 
   useEffect(() => {
     api.getMode().then((m) => setIsRealMode(m.zcashMode === "real")).catch(() => {});
@@ -39,6 +40,7 @@ export default function BuyModal({ symbol, walletId, onClose }: { symbol: string
       setExactZecAmount(order.zecAmount);
       const uri = `zcash:${order.zecAddress}?amount=${order.zecAmount}`; // simplified ZIP-321 format
       setQr(await QRCode.toDataURL(uri, { margin: 1, width: 220 }));
+      setPaidAck(false);
       setPhase("waiting");
     } catch (e: any) {
       setError(e.message);
@@ -91,6 +93,19 @@ export default function BuyModal({ symbol, walletId, onClose }: { symbol: string
               {address}
             </div>
             <p className="muted" style={{ marginTop: 14, fontSize: 12 }}>{isRealMode ? t("buy.realNote") : t("buy.simulatedNote")}</p>
+            {isRealMode && (
+              paidAck ? (
+                <p className="muted" style={{ marginTop: 10, fontSize: 12, textAlign: "center" }}>{t("buy.alreadyPaidAck.confirmed")}</p>
+              ) : (
+                <button
+                  className="btn btn-outline"
+                  style={{ width: "100%", marginTop: 10, fontSize: 12, lineHeight: 1.4 }}
+                  onClick={() => setPaidAck(true)}
+                >
+                  {t("buy.alreadyPaidAck")}
+                </button>
+              )
+            )}
           </>
         )}
 
