@@ -269,53 +269,51 @@ export function buildPaymentMemoBase64(orderId: string): string {
   return Buffer.from(orderId, "utf8").toString("base64");
 }
 
-// Found 2026-09-07, same incident as HARD_MAX_LIFETIME_MS above: matching
-// is amount-only, so two orders open at once for the identical amount is a
-// straight-up ambiguity the code cannot resolve correctly -- whichever was
-// registered first always wins the next matching note, even when it's the
-// wrong one (a stale abandoned creation stole a real FLORK payment this
-// way). The hard-lifetime cap above narrows the window this can happen in,
-// but doesn't remove it: two orders can still be legitimately open, unpaid,
-// at the same moment. The actual fix is to never let that ambiguity exist
-// in the first place -- every new order gets a tiny, effectively invisible
-// (a few thousand zatoshis, a fraction of a cent) bump added on top of the
-// requested amount until it no longer matches any currently-watched order,
-// so the amount itself is always a unique fingerprint. The caller must
-// display/charge this adjusted amount, not the original request.
+// Found 2026-09-07, same incident as HARD_MAX_LIFETIME_MS above: back when
+// matching was amount-only, two orders open at once for the identical
+// amount was a straight-up ambiguity the code couldn't resolve correctly --
+// whichever was registered first always won the next matching note, even
+// when it was the wrong one (a stale abandoned creation stole a real FLORK
+// payment this way). This function originally "fixed" that by bumping the
+// requested amount by a few thousand zatoshis until it was unique, and
+// making the caller display/charge that bumped amount instead of what was
+// actually requested.
 //
-// IMPORTANT (caught 2026-09-07, before shipping -- Brai: "si sumas un
-// pelito en 20 a la vez... se te van a pisar los numeros, chequea que no
-// este usado el numero"): picking the amount and reserving it are NOT the
-// same moment. The obvious version of this -- check watchers, then `await`
-// the wallet-service call for a fresh address, then finally add the picked
-// amount to watchers -- has a real race: with 20 people buying 0.1 ZEC
-// within the same ~second, every one of those 20 requests can run its
-// "is 0.1 taken?" check BEFORE any of them has reached the watchers.set()
-// at the end (they're all sitting mid-`await` on the address call at that
-// point), so all 20 see "not taken" and all 20 collide on 0.1 anyway --
-// exactly the bug this function exists to prevent, just moved one step
-// later. The fix: reserve the picked amount in `watchers` SYNCHRONOUSLY,
-// before the first `await` in generateOrderAddress. Node only switches
-// between concurrent requests at an `await`, so nothing can see a
-// half-picked amount as "free" -- reservation is atomic with the pick.
-const DISAMBIGUATION_BUMP_ZATS = 1000; // 0.00001 ZEC per collision retry
+// Brai, 2026-09-07 (later): "yo pongo comprar 0.0001 y me pone q tengo q
+// pagar 0.00015000000000000001 ... vos tenes que hacer que yo pague 0.0001
+// ... q la gente pague el monto que quiere comprar" -- charging a bumped,
+// floating-point-ugly amount the buyer never asked for is bad UX, and by
+// this point it's also no longer the primary defense: the memo-based match
+// added above (Pass 1 in the poll loop) already identifies each order by
+// its own unique orderId regardless of amount, so a same-amount collision
+// between two DIFFERENT orders is no longer ambiguous for any wallet that
+// preserves the ZIP-321 memo. The bump is now removed -- every order is
+// watched for the exact amount requested. The one residual gap: a payer
+// whose wallet drops the memo entirely (manual retype, non-ZIP-321 wallet)
+// still falls back to amount-only matching (Pass 2), so two such payments
+// for the identical amount, open at the same moment, could in theory still
+// cross-match -- same accepted, fund-safe-only risk described above (money
+// always lands in the platform wallet either way; only the credited
+// PENDING RECORD could be wrong). Considered an acceptable tradeoff for no
+// longer charging buyers an amount they didn't ask for.
+//
+// IMPORTANT (caught 2026-09-07, before shipping the original bump -- Brai:
+// "si sumas un pelito en 20 a la vez... se te van a pisar los numeros,
+// chequea que no este usado el numero"): picking the amount and reserving
+// it must NOT be two separate moments, even without a bump to pick --
+// registering the watcher still has to happen synchronously, before the
+// first `await` in generateOrderAddress, so a burst of concurrent requests
+// can't all read `watchers` in an inconsistent state. Node only switches
+// between concurrent requests at an `await`, so reserving here first keeps
+// that atomic.
 function pickAndReserveAmount(orderId: string, expectedZecAmount: number): number {
-  let candidate = expectedZecAmount;
-  let bumps = 0;
-  const isTaken = (zec: number) => {
-    const zats = Math.round(zec * ZATOSHIS_PER_ZEC);
-    return [...watchers.values()].some((w) => Math.round(w.expectedZecAmount * ZATOSHIS_PER_ZEC) === zats);
-  };
-  while (isTaken(candidate) && bumps < 200) {
-    bumps += 1;
-    candidate = expectedZecAmount + (bumps * DISAMBIGUATION_BUMP_ZATS) / ZATOSHIS_PER_ZEC;
-  }
   // Reserve it right here, same tick, before any await -- the address is
   // filled in afterward once we have it. An empty address doesn't affect
-  // matching (matching is amount-only, see the poll loop above).
+  // matching (memo matching doesn't use the address at all; amount
+  // matching only needs expectedZecAmount, already set below).
   const now = Date.now();
-  watchers.set(orderId, { orderId, address: "", expectedZecAmount: candidate, createdAt: now, originalCreatedAt: now });
-  return candidate;
+  watchers.set(orderId, { orderId, address: "", expectedZecAmount, createdAt: now, originalCreatedAt: now });
+  return expectedZecAmount;
 }
 
 /** Generates a real one-time address for a buy order via the wallet
