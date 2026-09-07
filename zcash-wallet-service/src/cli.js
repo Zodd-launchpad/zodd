@@ -191,6 +191,25 @@ export async function rawNotesDebug() {
   return json ?? raw;
 }
 
+// Brai, 2026-09-07: "la direccion ES la orden" -- SHLD.fun (the platform
+// this one is modeled on) demonstrably CAN tell which one-time shielded
+// address a payment landed on, which means this is NOT an inherent
+// Zcash/shielded limitation -- it's specific to what zingo-cli's `notes`
+// command surfaces (confirmed empty of any address field via
+// rawNotesDebug above). Before concluding we need to replace zingo-cli
+// entirely, check what it can ACTUALLY do: `notes`' own account_id field
+// (always 0 so far, on every note we've ever seen) implies multi-account
+// support exists in the underlying wallet -- if zingo-cli can create a
+// separate account per order and reports notes scoped to the account they
+// landed in, that's a real per-order signal with zero new tooling. This
+// pulls the CLI's own help text so we can see the full command surface
+// (new_address's account-related flags, any account/list_accounts/
+// create_account command, etc.) instead of guessing.
+export async function rawHelpDebug() {
+  const out = await runCli(["help"], { timeout: 30_000 });
+  return out;
+}
+
 export async function unspentNotes() {
   const out = await runCli(["notes"], { timeout: 3 * 60_000, waitsync: true });
   const { json, raw } = parseMaybeJson(out);

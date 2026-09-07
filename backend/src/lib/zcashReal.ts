@@ -415,6 +415,12 @@ export async function rawNotesDebug(): Promise<unknown> {
   return call(`/wallet/notes-raw-debug`);
 }
 
+// Temporary diagnostic -- see the comment on rawHelpDebug in
+// zcash-wallet-service's cli.js. Remove once answered.
+export async function rawHelpDebug(): Promise<unknown> {
+  return call(`/wallet/help-raw-debug`);
+}
+
 /** Re-registers a watcher for an address that was already generated in a
  * previous process lifetime (see server.ts's startup call to
  * store.getPendingOrdersAwaitingPayment / getPendingTokenCreationsAwaitingPayment).
