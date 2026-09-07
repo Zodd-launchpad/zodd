@@ -70,7 +70,10 @@ export const api = {
     if (!modePromise) modePromise = req("/api/mode");
     return modePromise;
   },
-  portfolio: (walletId: string) => req(`/api/wallets/${walletId}/portfolio`),
+  portfolio: (
+    walletId: string
+  ): Promise<{ walletTag: string; holdings: { symbol: string; name: string; amount: number; priceZec: number }[] }> =>
+    req(`/api/wallets/${walletId}/portfolio`),
   listTokens: (): Promise<TokenSummary[]> => req("/api/tokens"),
   getToken: (symbol: string): Promise<TokenSummary> => req(`/api/tokens/${symbol}`),
   getHistory: (symbol: string): Promise<PricePoint[]> => req(`/api/tokens/${symbol}/history`),

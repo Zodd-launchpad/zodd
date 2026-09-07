@@ -10,6 +10,28 @@ function fmt(n: number, digits = 4) {
   return n.toLocaleString("en-US", { maximumFractionDigits: digits });
 }
 
+// Meme-token prices land absurdly small (e-9, e-10...) once a token has a
+// billion-token supply, and "2.80e-9" reads as a bug to anyone who isn't
+// used to scientific notation. Same trick DexScreener/Binance use: show the
+// count of leading zeros after the decimal point as a small subscript, then
+// the first few significant digits -- "0.0₈280" instead of "2.80e-9". Keeps
+// the real magnitude visible (nothing is actually rounded away) while
+// reading as a clean, non-scary number.
+function fmtPrice(n: number) {
+  if (n === 0) return "0";
+  if (Math.abs(n) >= 0.0001) return n.toLocaleString("en-US", { maximumFractionDigits: 8 });
+  const exp = Math.floor(Math.log10(Math.abs(n)));
+  const leadingZeros = -exp - 1;
+  const mantissa = n / Math.pow(10, exp);
+  const digits = mantissa.toFixed(2).replace(".", "").replace("-", "");
+  return (
+    <>
+      0.0<sub>{leadingZeros}</sub>
+      {digits}
+    </>
+  );
+}
+
 export default function MarketPage() {
   const { t } = useLanguage();
   const [tokens, setTokens] = useState<TokenSummary[] | null>(null);
@@ -77,7 +99,7 @@ export default function MarketPage() {
                     </div>
                   </div>
                 </td>
-                <td className="mono">{fmt(t2.priceZec, 12)}</td>
+                <td className="mono">{fmtPrice(t2.priceZec)} ZEC</td>
                 <td className="mono">{fmt(t2.marketCapZec)} ZEC</td>
                 <td className="mono">{fmt(t2.realZecReserves)} ZEC</td>
                 <td className={t2.graduated ? "pill up" : "muted"}>{t2.graduated ? t("market.graduated") : t("market.bonding")}</td>

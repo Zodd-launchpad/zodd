@@ -237,11 +237,15 @@ export const translations = {
   // ---------- Sell modal ----------
   "sell.title": { en: "Sell {symbol}", zh: "卖出 {symbol}" },
   "sell.amountLabel": { en: "Amount ({symbol})", zh: "数量（{symbol}）" },
+  "sell.balance": { en: "You have: {amount} {symbol}", zh: "你持有：{amount} {symbol}" },
+  "sell.half": { en: "Half", zh: "一半" },
+  "sell.max": { en: "Max", zh: "最大" },
   "sell.addressLabel": { en: "Your Zcash address (payout)", zh: "你的 Zcash 地址（收款）" },
   "sell.button": { en: "Sell", zh: "卖出" },
   "sell.payoutSent": { en: "Payout sent", zh: "打款已发送" },
   "sell.payoutBody": { en: "{amount} ZEC (simulated) to your address.", zh: "{amount} ZEC（模拟）已发送到你的地址。" },
   "sell.error.invalidAmount": { en: "invalid amount", zh: "金额无效" },
+  "sell.error.exceedsBalance": { en: "you don't have that many {symbol}", zh: "你没有那么多 {symbol}" },
   "sell.error.invalidAddress": { en: "enter a valid Zcash address to receive the payout", zh: "请输入有效的 Zcash 地址以接收打款" },
 
   // ---------- Chart ----------
