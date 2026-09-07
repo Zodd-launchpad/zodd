@@ -90,7 +90,23 @@ export function quoteSell(state: CurveState, tokensIn: number, cfg: CurveConfig 
 
   const tokensAfter = tokensBefore + tokensIn;
   const zecAfter = k / tokensAfter;
-  const zecOut = zecBefore - zecAfter;
+  let zecOut = zecBefore - zecAfter;
+
+  // store.ts persists tokensSold/balances as whole tokens (BigInt(Math.round(...))
+  // -- see updateTokenCurve/creditBalance) while realZecReserves stays an exact
+  // float. That rounding is one-directional (up, on average), so selling back
+  // the FULL rounded balance a curve issued can legitimately compute a zecOut
+  // a hair above realZecReserves -- found 2026-09-07 on a real full-supply sell:
+  // 350,399 tokens (rounded up from 350,398.8697) priced out to 0.00098000036
+  // ZEC against a real reserve of exactly 0.00098. That's rounding noise, not
+  // an actual shortfall, so it's clamped rather than rejected. The max this
+  // can ever be off by is ~half a token's worth of ZEC at the current
+  // marginal price -- nowhere near enough to let a sell drain more than what
+  // the curve actually holds.
+  const ROUNDING_EPSILON_ZEC = 1e-6;
+  if (zecOut > state.realZecReserves && zecOut - state.realZecReserves <= ROUNDING_EPSILON_ZEC) {
+    zecOut = state.realZecReserves;
+  }
 
   if (zecOut <= 0 || zecOut > state.realZecReserves) {
     throw new Error("invalid sell: exceeds the real ZEC reserve");

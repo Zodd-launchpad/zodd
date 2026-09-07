@@ -362,7 +362,16 @@ const sellSchema = z.object({
   walletId: z.string(),
   symbol: z.string(),
   tokenAmount: z.number().positive(),
-  refundAddress: z.string().min(10),
+  // Same rule as creatorPayoutAddress above and for the same reason: this is
+  // an automated send out of the platform's own wallet, and paying out to a
+  // transparent (t1...) address would "deshield" it on-chain, permanently
+  // and publicly linking the platform reserve to that address. This was
+  // missing here until a real sell test surfaced it (2026-09-07) -- only
+  // the create-token payout address had the check.
+  refundAddress: z
+    .string()
+    .min(10)
+    .refine(isShieldedAddress, "refund address must be shielded (starts with u1 or zs1)"),
 });
 
 app.post("/api/orders/sell", async (req, reply) => {
