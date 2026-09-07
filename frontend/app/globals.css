@@ -234,14 +234,21 @@ tr:hover td { background: #151517; cursor: pointer; }
   pointer-events: none;
 }
 
+/* Found 2026-09-07 (Brai, screenshot): bottom:0 here plus the -56px pull on
+   .home-boards-overlap below made the opaque board box cut straight through
+   the title and hide the tagline completely -- the overlap zone and the
+   text were occupying the same pixels. Fix: anchor the title well above the
+   hero's bottom edge (bottom: 64px) and keep the overlap small enough
+   (-22px) that it stays inside the empty faded strip below the tagline,
+   never touching the text. */
 .home-hero {
   position: absolute;
   left: 0;
   right: 0;
-  bottom: 0;
+  bottom: 64px;
   z-index: 2;
   text-align: center;
-  padding: 8px 24px 18px;
+  padding: 0 24px;
   margin: 0;
 }
 .home-hero h1 {
@@ -261,11 +268,12 @@ tr:hover td { background: #151517; cursor: pointer; }
 /* Pulls the token boards up to overlap the hero's faded bottom edge --
    the negative margin is what actually brings them into the first
    viewport; the sphinx stays visible in the space around/above the
-   (now-opaque) board-frame boxes. */
+   (now-opaque) board-frame boxes. Kept smaller than .home-hero's bottom
+   offset above so it never reaches the title/tagline text. */
 .home-boards-overlap {
   position: relative;
   z-index: 3;
-  margin-top: -56px;
+  margin-top: -22px;
 }
 
 .lore {
