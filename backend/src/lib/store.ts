@@ -296,6 +296,22 @@ export async function getPriceHistory(tokenId: string): Promise<PricePointView[]
   return points.map((p) => ({ priceZec: num(p.priceZec), mcapZec: num(p.mcapZec), createdAt: p.createdAt.toISOString() }));
 }
 
+/** % change vs. the price ~24h ago, for the "24h" column on the market list.
+ * Returns null when the token has no recorded price point older than 24h
+ * yet (too new to have a 24h change) -- the frontend shows a dash for that,
+ * rather than a misleading 0.00%. */
+export async function getPriceChange24hPct(tokenId: string, currentPriceZec: number): Promise<number | null> {
+  const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const point = await prisma.pricePoint.findFirst({
+    where: { tokenId, createdAt: { lte: cutoff } },
+    orderBy: { createdAt: "desc" },
+  });
+  if (!point) return null;
+  const oldPrice = num(point.priceZec);
+  if (oldPrice <= 0) return null;
+  return ((currentPriceZec - oldPrice) / oldPrice) * 100;
+}
+
 // ---------- Recent trades (for the trade feed) ----------
 
 export interface TradeView {
@@ -471,6 +487,35 @@ export async function getAllKnownPaymentTxids(): Promise<string[]> {
     ...orders.map((o) => o.executionTxid),
   ].filter((t): t is string => !!t);
   return txids;
+}
+
+/** Same-order repeat payment (see isRepeat in zcashReal.ts / server.ts):
+ * the ORIGINAL order is already FILLED, so a second (third, ...) send of
+ * its exact amount can't fill it again -- instead this creates a brand-new
+ * order, already FILLED, that mirrors the original's wallet/token/address
+ * and the fresh execution details for that specific repeat payment. */
+export async function createRepeatBuyOrder(input: {
+  internalWalletId: string;
+  tokenId: string;
+  zecAddress: string | null;
+  zecAmount: number;
+  tokenAmount: number;
+  executionTxid: string;
+}) {
+  const o = await prisma.order.create({
+    data: {
+      internalWalletId: input.internalWalletId,
+      tokenId: input.tokenId,
+      side: "BUY",
+      status: "FILLED",
+      zecAddress: input.zecAddress,
+      zecAmount: input.zecAmount,
+      tokenAmount: BigInt(Math.round(input.tokenAmount)),
+      executionTxid: input.executionTxid,
+      filledAt: new Date(),
+    },
+  });
+  return toOrderView(o);
 }
 
 export async function fillBuyOrder(orderId: string, tokenAmount: number, executionTxid: string) {

@@ -10,10 +10,27 @@ import Chart from "./Chart";
 import TradesList from "./TradesList";
 import Hourglass from "./Hourglass";
 
+// Same subscript-leading-zeros trick as fmtPrice in the Launchpad list page
+// (see its comment there): a tiny ZEC amount like a 1% creator fee on a
+// 0.00003 ZEC test buy used to render as "3.00e-7 ZEC" via toExponential,
+// which reads as "3 ZEC" at a glance if you're not used to exponential
+// notation -- Brai flagged exactly this ("no puede haber 3 zec de
+// ganancia... no compré ni 0.01 zec") on a value that was actually
+// 0.0000003 ZEC, correctly tiny. This renders it as "0.0₆300" instead --
+// same real magnitude, nothing rounded away, but unambiguous at a glance.
 function fmt(n: number, digits = 6) {
   if (n === 0) return "0";
-  if (Math.abs(n) < 0.0001) return n.toExponential(2);
-  return n.toLocaleString("en-US", { maximumFractionDigits: digits });
+  if (Math.abs(n) >= 0.0001) return n.toLocaleString("en-US", { maximumFractionDigits: digits });
+  const exp = Math.floor(Math.log10(Math.abs(n)));
+  const leadingZeros = -exp - 1;
+  const mantissa = n / Math.pow(10, exp);
+  const mantissaDigits = mantissa.toFixed(2).replace(".", "").replace("-", "");
+  return (
+    <>
+      0.0<sub>{leadingZeros}</sub>
+      {mantissaDigits}
+    </>
+  );
 }
 
 function shortHash(h: string) {
@@ -132,7 +149,7 @@ export default function TokenPage() {
 
         <div className="card" style={{ marginTop: 16 }}>
           <div className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>{t("token.supply")}</div>
-          <div style={{ fontWeight: 700 }}>{t("token.supplyUnit", { n: fmt(token.totalSupply, 0) })}</div>
+          <div style={{ fontWeight: 700 }}>{t("token.supplyUnit", { n: token.totalSupply.toLocaleString("en-US", { maximumFractionDigits: 0 }) })}</div>
         </div>
 
         <div className="card" style={{ marginTop: 16 }}>

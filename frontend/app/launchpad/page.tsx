@@ -32,6 +32,30 @@ function fmtPrice(n: number) {
   );
 }
 
+// Small horizontal bar for the Graduation column -- fills left-to-right
+// with the same 0-100 progress the Hourglass on the token page shows,
+// so "how close to graduating" is visible at a glance in the list too.
+function GraduationBar({ pct, graduated }: { pct: number; graduated: boolean }) {
+  const clamped = Math.max(0, Math.min(100, pct));
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 90 }}>
+      <div style={{ flex: 1, height: 6, borderRadius: 3, background: "var(--border)", overflow: "hidden" }}>
+        <div
+          style={{
+            width: `${clamped}%`,
+            height: "100%",
+            background: graduated ? "var(--green)" : "var(--accent)",
+            borderRadius: 3,
+          }}
+        />
+      </div>
+      <span className="muted" style={{ fontSize: 11, minWidth: 30, textAlign: "right" }}>
+        {clamped.toFixed(0)}%
+      </span>
+    </div>
+  );
+}
+
 type FilterKey = "new" | "marketCap" | "graduated";
 
 const FILTERS: { key: FilterKey; labelKey: "market.filter.new" | "market.filter.marketCap" | "market.filter.graduated" }[] = [
@@ -123,32 +147,40 @@ export default function MarketPage() {
               <th>{t("market.col.token")}</th>
               <th>{t("market.col.price")}</th>
               <th>{t("market.col.marketCap")}</th>
-              <th>{t("market.col.reserve")}</th>
+              <th>{t("market.col.change24h")}</th>
               <th>{t("market.col.graduation")}</th>
             </tr>
           </thead>
           <tbody>
-            {visibleTokens.map((t2) => (
-              <tr key={t2.symbol} onClick={() => (location.href = `/launchpad/token/${t2.symbol}`)}>
-                <td>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    {t2.logoDataUrl ? (
-                      <img src={t2.logoDataUrl} alt="" width={28} height={28} style={{ borderRadius: 6, objectFit: "cover", flexShrink: 0 }} />
-                    ) : (
-                      <div style={{ width: 28, height: 28, borderRadius: 6, background: "var(--border)", flexShrink: 0 }} />
-                    )}
-                    <div>
-                      <strong>{t2.symbol}</strong>
-                      <div className="muted">{t2.name}</div>
+            {visibleTokens.map((t2) => {
+              const gradPct = Math.min(100, (t2.realZecReserves / t2.graduationThresholdZec) * 100);
+              const change = t2.priceChange24hPct;
+              return (
+                <tr key={t2.symbol} onClick={() => (location.href = `/launchpad/token/${t2.symbol}`)}>
+                  <td>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      {t2.logoDataUrl ? (
+                        <img src={t2.logoDataUrl} alt="" width={28} height={28} style={{ borderRadius: 6, objectFit: "cover", flexShrink: 0 }} />
+                      ) : (
+                        <div style={{ width: 28, height: 28, borderRadius: 6, background: "var(--border)", flexShrink: 0 }} />
+                      )}
+                      <div>
+                        <strong>{t2.symbol}</strong>
+                        <div className="muted">{t2.name}</div>
+                      </div>
                     </div>
-                  </div>
-                </td>
-                <td className="mono">{fmtPrice(t2.priceZec)} ZEC</td>
-                <td className="mono">{fmt(t2.marketCapZec)} ZEC</td>
-                <td className="mono">{fmt(t2.realZecReserves)} ZEC</td>
-                <td className={t2.graduated ? "pill up" : "muted"}>{t2.graduated ? t("market.graduated") : t("market.bonding")}</td>
-              </tr>
-            ))}
+                  </td>
+                  <td className="mono">{fmtPrice(t2.priceZec)} ZEC</td>
+                  <td className="mono">{fmt(t2.marketCapZec)} ZEC</td>
+                  <td className="mono" style={{ color: change == null ? undefined : change > 0 ? "var(--green)" : change < 0 ? "var(--red)" : undefined }}>
+                    {change == null ? "—" : `${change > 0 ? "+" : ""}${change.toFixed(2)}%`}
+                  </td>
+                  <td>
+                    <GraduationBar pct={gradPct} graduated={t2.graduated} />
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       )}

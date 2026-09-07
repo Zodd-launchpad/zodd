@@ -176,14 +176,14 @@ app.get("/api/token-creations/:id", async (req, reply) => {
 
 app.get("/api/tokens", async (_req, reply) => {
   const tokens = await store.listTokens();
-  return reply.send(tokens.map(serializeToken));
+  return reply.send(await Promise.all(tokens.map(serializeToken)));
 });
 
 app.get("/api/tokens/:symbol", async (req, reply) => {
   const { symbol } = req.params as { symbol: string };
   const token = await store.getToken(symbol.toUpperCase());
   if (!token) return reply.code(404).send({ error: "token not found" });
-  return reply.send(serializeToken(token));
+  return reply.send(await serializeToken(token));
 });
 
 app.get("/api/tokens/:symbol/history", async (req, reply) => {
@@ -200,12 +200,14 @@ app.get("/api/tokens/:symbol/trades", async (req, reply) => {
   return reply.send(await store.getRecentTrades(token.id, 100));
 });
 
-function serializeToken(t: store.TokenWithCurve) {
+async function serializeToken(t: store.TokenWithCurve) {
+  const priceZec = currentPrice(t.curve);
   return {
     symbol: t.symbol,
     name: t.name,
     totalSupply: t.totalSupply,
-    priceZec: currentPrice(t.curve),
+    priceZec,
+    priceChange24hPct: await store.getPriceChange24hPct(t.id, priceZec),
     marketCapZec: marketCapZec(t.curve, t.totalSupply),
     realZecReserves: t.curve.realZecReserves,
     tokensSold: t.curve.tokensSold,
@@ -292,10 +294,19 @@ app.get("/api/orders/:id", async (req, reply) => {
 // address through the same generateOrderAddress(id, amount) call, so a
 // single global "a payment landed" callback has to figure out which kind
 // of thing this id refers to before it knows what to do about it.
-onPaymentDetected(async (orderId, confirmedZecAmount, txid) => {
+onPaymentDetected(async (orderId: string, confirmedZecAmount: number, txid: string, opts?: { isRepeat: boolean }) => {
+  const isRepeat = opts?.isRepeat ?? false;
   const pendingCreation = await store.getPendingTokenCreation(orderId).catch(() => null);
   if (pendingCreation) {
-    if (pendingCreation.status !== "PENDING") return;
+    if (pendingCreation.status !== "PENDING") {
+      // A repeat send of a token-creation's fee amount can't create a
+      // second token for the same symbol -- there's nothing meaningful to
+      // credit it against, so it's left as an unclaimed note for admin
+      // recovery (see listUnclaimedNotes in zcashReal.ts), same as any
+      // other surplus payment.
+      if (isRepeat) app.log.warn(`repeat payment of ${confirmedZecAmount} ZEC landed on token-creation ${orderId} after it already ${pendingCreation.status} -- left unclaimed (txid ${txid})`);
+      return;
+    }
     try {
       // Real mode: this payment's own txid becomes the token's genesis
       // memo -- it's the creator's real fee payment, which is a more
@@ -314,10 +325,18 @@ onPaymentDetected(async (orderId, confirmedZecAmount, txid) => {
   }
 
   // When the zcash-service detects a buy order's payment, the order
-  // executes against the bonding curve at that moment's price.
+  // executes against the bonding curve at that moment's price. A payer who
+  // resends the exact same amount to the exact same order again (Brai:
+  // "si confirmas la compra 10 veces, tiene que comprarte 10 veces") gets
+  // an equivalent ADDITIONAL buy each time instead of the extra sends
+  // sitting unclaimed -- see isRepeat, set by zcashReal.ts's poll loop.
+  // The original order can only ever be filled once, so a repeat clones a
+  // brand-new, already-FILLED order rather than touching the original.
   try {
     const order = await store.getOrder(orderId);
-    if (!order || order.status !== "PENDING") return;
+    if (!order) return;
+    if (!isRepeat && order.status !== "PENDING") return;
+    if (isRepeat && order.status !== "FILLED") return; // nothing to clone off of yet -- shouldn't happen (see isRepeat's origin), but don't act on a half-formed order
     const token = await store.getTokenById(order.tokenId);
     if (!token) return;
 
@@ -330,12 +349,24 @@ onPaymentDetected(async (orderId, confirmedZecAmount, txid) => {
     await store.recordPricePoint(token.id, newState, token.totalSupply);
     await store.creditBalance(order.internalWalletId, token.id, tokensOut);
     await store.accrueFees(token.id, creatorFee, platformFee);
-    await store.fillBuyOrder(order.id, tokensOut, txid);
 
-    app.log.info(`order ${orderId} filled: ${confirmedZecAmount} ZEC -> ${tokensOut.toFixed(0)} ${token.symbol} (fee ${(creatorFee + platformFee).toFixed(8)} ZEC)`);
+    if (isRepeat) {
+      await store.createRepeatBuyOrder({
+        internalWalletId: order.internalWalletId,
+        tokenId: token.id,
+        zecAddress: order.zecAddress ?? null,
+        zecAmount: confirmedZecAmount,
+        tokenAmount: tokensOut,
+        executionTxid: txid,
+      });
+      app.log.info(`order ${orderId} REPEAT payment: ${confirmedZecAmount} ZEC -> ${tokensOut.toFixed(0)} ${token.symbol} (new order cloned, same address paid again, txid ${txid})`);
+    } else {
+      await store.fillBuyOrder(order.id, tokensOut, txid);
+      app.log.info(`order ${orderId} filled: ${confirmedZecAmount} ZEC -> ${tokensOut.toFixed(0)} ${token.symbol} (fee ${(creatorFee + platformFee).toFixed(8)} ZEC)`);
+    }
   } catch (err) {
-    await store.failOrder(orderId).catch(() => {});
-    app.log.error(err, `order ${orderId} failed to execute against the curve`);
+    if (!isRepeat) await store.failOrder(orderId).catch(() => {});
+    app.log.error(err, `order ${orderId} failed to execute${isRepeat ? " a repeat payment" : ""} against the curve`);
   }
 });
 

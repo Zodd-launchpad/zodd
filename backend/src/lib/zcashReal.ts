@@ -50,9 +50,16 @@ export interface PendingPayment {
    * HARD_MAX_LIFETIME_MS below -- this is what stops an abandoned order
    * from watching (and stealing same-amount payments from) forever. */
   originalCreatedAt: number;
+  /** Set the first time this amount is matched to a confirmed note. Once
+   * set, the watcher is kept alive (instead of being deleted like before)
+   * for REPEAT_WINDOW_MS so a payer who sends the exact same amount again
+   * -- on purpose or by mistake -- gets it credited as an ADDITIONAL buy
+   * instead of it silently sitting unclaimed in the wallet. See the poll
+   * loop and REPEAT_WINDOW_MS below. */
+  firstMatchedAt?: number;
 }
 
-type PaymentCallback = (orderId: string, confirmedZecAmount: number, txid: string) => void;
+type PaymentCallback = (orderId: string, confirmedZecAmount: number, txid: string, opts?: { isRepeat: boolean }) => void;
 
 const watchers = new Map<string, PendingPayment>();
 let onPayment: PaymentCallback | null = null;
@@ -89,6 +96,32 @@ const ORDER_EXPIRY_MS = 2 * 60 * 60_000; // an order nobody paid within 2h stops
 // anymore, so it can afford to sit comfortably above the 2h soft window
 // instead of well below it.
 const HARD_MAX_LIFETIME_MS = 3 * 60 * 60_000;
+
+// Found 2026-09-07 (Brai: "toqué comprar 2 veces pero una la pagué 3
+// veces... si la gente hace eso tiene que sumarle otra compra mas, o sea
+// si vos confirmas la compra 10 veces, tiene que comprarte 10 veces"): a
+// payer resending the exact same amount to the exact same order more than
+// once used to just leave the extra sends stranded -- the order already
+// matched once and stopped watching, so nothing was left to claim them.
+// Now, once an amount is matched, its watcher stays alive (instead of
+// being deleted) for this long, so each additional confirmed note of the
+// identical amount is credited as its own separate buy (see the
+// firstMatchedAt handling in the poll loop, and the isRepeat handling in
+// server.ts's onPaymentDetected, which clones a brand-new FILLED order
+// per repeat rather than touching the original). Kept short (well under
+// ORDER_EXPIRY_MS) since a deliberate resend happens quickly, and because
+// pickAndReserveAmount treats a still-watched matched amount as taken --
+// the longer this window is, the longer a brand-new unrelated order
+// requesting the same amount stays bumped to a different one.
+//
+// KNOWN LIMITATION: this window is in-memory only, like the rest of
+// `watchers`. A backend restart mid-window loses it, because
+// resumeWatching (see below) only re-arms orders still PENDING in the DB
+// -- an order that already matched once is FILLED, not PENDING, so it
+// won't be resumed. In practice this only matters for a repeat sent in
+// the few seconds around a redeploy, which is rare enough not to justify
+// persisting matched-but-still-open watchers to the DB for now.
+const REPEAT_WINDOW_MS = 20 * 60_000;
 
 export function onPaymentDetected(cb: PaymentCallback) {
   onPayment = cb;
@@ -127,6 +160,17 @@ function startPolling() {
   pollingStarted = true;
   setInterval(async () => {
     for (const pending of [...watchers.values()]) {
+      // Already matched once: it's in its repeat-payment grace window, not
+      // subject to the normal unpaid-order expiry rules below -- it just
+      // ages out on its own clock once REPEAT_WINDOW_MS passes with no
+      // further sends.
+      if (pending.firstMatchedAt != null) {
+        if (Date.now() - pending.firstMatchedAt > REPEAT_WINDOW_MS) {
+          watchers.delete(pending.orderId);
+          console.log(`[zcashReal] order ${pending.orderId} repeat-payment window closed, no longer watching for extra sends (address ${pending.address})`);
+        }
+        continue;
+      }
       const hardExpired = Date.now() - pending.originalCreatedAt > HARD_MAX_LIFETIME_MS;
       if (Date.now() - pending.createdAt > ORDER_EXPIRY_MS || hardExpired) {
         watchers.delete(pending.orderId);
@@ -148,9 +192,14 @@ function startPolling() {
         const note = available[idx];
         available.splice(idx, 1); // don't let a second pending order for the same amount claim it too, this tick
         consumedTxids.add(note.txid);
-        watchers.delete(pending.orderId);
-        console.log(`[zcashReal] order ${pending.orderId} matched: note worth ${pending.expectedZecAmount} ZEC (txid ${note.txid})`);
-        onPayment?.(pending.orderId, pending.expectedZecAmount, note.txid);
+        const isRepeat = pending.firstMatchedAt != null;
+        if (isRepeat) {
+          console.log(`[zcashReal] order ${pending.orderId} matched AGAIN: note worth ${pending.expectedZecAmount} ZEC (txid ${note.txid}) -- crediting as an additional buy`);
+        } else {
+          pending.firstMatchedAt = Date.now();
+          console.log(`[zcashReal] order ${pending.orderId} matched: note worth ${pending.expectedZecAmount} ZEC (txid ${note.txid})`);
+        }
+        onPayment?.(pending.orderId, pending.expectedZecAmount, note.txid, { isRepeat });
       }
     } catch (err) {
       console.error(`[zcashReal] poll failed:`, err);
@@ -231,6 +280,25 @@ export async function generateOrderAddress(orderId: string, expectedZecAmount: n
   const pending = watchers.get(orderId);
   if (pending) pending.address = address; // fill in the address on the already-reserved watcher
   return { address, expectedZecAmount: uniqueAmount };
+}
+
+// Found 2026-09-07: a payer who sends the same order's exact amount more
+// than once (Brai: "toqué comprar 2 veces pero una la pagué 3 veces") ends
+// up with extra confirmed notes nobody is watching for -- the order that
+// amount belonged to already matched once and stopped watching (see the
+// poll loop above), so the surplus sends just sit in the pooled wallet,
+// spendable but not credited to anyone. This is for admin recovery: list
+// every confirmed note that ISN'T already accounted for by a real
+// order/token-creation (cross-checked against the DB via
+// getAllKnownPaymentTxids in store.ts, the same source resumeWatching's
+// consumedTxids seeding uses), so a human can decide what to do with a
+// surplus payment instead of it silently staying unclaimed forever.
+export async function listUnclaimedNotes(knownTxids: string[]): Promise<{ txid: string; zatoshis: number; zec: number }[]> {
+  const { notes } = await call(`/wallet/notes`);
+  const known = new Set(knownTxids);
+  return (notes ?? [])
+    .filter((n: any) => typeof n.status === "string" && n.status.toLowerCase().includes("confirmed") && !known.has(n.txid))
+    .map((n: any) => ({ txid: n.txid, zatoshis: Number(n.valueZatoshis), zec: Number(n.valueZatoshis) / ZATOSHIS_PER_ZEC }));
 }
 
 /** Re-registers a watcher for an address that was already generated in a

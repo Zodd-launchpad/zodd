@@ -15,6 +15,8 @@ export interface TokenSummary {
   name: string;
   totalSupply: number;
   priceZec: number;
+  /** % change vs. ~24h ago; null when the token isn't old enough yet to have one. */
+  priceChange24hPct: number | null;
   marketCapZec: number;
   realZecReserves: number;
   tokensSold: number;

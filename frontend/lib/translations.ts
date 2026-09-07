@@ -69,7 +69,7 @@ export const translations = {
   "market.col.token": { en: "Token", zh: "代币" },
   "market.col.price": { en: "Price (ZEC)", zh: "价格（ZEC）" },
   "market.col.marketCap": { en: "Market cap", zh: "市值" },
-  "market.col.reserve": { en: "Reserve", zh: "储备金" },
+  "market.col.change24h": { en: "24h", zh: "24小时" },
   "market.col.graduation": { en: "Graduation", zh: "毕业状态" },
   "market.graduated": { en: "graduated", zh: "已毕业" },
   "market.bonding": { en: "bonding", zh: "曲线中" },
