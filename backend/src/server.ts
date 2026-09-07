@@ -779,6 +779,28 @@ app.get("/api/admin/zcash-status", async (_req, reply) => {
   }
 });
 
+// Brai, 2026-09-07: "chequeame que no entro una compra de 0.2 en el token
+// zodd" -- when a buy's payment doesn't confirm as a FILLED trade, this is
+// how to check whether the ZEC actually landed in the wallet anyway (see
+// the big comment on generateOrderAddress/matching in zcashReal.ts: a note
+// whose value doesn't exactly match any currently-watched order's amount
+// just sits here, unclaimed, until an admin looks). Read-only, never moves
+// funds -- cross-checks the wallet's real notes against every txid this
+// backend already knows about (any completed buy, sell payout, token
+// creation, or fee payout), so what's left is genuinely unaccounted for.
+app.get("/api/admin/unclaimed-notes", async (req, reply) => {
+  if (ZCASH_MODE !== "real") return reply.code(404).send({ error: "not in real mode" });
+  if (!ADMIN_TOKEN) return reply.code(503).send({ error: "ADMIN_TOKEN is not configured" });
+  if (req.headers["x-admin-token"] !== ADMIN_TOKEN) return reply.code(401).send({ error: "unauthorized" });
+  try {
+    const known = await store.getAllKnownPaymentTxids();
+    const notes = await (zcashService as typeof import("./lib/zcashReal.js")).listUnclaimedNotes(known);
+    return reply.send({ ok: true, count: notes.length, notes });
+  } catch (err) {
+    return reply.code(502).send({ error: String((err as Error).message ?? err) });
+  }
+});
+
 // Brai (2026-09-07): "quiero hacerlo yo solo el claim... quiero estar
 // seguro que se hace, de otra forma no lo controlo" -- the automatic 24h
 // cycle is intentionally OFF. Real ZEC creator-fee payouts only ever move
