@@ -30,6 +30,22 @@ export default function BuyModal({ symbol, walletId, onClose }: { symbol: string
   const [tokensOut, setTokensOut] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isRealMode, setIsRealMode] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  // Brai, 2026-09-07: "esa wallet que te aparece ahi para pagar cualquier
+  // compra tiene que ser un boton que si lo clickeas se auto copia" -- the
+  // deposit address box itself is now the copy button, not just text next
+  // to one.
+  async function copyAddress() {
+    if (!address) return;
+    try {
+      await navigator.clipboard.writeText(address);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // clipboard not available -- the address is still selectable/visible
+    }
+  }
 
   useEffect(() => {
     api.getMode().then((m) => setIsRealMode(m.zcashMode === "real")).catch(() => {});
@@ -113,9 +129,25 @@ export default function BuyModal({ symbol, walletId, onClose }: { symbol: string
                 <img src={qr} alt="qr" />
               </div>
             )}
-            <div className="mono-break" style={{ fontSize: 11, color: "var(--accent)", border: "1px solid var(--border)", padding: 8, borderRadius: 4 }}>
-              {address}
-            </div>
+            <button
+              type="button"
+              onClick={copyAddress}
+              className="mono-break"
+              style={{
+                display: "block",
+                width: "100%",
+                textAlign: "left",
+                fontSize: 11,
+                color: copied ? "var(--green)" : "var(--accent)",
+                background: "transparent",
+                border: `1px solid ${copied ? "var(--green)" : "var(--border)"}`,
+                padding: 8,
+                borderRadius: 4,
+                cursor: "pointer",
+              }}
+            >
+              {copied ? `✓ ${t("buy.addressCopied")}` : address}
+            </button>
             <p className="muted" style={{ marginTop: 14, fontSize: 12 }}>{isRealMode ? t("buy.realNote") : t("buy.simulatedNote")}</p>
             {isRealMode && (
               <button
