@@ -168,9 +168,26 @@ export async function heightInfo() {
  * wallet knows about) and filter for the address ourselves in JS, matching
  * anywhere in the entry's JSON since zingolib's exact field name for the
  * receiving address on each entry isn't pinned down on our side yet. */
+// Debug instrumentation added 2026-09-07: the address-less `messages` call
+// is coming back with an empty list on every poll (list.length === 0, not
+// null -- so it IS valid JSON, just empty) even though spendable_balance is
+// confirmed nonzero (0.0102 ZEC) and includes two real incoming payments.
+// Logging only fired on a *nonempty* list before, so an all-empty run left
+// nothing to look at. Log unconditionally (throttled to once per distinct
+// raw output, so a healthy steady-state doesn't spam every 20s) until this
+// is understood -- either `messages` is scoped to a different
+// account/address-type than `new_address oz` creates, or it only reports
+// transfers this wallet itself initiated via `send`, not arbitrary incoming
+// ones. If this still comes back empty, the next thing to try is `notes` or
+// `list` (raw note-level view) instead of `messages`.
+let lastLoggedRaw = null;
 export async function messagesFor(address) {
   const out = await runCli(["messages"], { timeout: 3 * 60_000, waitsync: true });
   const { json, raw } = parseMaybeJson(out);
+  if (raw !== lastLoggedRaw) {
+    lastLoggedRaw = raw;
+    console.error(`[zcash-wallet-service] messages() raw output changed, full dump: ${raw}`);
+  }
   const list = Array.isArray(json)
     ? json
     : Array.isArray(json?.messages)
