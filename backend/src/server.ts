@@ -830,7 +830,13 @@ app.get("/api/admin/zcash-status", async (_req, reply) => {
 app.get("/api/admin/notes-raw-debug", async (req, reply) => {
   if (ZCASH_MODE !== "real") return reply.code(404).send({ error: "not in real mode" });
   if (!DEBUG_NOTES_TOKEN) return reply.code(503).send({ error: "DEBUG_NOTES_TOKEN is not configured" });
-  if (req.headers["x-debug-token"] !== DEBUG_NOTES_TOKEN) return reply.code(401).send({ error: "unauthorized" });
+  // Accepts the token via header OR query string -- the header alone can't
+  // be sent by a plain URL fetch, and this is a temporary, read-only,
+  // no-fund-risk diagnostic (see the comment above), so the slightly
+  // weaker query-string option is fine for the short time this route
+  // exists.
+  const suppliedToken = req.headers["x-debug-token"] ?? (req.query as any)?.token;
+  if (suppliedToken !== DEBUG_NOTES_TOKEN) return reply.code(401).send({ error: "unauthorized" });
   try {
     const raw = await (zcashService as typeof import("./lib/zcashReal.js")).rawNotesDebug();
     return reply.send(raw);
