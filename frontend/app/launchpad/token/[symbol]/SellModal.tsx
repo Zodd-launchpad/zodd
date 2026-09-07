@@ -15,9 +15,11 @@ function fmtBalance(n: number) {
 }
 
 // Mirrors the backend's isShieldedAddress check (server.ts) so the error
-// shows up immediately instead of after a round trip.
+// shows up immediately instead of after a round trip. Trimmed -- see the
+// matching comment in BuyModal.tsx -- so a pasted trailing newline/spaces
+// (some wallets' "copy address" includes them) doesn't fail validation.
 function isShieldedAddress(addr: string): boolean {
-  return /^(u1|zs1)/.test(addr);
+  return /^(u1|zs1)/.test(addr.trim());
 }
 
 export default function SellModal({ symbol, walletId, onClose }: { symbol: string; walletId: string; onClose: () => void }) {
@@ -61,8 +63,9 @@ export default function SellModal({ symbol, walletId, onClose }: { symbol: strin
       const amount = parseFloat(tokenAmount);
       if (!(amount > 0)) throw new Error(t("sell.error.invalidAmount"));
       if (balance !== null && amount > balance) throw new Error(t("sell.error.exceedsBalance", { symbol }));
-      if (refundAddress.length < 10 || !isShieldedAddress(refundAddress)) throw new Error(t("sell.error.invalidAddress"));
-      const order = await api.sell({ walletId, symbol, tokenAmount: amount, refundAddress });
+      const trimmedRefund = refundAddress.trim();
+      if (trimmedRefund.length < 10 || !isShieldedAddress(trimmedRefund)) throw new Error(t("sell.error.invalidAddress"));
+      const order = await api.sell({ walletId, symbol, tokenAmount: amount, refundAddress: trimmedRefund });
       setResult({ zecAmount: order.zecAmount });
     } catch (e: any) {
       setError(e.message);

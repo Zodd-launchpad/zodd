@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import QRCode from "qrcode";
 import { useWallet } from "@/lib/wallet";
-import { api, formatUsd } from "@/lib/api";
+import { api, formatUsd, formatZec } from "@/lib/api";
 import { useLanguage } from "@/lib/i18n";
 import { useZecUsdPrice } from "@/lib/zecPrice";
 import { fileToSquareDataUrl } from "@/lib/imageResize";
@@ -161,12 +161,12 @@ export default function CreatePage() {
           <p className="muted" style={{ textAlign: "center", marginBottom: 4, textTransform: "uppercase", letterSpacing: 1, fontSize: 11 }}>
             {t("create.waiting.title")}
           </p>
-          <h2 style={{ marginTop: 0, textAlign: "center", fontSize: 40, lineHeight: 1.1 }}>{zecAmount} ZEC</h2>
+          <h2 style={{ marginTop: 0, textAlign: "center", fontSize: 40, lineHeight: 1.1 }}>{zecAmount != null ? formatZec(zecAmount) : zecAmount} ZEC</h2>
           {formatUsd(zecAmount ?? 0, usdRate) && (
             <p className="muted" style={{ textAlign: "center", marginTop: -8 }}>≈ {formatUsd(zecAmount ?? 0, usdRate)}</p>
           )}
           <p className="muted" style={{ textAlign: "center" }}>
-            {t("create.waiting.sendExactly", { amount: zecAmount ?? "", symbol })}
+            {t("create.waiting.sendExactly", { amount: zecAmount != null ? formatZec(zecAmount) : "", symbol })}
           </p>
           {qr && (
             <div style={{ background: "#fff", padding: 12, borderRadius: 6, display: "flex", justifyContent: "center", margin: "12px 0" }}>

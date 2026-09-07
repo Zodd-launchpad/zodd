@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import QRCode from "qrcode";
-import { api, formatUsd } from "@/lib/api";
+import { api, formatUsd, formatZec } from "@/lib/api";
 import { useLanguage } from "@/lib/i18n";
 import { useZecUsdPrice } from "@/lib/zecPrice";
 
@@ -9,8 +9,15 @@ type Phase = "amount" | "waiting" | "filled" | "failed";
 
 // Mirrors the backend's isShieldedAddress check (server.ts) so the error
 // shows up immediately instead of after a round trip.
+//
+// Brai, 2026-09-07: "estoy copiando mi wallet shielded recien copiada y no
+// me deja comprar... me dice que invalid wallet" -- some wallets' "copy
+// address" includes a trailing newline or leading/trailing spaces, which
+// broke the ^(u1|zs1) prefix check even though the address itself was
+// fine. Trimmed here (and wherever this value is actually sent, see
+// submitBuy below) so pasted whitespace doesn't fail validation.
 function isShieldedAddress(addr: string): boolean {
-  return /^(u1|zs1)/.test(addr);
+  return /^(u1|zs1)/.test(addr.trim());
 }
 
 export default function BuyModal({ symbol, walletId, onClose }: { symbol: string; walletId: string; onClose: () => void }) {
@@ -89,8 +96,9 @@ export default function BuyModal({ symbol, walletId, onClose }: { symbol: string
     try {
       const amount = parseFloat(zecAmount);
       if (!(amount > 0)) throw new Error(t("buy.error.invalidAmount"));
-      if (refundAddress.length < 10 || !isShieldedAddress(refundAddress)) throw new Error(t("buy.error.invalidAddress"));
-      const order = await api.buy({ walletId, symbol, zecAmount: amount, refundAddress });
+      const trimmedRefund = refundAddress.trim();
+      if (trimmedRefund.length < 10 || !isShieldedAddress(trimmedRefund)) throw new Error(t("buy.error.invalidAddress"));
+      const order = await api.buy({ walletId, symbol, zecAmount: amount, refundAddress: trimmedRefund });
       setAddress(order.zecAddress);
       setOrderId(order.orderId);
       setExactZecAmount(order.zecAmount);
@@ -156,14 +164,16 @@ export default function BuyModal({ symbol, walletId, onClose }: { symbol: string
         {phase === "waiting" && (
           <>
             <h2 style={{ marginTop: 0, textAlign: "center" }}>
-              {exactZecAmount ?? zecAmount} ZEC
+              {exactZecAmount != null ? formatZec(exactZecAmount) : zecAmount} ZEC
               {formatUsd(exactZecAmount ?? (parseFloat(zecAmount) || 0), usdRate) && (
                 <span className="muted" style={{ fontSize: 14, fontWeight: 400, marginLeft: 6 }}>
                   (≈ {formatUsd(exactZecAmount ?? (parseFloat(zecAmount) || 0), usdRate)})
                 </span>
               )}
             </h2>
-            <p className="muted" style={{ textAlign: "center" }}>{t("buy.sendAtLeast", { amount: exactZecAmount ?? zecAmount })}</p>
+            <p className="muted" style={{ textAlign: "center" }}>
+              {t("buy.sendAtLeast", { amount: exactZecAmount != null ? formatZec(exactZecAmount) : zecAmount })}
+            </p>
             {qr && (
               <div style={{ background: "#fff", padding: 12, borderRadius: 6, display: "flex", justifyContent: "center", margin: "12px 0" }}>
                 <img src={qr} alt="qr" />

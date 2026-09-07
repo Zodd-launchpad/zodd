@@ -77,6 +77,20 @@ export function formatUsd(zecAmount: number, usdRate: number | null): string | n
   return usd.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: usd < 1 ? 4 : 2 });
 }
 
+/** Brai, 2026-09-07: the backend's disambiguation bump (pickAndReserveAmount
+ * in zcashReal.ts) nudges an order's zecAmount by 1 zatoshi at a time to
+ * keep it unique -- invisible on its own, but raw JS float math (e.g.
+ * 0.0001 + 0.00000001) routinely lands on values like
+ * 0.000150000000000000001 when printed directly, which read as broken.
+ * ZEC only has 8 decimal places, period (1 zatoshi = 1e-8 ZEC), so
+ * rounding to 8 and trimming trailing zeros always recovers the true
+ * value with zero precision loss -- this is display-only, never used for
+ * the actual amount sent to the backend/QR/payment URI. */
+export function formatZec(zecAmount: number): string {
+  if (!Number.isFinite(zecAmount)) return String(zecAmount);
+  return Number(zecAmount.toFixed(8)).toString();
+}
+
 export const api = {
   createWallet: () => req("/api/wallets", { method: "POST" }),
   importWallet: (words: string[]): Promise<{ walletId: string; walletTag: string }> =>
