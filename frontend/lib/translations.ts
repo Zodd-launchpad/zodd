@@ -9,8 +9,8 @@ export const translations = {
 
   // ---------- Demo banner ----------
   "demo.banner": {
-    en: "DEMO — this is a work-in-progress preview, not the final version",
-    zh: "演示版 — 这是开发中的预览版本，并非最终版本",
+    en: "Create a coin, earn 1% of the fees forever — ZODD is not affiliated with the ZODL wallet",
+    zh: "创建代币，永久赚取1%手续费 — ZODD 与 ZODL 钱包无关联",
   },
 
   // ---------- Disclaimer banner ----------

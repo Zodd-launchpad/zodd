@@ -485,14 +485,15 @@ tr:hover td { background: #151517; cursor: pointer; }
   justify-content: center;
   gap: 8px;
   padding: 8px 16px;
-  background: linear-gradient(180deg, #ffcc4d, #f5a623);
-  color: #241900;
+  background: linear-gradient(180deg, #3c3c40, #232326);
+  color: var(--accent);
   font-weight: 800;
   font-size: 12px;
   letter-spacing: 1.5px;
   text-transform: uppercase;
   text-align: center;
-  box-shadow: 0 2px 18px rgba(245, 166, 35, 0.45);
+  box-shadow: 0 2px 18px rgba(0, 0, 0, 0.45);
+  border-bottom: 1px solid var(--border);
 }
 .demo-banner-dot {
   width: 7px;
