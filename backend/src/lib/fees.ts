@@ -40,3 +40,21 @@ export function splitFee(grossZec: number): FeeSplit {
  * full 0.01 ZEC every time; the intended production value is 0.01.
  */
 export const TOKEN_CREATE_FEE_ZEC = Number(process.env.ZCASH_TOKEN_CREATE_FEE_ZEC ?? 0.01);
+
+/**
+ * Brai, 2026-09-07: "si el minimo a enviar no supera el fee no te deje
+ * vender, que haga el calculo" -- a real ZEC send (sendPayout, see
+ * zcashReal.ts) costs the platform a Zcash network/miner fee of roughly
+ * 0.0001 ZEC, paid separately out of the platform wallet's own balance (the
+ * seller always receives the full quoted payout -- see the big comment on
+ * MIN_CREATOR_PAYOUT_ZEC in feeDistributor.ts for the same reasoning
+ * applied to creator-fee payouts). If someone sells for a net payout at or
+ * below that, the platform is spending more on the network fee than the
+ * transfer is even worth -- pointless and, at scale, a way to slowly drain
+ * the platform wallet via a flood of dust sells. Same 0.001 ZEC floor used
+ * for creator payouts (10x the ~0.0001 ZEC fee, comfortable margin without
+ * blocking any real trade -- typical sells on this curve are 0.01-0.05
+ * ZEC). Checked against the NET payout (after the 2% trade fee), in
+ * server.ts's /api/orders/sell, before ever calling sendPayout.
+ */
+export const MIN_SELL_PAYOUT_ZEC = 0.001;

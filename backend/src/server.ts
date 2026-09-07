@@ -4,7 +4,7 @@ import * as store from "./lib/store.js";
 import { generateTwelveWords } from "./lib/wordlist.js";
 import { quoteBuy, quoteSell, currentPrice, marketCapZec, isGraduated } from "./lib/bondingCurve.js";
 import { simulatedInscriptionFor } from "./lib/simulatedChain.js";
-import { splitFee, TRADE_FEE_BPS, CREATOR_FEE_BPS, TOKEN_CREATE_FEE_ZEC } from "./lib/fees.js";
+import { splitFee, TRADE_FEE_BPS, CREATOR_FEE_BPS, TOKEN_CREATE_FEE_ZEC, MIN_SELL_PAYOUT_ZEC } from "./lib/fees.js";
 import { startFeeDistributor, runFeeDistributionOnce } from "./lib/feeDistributor.js";
 import { withTokenLock } from "./lib/mutex.js";
 import { checkOrderRateLimit } from "./lib/rateLimit.js";
@@ -505,6 +505,19 @@ app.post("/api/orders/sell", async (req, reply) => {
       // reflects the full gross zecOut (kept internally consistent with
       // how the buy side works).
       const { net: netPayout, creatorFee, platformFee } = splitFee(zecOut);
+
+      // Brai, 2026-09-07: block sells whose net payout wouldn't clear the
+      // real Zcash network fee -- see MIN_SELL_PAYOUT_ZEC in fees.ts for
+      // the full reasoning. Checked here, before sendPayout ever runs, so
+      // no real ZEC moves and the curve/balance are never touched.
+      if (netPayout <= MIN_SELL_PAYOUT_ZEC) {
+        throw Object.assign(
+          new Error(
+            `sell amount too small -- net payout would be ${netPayout.toFixed(8)} ZEC, below the ${MIN_SELL_PAYOUT_ZEC} ZEC minimum (the network fee would cost more than the sale). Sell a larger amount.`
+          ),
+          { httpStatus: 400 }
+        );
+      }
 
       const { txid } = await sendPayout(body.refundAddress, netPayout);
 
