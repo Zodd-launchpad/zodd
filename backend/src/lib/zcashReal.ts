@@ -55,11 +55,36 @@ let onPayment: PaymentCallback | null = null;
 
 const POLL_INTERVAL_MS = 20_000; // real chain state -- no need to hammer it every few seconds
 const ORDER_EXPIRY_MS = 30 * 60_000; // an order nobody paid within 30min stops being watched
-const MIN_CONFIRMATIONS = 2;
 
 export function onPaymentDetected(cb: PaymentCallback) {
   onPayment = cb;
   startPolling();
+}
+
+// Dead ends tried before this (2026-09-07, see cli.js in zcash-wallet-service
+// for the full account): `messages <address>` never returns anything for a
+// specific address; bare `messages` (no address) turned out to only track
+// transfers THIS wallet itself sent, not deposits it received -- so no
+// incoming payment, ever, shows up there. `notes` DOES show incoming
+// deposits (confirmed live against the two real 0.0001 ZEC test payments),
+// but its entries carry no receiving-address field at all -- zingo-cli
+// gives no way to ask "what landed at address X". So matching happens here
+// instead, by AMOUNT: every pending order/token-creation already has a
+// known expected zatoshi amount, and every unspent note has a known
+// zatoshi value, so a still-unconsumed note whose value equals a pending
+// order's expected amount is treated as that order's payment. This trades
+// away verifying the payment used the exact one-time address we handed out
+// (zingo-cli gives us no way to check that) -- but the money still lands
+// in this same platform wallet either way, so there's no fund-safety risk,
+// only a small chance of crediting the wrong PENDING RECORD if two orders
+// for the identical amount are open at once and get paid out of order.
+// consumedTxids (seeded at boot from the DB via seedConsumedTxids, see
+// server.ts) stops the same note from being matched to a second order
+// later, including across a restart.
+const consumedTxids = new Set<string>();
+
+export function seedConsumedTxids(txids: string[]) {
+  for (const t of txids) consumedTxids.add(t);
 }
 
 let pollingStarted = false;
@@ -71,37 +96,27 @@ function startPolling() {
       if (Date.now() - pending.createdAt > ORDER_EXPIRY_MS) {
         watchers.delete(pending.orderId);
         console.warn(`[zcashReal] order ${pending.orderId} expired unpaid after 30min (address ${pending.address})`);
-        continue;
       }
-      try {
-        const { messages } = await call(`/wallet/messages?address=${encodeURIComponent(pending.address)}`);
-        if (messages?.length) {
-          console.log(`[zcashReal] order ${pending.orderId}: ${messages.length} message(s) at ${pending.address}: ${JSON.stringify(messages)}`);
-        }
-        // zingolib's ValueTransfer JSON shape isn't pinned down on our side
-        // yet (confirmed live 2026-09-06 that the wrapper key is
-        // value_transfers, not messages) -- match generously across the
-        // plausible field-name variants rather than assuming one, and rely
-        // on the console.log above to tell us fast if this still misses.
-        const match = (messages ?? []).find((m: any) => {
-          const confirmed =
-            Number(m.confirmations ?? 0) >= MIN_CONFIRMATIONS ||
-            m.status === "confirmed" ||
-            (typeof m.blockheight === "number" && m.blockheight > 0) ||
-            (typeof m.block_height === "number" && m.block_height > 0);
-          const amountZats = Number(m.amountZatoshis ?? m.amount ?? m.value ?? m.value_zatoshis ?? 0);
-          const isIncoming = m.kind ? /receiv/i.test(String(m.kind)) : true;
-          return confirmed && amountZats > 0 && isIncoming;
-        });
-        if (match) {
-          watchers.delete(pending.orderId);
-          const amountZats = Number(match.amountZatoshis ?? match.amount ?? match.value ?? match.value_zatoshis);
-          const confirmedZecAmount = amountZats / ZATOSHIS_PER_ZEC;
-          onPayment?.(pending.orderId, confirmedZecAmount, match.txid);
-        }
-      } catch (err) {
-        console.error(`[zcashReal] poll failed for order ${pending.orderId}:`, err);
+    }
+    if (watchers.size === 0) return;
+    try {
+      const { notes } = await call(`/wallet/notes`);
+      const available = (notes ?? []).filter(
+        (n: any) => typeof n.status === "string" && n.status.toLowerCase().includes("confirmed") && !consumedTxids.has(n.txid)
+      );
+      for (const pending of [...watchers.values()]) {
+        const expectedZats = Math.round(pending.expectedZecAmount * ZATOSHIS_PER_ZEC);
+        const idx = available.findIndex((n: any) => Number(n.valueZatoshis) === expectedZats);
+        if (idx === -1) continue;
+        const note = available[idx];
+        available.splice(idx, 1); // don't let a second pending order for the same amount claim it too, this tick
+        consumedTxids.add(note.txid);
+        watchers.delete(pending.orderId);
+        console.log(`[zcashReal] order ${pending.orderId} matched: note worth ${pending.expectedZecAmount} ZEC (txid ${note.txid})`);
+        onPayment?.(pending.orderId, pending.expectedZecAmount, note.txid);
       }
+    } catch (err) {
+      console.error(`[zcashReal] poll failed:`, err);
     }
   }, POLL_INTERVAL_MS);
 }

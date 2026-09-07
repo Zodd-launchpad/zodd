@@ -430,6 +430,30 @@ export async function getPendingOrdersAwaitingPayment(): Promise<OrderView[]> {
   return rows.map(toOrderView);
 }
 
+/** All txids already used to fulfill a payment (a token-creation fee or a
+ * filled buy order). Real mode needs this because zingo-cli's `notes`
+ * command -- the only source that shows incoming deposits at all (see
+ * zcashReal.ts) -- carries no per-diversified-address info, so payments are
+ * matched to pending orders by amount, not by address. That means a note
+ * that already fulfilled one order could otherwise be matched a second time
+ * to a different still-pending order for the same amount (its spend_status
+ * stays "unspent" in zingo-cli forever, since we never literally spend it --
+ * we just credit the order internally). Seeding the in-memory
+ * consumedTxids set from here at boot (see zcashReal.ts's resumeWatching
+ * call site in server.ts) closes that gap across restarts, on top of the
+ * same-process tracking the poll loop already does. */
+export async function getAllKnownPaymentTxids(): Promise<string[]> {
+  const [tokens, orders] = await Promise.all([
+    prisma.token.findMany({ where: { genesisMemoTxid: { not: null } }, select: { genesisMemoTxid: true } }),
+    prisma.order.findMany({ where: { executionTxid: { not: null } }, select: { executionTxid: true } }),
+  ]);
+  const txids = [
+    ...tokens.map((t) => t.genesisMemoTxid),
+    ...orders.map((o) => o.executionTxid),
+  ].filter((t): t is string => !!t);
+  return txids;
+}
+
 export async function fillBuyOrder(orderId: string, tokenAmount: number, executionTxid: string) {
   const o = await prisma.order.update({
     where: { id: orderId },

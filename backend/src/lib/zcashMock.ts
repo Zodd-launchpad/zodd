@@ -68,6 +68,12 @@ export function generateOrderAddress(orderId: string, expectedZecAmount: number)
  * this mirrors for restart recovery). */
 export function resumeWatching(_orderId: string, _address: string, _expectedZecAmount: number, _createdAtMs: number) {}
 
+/** No-op in mock mode: mirrors zcashReal.ts's seedConsumedTxids so
+ * server.ts can call it generically regardless of ZCASH_MODE (the mock
+ * always confirms via its own fake timer, never needs de-duping against
+ * real notes). */
+export function seedConsumedTxids(_txids: string[]) {}
+
 /** Simulates sending a real payout (sell / graduation). */
 export function sendPayout(toAddress: string, zecAmount: number): { txid: string } {
   const fakeTxid = [...Array(64)].map(() => "0123456789abcdef"[Math.floor(Math.random() * 16)]).join("");

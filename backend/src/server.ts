@@ -335,6 +335,25 @@ onPaymentDetected(async (orderId, confirmedZecAmount, txid) => {
   } catch (err) {
     app.log.error(err, "failed to resume watching pending payments after restart");
   }
+
+  // Real mode only, and independent of the resume above: payment detection
+  // now matches an incoming note to a pending order by AMOUNT (see
+  // zcashReal.ts -- zingo-cli's `notes` command has no per-address info to
+  // match on). A note that already fulfilled some past order stays
+  // "unspent" forever from zingo-cli's point of view, so without this a
+  // restart could let it be matched a second time to a different pending
+  // order for the same amount. Seed the in-memory de-dupe set from every
+  // txid already recorded in the DB as a completed payment.
+  try {
+    const seed = (zcashService as { seedConsumedTxids?: typeof import("./lib/zcashReal.js").seedConsumedTxids }).seedConsumedTxids;
+    if (seed) {
+      const known = await store.getAllKnownPaymentTxids();
+      seed(known);
+      if (known.length) app.log.info(`seeded ${known.length} already-used payment txid(s) so they can't be matched to a new order`);
+    }
+  } catch (err) {
+    app.log.error(err, "failed to seed known payment txids after restart");
+  }
 })();
 
 // ---------- Orders: sell ----------

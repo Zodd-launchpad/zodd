@@ -153,89 +153,47 @@ export async function heightInfo() {
   return parseMaybeJson(out);
 }
 
-/** Filters messages/value transfers received at a specific address -- this
- * is how we detect a buy order's payment landing, since every order gets
- * its own one-time address (see docs/ARCHITECTURE.md). Needs waitsync: true,
- * otherwise a payment that just confirmed on-chain won't show up here yet.
- *
- * IMPORTANT (found 2026-09-07): `zingo-cli messages <address>` consistently
- * returns an empty value_transfers list even once the wallet's own balance
- * has genuinely gone up by the expected amount -- confirmed live against
- * two real 0.0001 ZEC payments that landed in the wallet's balance but
- * never showed up via this address-filtered call. Per-diversified-address
- * filtering on this subcommand isn't behaving the way we assumed. Fix:
- * call `messages` with NO address argument (get every value transfer this
- * wallet knows about) and filter for the address ourselves in JS, matching
- * anywhere in the entry's JSON since zingolib's exact field name for the
- * receiving address on each entry isn't pinned down on our side yet. */
-// Debug instrumentation added 2026-09-07: the address-less `messages` call
-// is coming back with an empty list on every poll (list.length === 0, not
-// null -- so it IS valid JSON, just empty) even though spendable_balance is
-// confirmed nonzero (0.0102 ZEC) and includes two real incoming payments.
-// Logging only fired on a *nonempty* list before, so an all-empty run left
-// nothing to look at. Log unconditionally (throttled to once per distinct
-// raw output, so a healthy steady-state doesn't spam every 20s) until this
-// is understood -- either `messages` is scoped to a different
-// account/address-type than `new_address oz` creates, or it only reports
-// transfers this wallet itself initiated via `send`, not arbitrary incoming
-// ones. If this still comes back empty, the next thing to try is `notes` or
-// `list` (raw note-level view) instead of `messages`.
-let lastLoggedRaw = null;
-// CONFIRMED 2026-09-07: `messages` (no address) reliably returns
-// `{"value_transfers": []}` -- genuinely empty, not a parsing bug -- even
-// though spendable_balance is confirmed nonzero and includes two real
-// incoming payments. So `messages`/value_transfers appears to track only
-// transfers THIS wallet itself initiated via send/quicksend, not arbitrary
-// deposits received from outside. Falling back to `notes`, which lists the
-// wallet's actual shielded notes (received UTXO-equivalents) and should
-// include incoming deposits regardless of who sent them. Logged
-// unconditionally (throttled to once per distinct raw output) until the
-// real field shape is confirmed live, same pattern as messages() above.
-let lastLoggedNotesRaw = null;
-async function notesRaw() {
+/** History of how payment detection got here (2026-09-07), kept because the
+ * next person touching this will hit the same dead ends otherwise:
+ *   1. `messages <address>` always returned an empty value_transfers list,
+ *      even once the wallet's balance had genuinely gone up by the expected
+ *      amount -- per-diversified-address filtering on that subcommand
+ *      doesn't work.
+ *   2. Dropping the address and calling bare `messages` "to get everything"
+ *      ALSO came back empty (`{"value_transfers": []}`) even though
+ *      spendable_balance was confirmed nonzero and included two real
+ *      incoming payments. Confirmed live: `messages`/value_transfers only
+ *      tracks transfers this wallet itself initiated via send/quicksend --
+ *      not arbitrary deposits received from outside, which is exactly what
+ *      every buy order and token-creation-fee payment is.
+ *   3. `notes` DOES list incoming deposits (confirmed live: it showed the
+ *      wallet's baseline note plus both real 0.0001 ZEC test payments, exact
+ *      zatoshi amounts, matching the balance). But its note_summaries carry
+ *      no receiving-address field at all -- only value, status ("confirmed
+ *      at block height N"), spend_status, memo, time, txid, output_index,
+ *      account_id (always 0 so far), scope. So per-order matching can't be
+ *      done by address here either; it has to be done by AMOUNT, in the
+ *      backend, against its own set of pending orders (see zcashReal.ts). */
+export async function unspentNotes() {
   const out = await runCli(["notes"], { timeout: 3 * 60_000, waitsync: true });
   const { json, raw } = parseMaybeJson(out);
-  if (raw !== lastLoggedNotesRaw) {
-    lastLoggedNotesRaw = raw;
-    console.error(`[zcash-wallet-service] notes() raw output changed, full dump: ${raw}`);
-  }
-  return json;
-}
-
-export async function messagesFor(address) {
-  const out = await runCli(["messages"], { timeout: 3 * 60_000, waitsync: true });
-  const { json, raw } = parseMaybeJson(out);
-  if (raw !== lastLoggedRaw) {
-    lastLoggedRaw = raw;
-    console.error(`[zcash-wallet-service] messages() raw output changed, full dump: ${raw}`);
-  }
-  const list = Array.isArray(json)
-    ? json
-    : Array.isArray(json?.messages)
-      ? json.messages
-      : Array.isArray(json?.value_transfers)
-        ? json.value_transfers
-        : null;
-  // Always also pull notes(), even while messages() is still the primary
-  // source, purely for the debug dump above -- this is the fallback we'll
-  // switch to once its shape is confirmed live.
-  await notesRaw().catch((err) => console.error(`[zcash-wallet-service] notes() call failed: ${String(err.message ?? err)}`));
-  if (list === null) {
-    console.error(`[zcash-wallet-service] unrecognized messages() output, needs a look: ${raw}`);
+  if (!json || typeof json !== "object") {
+    console.error(`[zcash-wallet-service] unrecognized notes() output, needs a look: ${raw}`);
     return [];
   }
-  if (list.length > 0) {
-    // zingolib's exact field names per entry aren't pinned down on our side
-    // yet -- log the raw shape every time (not just once) while this is
-    // still being nailed down, so a mismatch in the backend's own matching
-    // logic (zcashReal.ts) can be caught and fixed fast.
-    console.error(`[zcash-wallet-service] messages() got ${list.length} total entrie(s), filtering for ${address}: ${JSON.stringify(list)}`);
-  }
-  const matches = list.filter((m) => JSON.stringify(m).includes(address));
-  if (matches.length > 0) {
-    console.error(`[zcash-wallet-service] matched ${matches.length} entrie(s) for ${address}`);
-  }
-  return matches;
+  // Notes live in one of three pools depending on which shielded protocol
+  // received them (ironwood/orchard/sapling) -- a payment could in principle
+  // land in any of the three, so all get flattened together here.
+  const pools = [json.ironwood_notes, json.orchard_notes, json.sapling_notes];
+  const notes = pools.flatMap((pool) => (Array.isArray(pool?.note_summaries) ? pool.note_summaries : []));
+  return notes
+    .filter((n) => n.spend_status === "unspent")
+    .map((n) => ({
+      valueZatoshis: Number(n.value),
+      txid: n.txid,
+      time: Number(n.time ?? 0),
+      status: n.status,
+    }));
 }
 
 const MAX_MEMO_BYTES = 512; // Zcash shielded memo field hard limit

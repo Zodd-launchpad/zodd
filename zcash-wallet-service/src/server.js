@@ -71,13 +71,18 @@ app.get("/wallet/height", async (_req, reply) => {
   }
 });
 
-app.get("/wallet/messages", async (req, reply) => {
+// Replaces the old address-scoped /wallet/messages: zingo-cli's `messages`
+// command doesn't track incoming deposits at all (only transfers this
+// wallet itself sent -- see the long comment on cli.unspentNotes), and its
+// `notes` command -- which DOES show deposits -- carries no per-address
+// info to filter by. So this returns every unspent note this wallet holds,
+// unfiltered, and the backend matches them against its own pending orders
+// by amount (see zcashReal.ts).
+app.get("/wallet/notes", async (_req, reply) => {
   if (!ready) return reply.code(503).send({ error: "wallet not ready yet", detail: readyError });
-  const { address } = req.query;
-  if (!address) return reply.code(400).send({ error: "address query param is required" });
   try {
-    const messages = await cli.messagesFor(address);
-    return reply.send({ messages });
+    const notes = await cli.unspentNotes();
+    return reply.send({ notes });
   } catch (err) {
     app.log.error(err);
     return reply.code(500).send({ error: String(err.message ?? err) });
