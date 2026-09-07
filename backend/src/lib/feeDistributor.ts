@@ -23,14 +23,29 @@ interface Logger {
  * -- so an admin route can trigger a single run on demand (Brai, 2026-09-07:
  * wants to run it manually himself instead of waiting for the 24h clock,
  * "para mas seguridad"), without duplicating this logic. */
-export async function runFeeDistributionOnce(sendPayout: SendPayout, maxPayoutZec: number, log: Logger) {
+export async function runFeeDistributionOnce(
+  sendPayout: SendPayout,
+  maxPayoutZec: number,
+  log: Logger,
+  // false (default) for the automatic setInterval cycle below, which should
+  // keep respecting the 24h-per-token pacing. true for a deliberate manual
+  // run (see the admin route in server.ts) -- see the big comment on
+  // getTokensDueForFeePayout for why a manual trigger shouldn't be gated by
+  // that same clock.
+  ignoreInterval = false
+) {
   let due: Awaited<ReturnType<typeof store.getTokensDueForFeePayout>>;
   try {
-    due = await store.getTokensDueForFeePayout(PAYOUT_INTERVAL_MS);
+    due = await store.getTokensDueForFeePayout(PAYOUT_INTERVAL_MS, ignoreInterval);
   } catch (err) {
     log.error(err, "failed to query tokens due for creator fee payout");
     return { paid: [] as { symbol: string; amount: number; txid: string }[], skipped: [] as string[] };
   }
+  // Surfaced in the admin route's response too -- diagnostic visibility
+  // into exactly what the query considered "due" this run, since "paid:
+  // []" alone doesn't say whether nothing was due or something failed
+  // silently before ever reaching sendPayout.
+  log.info(`fee distribution: ${due.length} token(s) matched as due (ignoreInterval=${ignoreInterval}): ${due.map((t) => `${t.symbol}(accrued=${t.creatorFeeAccruedZec},addr=${t.creatorPayoutAddress ? "yes" : "no"})`).join(", ") || "none"}`);
 
   const paid: { symbol: string; amount: number; txid: string }[] = [];
   const skipped: string[] = [];
