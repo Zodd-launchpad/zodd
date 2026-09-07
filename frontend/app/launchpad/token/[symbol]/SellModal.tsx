@@ -14,6 +14,12 @@ function fmtBalance(n: number) {
   return n.toLocaleString("en-US", { maximumFractionDigits: 6 });
 }
 
+// Mirrors the backend's isShieldedAddress check (server.ts) so the error
+// shows up immediately instead of after a round trip.
+function isShieldedAddress(addr: string): boolean {
+  return /^(u1|zs1)/.test(addr);
+}
+
 export default function SellModal({ symbol, walletId, onClose }: { symbol: string; walletId: string; onClose: () => void }) {
   const { t } = useLanguage();
   const [tokenAmount, setTokenAmount] = useState("");
@@ -21,6 +27,11 @@ export default function SellModal({ symbol, walletId, onClose }: { symbol: strin
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{ zecAmount: number } | null>(null);
   const [balance, setBalance] = useState<number | null>(null);
+  const [isRealMode, setIsRealMode] = useState(false);
+
+  useEffect(() => {
+    api.getMode().then((m) => setIsRealMode(m.zcashMode === "real")).catch(() => {});
+  }, []);
 
   useEffect(() => {
     let stop = false;
@@ -45,7 +56,7 @@ export default function SellModal({ symbol, walletId, onClose }: { symbol: strin
       const amount = parseFloat(tokenAmount);
       if (!(amount > 0)) throw new Error(t("sell.error.invalidAmount"));
       if (balance !== null && amount > balance) throw new Error(t("sell.error.exceedsBalance", { symbol }));
-      if (refundAddress.length < 10) throw new Error(t("sell.error.invalidAddress"));
+      if (refundAddress.length < 10 || !isShieldedAddress(refundAddress)) throw new Error(t("sell.error.invalidAddress"));
       const order = await api.sell({ walletId, symbol, tokenAmount: amount, refundAddress });
       setResult({ zecAmount: order.zecAmount });
     } catch (e: any) {
@@ -90,7 +101,8 @@ export default function SellModal({ symbol, walletId, onClose }: { symbol: strin
             </div>
             <div className="field">
               <label>{t("sell.addressLabel")}</label>
-              <input value={refundAddress} onChange={(e) => setRefundAddress(e.target.value)} placeholder="u1..." />
+              <input value={refundAddress} onChange={(e) => setRefundAddress(e.target.value)} placeholder="u1... / zs1..." />
+              <span className="muted" style={{ fontSize: 11, marginTop: 4, display: "block" }}>{t("sell.addressHint")}</span>
             </div>
             {error && <p style={{ color: "var(--red)", fontSize: 13 }}>{error}</p>}
             <button className="btn btn-red" style={{ width: "100%" }} onClick={submit}>
@@ -100,7 +112,7 @@ export default function SellModal({ symbol, walletId, onClose }: { symbol: strin
         ) : (
           <>
             <h2 style={{ marginTop: 0, color: "var(--green)" }}>{t("sell.payoutSent")}</h2>
-            <p>{t("sell.payoutBody", { amount: result.zecAmount.toFixed(8) })}</p>
+            <p>{t(isRealMode ? "sell.payoutBody.real" : "sell.payoutBody.simulated", { amount: result.zecAmount.toFixed(8) })}</p>
             <button className="btn btn-gold" style={{ width: "100%" }} onClick={onClose}>
               {t("buy.close")}
             </button>

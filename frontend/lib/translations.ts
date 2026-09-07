@@ -240,13 +240,44 @@ export const translations = {
   "sell.balance": { en: "You have: {amount} {symbol}", zh: "你持有：{amount} {symbol}" },
   "sell.half": { en: "Half", zh: "一半" },
   "sell.max": { en: "Max", zh: "最大" },
-  "sell.addressLabel": { en: "Your Zcash address (payout)", zh: "你的 Zcash 地址（收款）" },
+  "sell.addressLabel": { en: "Your shielded Zcash address (payout)", zh: "你的屏蔽式 Zcash 地址（收款）" },
+  "sell.addressHint": { en: "Must start with u1... or zs1... (transparent t1... addresses aren't accepted)", zh: "必须以 u1... 或 zs1... 开头（不接受透明的 t1... 地址）" },
   "sell.button": { en: "Sell", zh: "卖出" },
   "sell.payoutSent": { en: "Payout sent", zh: "打款已发送" },
-  "sell.payoutBody": { en: "{amount} ZEC (simulated) to your address.", zh: "{amount} ZEC（模拟）已发送到你的地址。" },
+  "sell.payoutBody.real": { en: "{amount} ZEC sent to your address.", zh: "{amount} ZEC 已发送到你的地址。" },
+  "sell.payoutBody.simulated": { en: "{amount} ZEC (simulated) to your address.", zh: "{amount} ZEC（模拟）已发送到你的地址。" },
   "sell.error.invalidAmount": { en: "invalid amount", zh: "金额无效" },
   "sell.error.exceedsBalance": { en: "you don't have that many {symbol}", zh: "你没有那么多 {symbol}" },
-  "sell.error.invalidAddress": { en: "enter a valid Zcash address to receive the payout", zh: "请输入有效的 Zcash 地址以接收打款" },
+  "sell.error.invalidAddress": { en: "enter a shielded Zcash address (starts with u1... or zs1...) to receive the payout", zh: "请输入屏蔽式 Zcash 地址（以 u1... 或 zs1... 开头）以接收打款" },
+
+  // ---------- Help / guide modal ----------
+  "nav.help": { en: "Guide", zh: "指南" },
+  "help.title": { en: "How ZODD works", zh: "ZODD 如何运作" },
+  "help.wallet.heading": { en: "Your wallet", zh: "你的钱包" },
+  "help.wallet.body": {
+    en: "Connect creates a 12-word wallet right in your browser -- no email, no password. Write the 12 words down and keep them somewhere safe: they're the only way to recover your wallet, and ZODD can't reset them for you.",
+    zh: "连接钱包会在你的浏览器里生成一个 12 个单词的钱包——无需邮箱，无需密码。请把这 12 个单词记下来并妥善保管：这是恢复钱包的唯一方式，ZODD 无法为你重置。",
+  },
+  "help.buy.heading": { en: "Buying a token", zh: "如何购买" },
+  "help.buy.body": {
+    en: "Open any token and click Buy, then enter how much ZEC you want to spend. You'll get a one-time Zcash address and QR code -- send that exact amount from any Zcash wallet. Once the payment confirms on-chain (usually a few minutes), your tokens land in your ZODD wallet automatically.",
+    zh: "打开任意代币页面，点击「买入」，输入你想花费的 ZEC 数量。系统会生成一个一次性的 Zcash 地址和二维码——用任意 Zcash 钱包发送相同金额。链上确认后（通常几分钟），代币会自动进入你的 ZODD 钱包。",
+  },
+  "help.sell.heading": { en: "Selling a token", zh: "如何出售" },
+  "help.sell.body": {
+    en: "Open Sell on a token you hold, choose an amount (or tap Half / Max), and enter a shielded Zcash address (starts with u1... or zs1...) to receive the payout -- transparent t1... addresses aren't accepted, to keep the platform's reserve private. Confirm, and the ZEC is sent automatically.",
+    zh: "在你持有的代币页面打开「卖出」，选择数量（或点击「一半」/「最大」），并输入一个屏蔽式 Zcash 地址（以 u1... 或 zs1... 开头）用于接收打款——为了保护平台储备金的隐私，不接受透明的 t1... 地址。确认后 ZEC 会自动发送。",
+  },
+  "help.curve.heading": { en: "How the price moves", zh: "价格如何变动" },
+  "help.curve.body": {
+    en: "There's no order book: every token trades against its own bonding curve, so the price moves automatically with each buy and sell -- buying pushes it up, selling brings it down. Once a token's real ZEC reserve reaches the graduation threshold, it graduates off the curve.",
+    zh: "这里没有订单簿：每个代币都在自己的联合曲线上交易，价格会随着每次买卖自动变化——买入推高价格，卖出则降低价格。当代币的真实 ZEC 储备达到毕业门槛时，它就会从曲线上「毕业」。",
+  },
+  "help.fees.heading": { en: "Fees", zh: "费用" },
+  "help.fees.body": {
+    en: "Every trade carries a 2% fee (1% to the token's creator, 1% to the platform). Creating a new token has a separate one-time fee, paid once from the creator's own wallet.",
+    zh: "每笔交易收取 2% 的费用（1% 归代币创建者，1% 归平台）。创建新代币需要单独支付一次性费用，由创建者从自己的钱包支付。",
+  },
 
   // ---------- Chart ----------
   "chart.interval.5m": { en: "5m", zh: "5分" },
