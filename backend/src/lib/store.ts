@@ -5,7 +5,8 @@
  */
 import { createHash, randomUUID } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
-import { CurveState, DEFAULT_CURVE_CONFIG, currentPrice } from "./bondingCurve.js";
+import { CurveState, DEFAULT_CURVE_CONFIG, currentPrice, quoteBuy, quoteSell } from "./bondingCurve.js";
+import { splitFee } from "./fees.js";
 
 export const prisma = new PrismaClient();
 export { DEFAULT_CURVE_CONFIG };
@@ -703,4 +704,61 @@ export async function completePendingTokenCreation(id: string, genesisMemoTxid: 
 export async function failPendingTokenCreation(id: string) {
   const p = await prisma.pendingTokenCreation.update({ where: { id }, data: { status: "FAILED" } });
   return toPendingTokenCreationView(p);
+}
+
+// ---------- Curve data repair ----------
+
+/** Recomputes a token's curve state (curveReserveZec, curveSoldTokens,
+ * graduated) from scratch by replaying every FILLED order in chronological
+ * order, instead of trusting whatever is currently stored. Fixes drift
+ * from the lost-update race that used to be possible when two buys/sells
+ * for the same token were processed concurrently (see mutex.ts's big
+ * comment -- found 2026-09-07, Brai got "cannot sell more than the curve
+ * has issued" trying to sell FLORKY, because past concurrent buys had
+ * silently clobbered each other's curve write while the balance ledger,
+ * which is always atomic, stayed correct). Balances are NEVER touched
+ * here -- they were never wrong -- only the curve's own running totals.
+ * Order.zecAmount is always the GROSS amount (before the 2/1/1% fee
+ * split) for both sides, matching what quoteBuy/quoteSell expect. */
+export async function recomputeCurveFromOrders(tokenId: string): Promise<{ before: CurveState; after: CurveState; ordersReplayed: number }> {
+  const token = await prisma.token.findUnique({ where: { id: tokenId } });
+  if (!token) throw new Error("token not found");
+  const before: CurveState = { realZecReserves: num(token.curveReserveZec), tokensSold: num(token.curveSoldTokens) };
+
+  const orders = await prisma.order.findMany({
+    where: { tokenId, status: "FILLED" },
+    orderBy: [{ filledAt: "asc" }, { createdAt: "asc" }],
+  });
+
+  let state: CurveState = { realZecReserves: 0, tokensSold: 0 };
+  for (const o of orders) {
+    // Best-effort: skip (rather than abort the whole replay) on anything
+    // quoteBuy/quoteSell would reject -- if the ORIGINAL history itself
+    // already had a conflict (possible cause, not just effect, of the
+    // drift this is fixing), one bad order shouldn't block reconstructing
+    // everything else.
+    try {
+      if (o.side === "BUY") {
+        const { net } = splitFee(num(o.zecAmount));
+        state = quoteBuy(state, net).newState;
+      } else {
+        state = quoteSell(state, num(o.tokenAmount)).newState;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  const graduated = state.realZecReserves >= DEFAULT_CURVE_CONFIG.graduationZecThreshold;
+  await prisma.token.update({
+    where: { id: tokenId },
+    data: {
+      curveReserveZec: state.realZecReserves,
+      curveSoldTokens: BigInt(Math.max(0, Math.round(state.tokensSold))),
+      graduated,
+      graduatedAt: graduated ? (token.graduatedAt ?? new Date()) : null,
+    },
+  });
+
+  return { before, after: state, ordersReplayed: orders.length };
 }

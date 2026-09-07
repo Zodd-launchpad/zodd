@@ -6,6 +6,7 @@ import { quoteBuy, quoteSell, currentPrice, marketCapZec, isGraduated } from "./
 import { simulatedInscriptionFor } from "./lib/simulatedChain.js";
 import { splitFee, TRADE_FEE_BPS, CREATOR_FEE_BPS, TOKEN_CREATE_FEE_ZEC } from "./lib/fees.js";
 import { startFeeDistributor, runFeeDistributionOnce } from "./lib/feeDistributor.js";
+import { withTokenLock } from "./lib/mutex.js";
 
 // ZCASH_MODE=real switches every payment/inscription in this service to
 // actually move ZEC through zcash-wallet-service, instead of the mock.
@@ -356,33 +357,41 @@ onPaymentDetected(async (orderId: string, confirmedZecAmount: number, txid: stri
     if (!order) return;
     if (!isRepeat && order.status !== "PENDING") return;
     if (isRepeat && order.status !== "FILLED") return; // nothing to clone off of yet -- shouldn't happen (see isRepeat's origin), but don't act on a half-formed order
-    const token = await store.getTokenById(order.tokenId);
-    if (!token) return;
 
-    // The 2% trading fee comes off the top; only the net amount actually
-    // moves the curve (the buyer's tokensOut is priced off the net, same
-    // as any DEX-style fee-on-top model).
-    const { net, creatorFee, platformFee } = splitFee(confirmedZecAmount);
-    const { tokensOut, newState } = quoteBuy(token.curve, net);
-    await store.updateTokenCurve(token.id, newState);
-    await store.recordPricePoint(token.id, newState, token.totalSupply);
-    await store.creditBalance(order.internalWalletId, token.id, tokensOut);
-    await store.accrueFees(token.id, creatorFee, platformFee);
+    // Everything from reading the curve through writing it back is
+    // serialized per-token (see mutex.ts's big comment: two buys for the
+    // same token processed concurrently -- very possible now that a
+    // deliberate repeat payment can land in the same poll tick as another
+    // one -- used to silently lose one buy's contribution to the curve).
+    await withTokenLock(order.tokenId, async () => {
+      const token = await store.getTokenById(order.tokenId);
+      if (!token) return;
 
-    if (isRepeat) {
-      await store.createRepeatBuyOrder({
-        internalWalletId: order.internalWalletId,
-        tokenId: token.id,
-        zecAddress: order.zecAddress ?? null,
-        zecAmount: confirmedZecAmount,
-        tokenAmount: tokensOut,
-        executionTxid: txid,
-      });
-      app.log.info(`order ${orderId} REPEAT payment: ${confirmedZecAmount} ZEC -> ${tokensOut.toFixed(0)} ${token.symbol} (new order cloned, same address paid again, txid ${txid})`);
-    } else {
-      await store.fillBuyOrder(order.id, tokensOut, txid);
-      app.log.info(`order ${orderId} filled: ${confirmedZecAmount} ZEC -> ${tokensOut.toFixed(0)} ${token.symbol} (fee ${(creatorFee + platformFee).toFixed(8)} ZEC)`);
-    }
+      // The 2% trading fee comes off the top; only the net amount actually
+      // moves the curve (the buyer's tokensOut is priced off the net, same
+      // as any DEX-style fee-on-top model).
+      const { net, creatorFee, platformFee } = splitFee(confirmedZecAmount);
+      const { tokensOut, newState } = quoteBuy(token.curve, net);
+      await store.updateTokenCurve(token.id, newState);
+      await store.recordPricePoint(token.id, newState, token.totalSupply);
+      await store.creditBalance(order.internalWalletId, token.id, tokensOut);
+      await store.accrueFees(token.id, creatorFee, platformFee);
+
+      if (isRepeat) {
+        await store.createRepeatBuyOrder({
+          internalWalletId: order.internalWalletId,
+          tokenId: token.id,
+          zecAddress: order.zecAddress ?? null,
+          zecAmount: confirmedZecAmount,
+          tokenAmount: tokensOut,
+          executionTxid: txid,
+        });
+        app.log.info(`order ${orderId} REPEAT payment: ${confirmedZecAmount} ZEC -> ${tokensOut.toFixed(0)} ${token.symbol} (new order cloned, same address paid again, txid ${txid})`);
+      } else {
+        await store.fillBuyOrder(order.id, tokensOut, txid);
+        app.log.info(`order ${orderId} filled: ${confirmedZecAmount} ZEC -> ${tokensOut.toFixed(0)} ${token.symbol} (fee ${(creatorFee + platformFee).toFixed(8)} ZEC)`);
+      }
+    });
   } catch (err) {
     if (!isRepeat) await store.failOrder(orderId).catch(() => {});
     app.log.error(err, `order ${orderId} failed to execute${isRepeat ? " a repeat payment" : ""} against the curve`);
@@ -454,52 +463,68 @@ const sellSchema = z.object({
     .refine(isShieldedAddress, "refund address must be shielded (starts with u1 or zs1)"),
 });
 
+// Found 2026-09-07 (Brai, selling FLORKY): "Internal Server Error" from
+// quoteSell's "cannot sell more than the curve has issued", even though
+// his balance clearly had enough. Root cause was a lost-update race on the
+// curve state -- see mutex.ts's big comment. Everything from reading the
+// curve through writing it back is now serialized per-token via
+// withTokenLock, and the curve is re-read INSIDE the lock (not reused from
+// the `token` fetched above, which can already be stale by the time the
+// lock is acquired if a buy/sell for the same token was queued ahead of
+// this one).
 app.post("/api/orders/sell", async (req, reply) => {
   const body = sellSchema.parse(req.body);
   const wallet = await store.getWallet(body.walletId);
-  const token = await store.getToken(body.symbol.toUpperCase());
+  const tokenCheck = await store.getToken(body.symbol.toUpperCase());
   if (!wallet) return reply.code(400).send({ error: "invalid wallet" });
-  if (!token) return reply.code(404).send({ error: "token not found" });
+  if (!tokenCheck) return reply.code(404).send({ error: "token not found" });
 
-  const balance = await store.getBalance(wallet.id, token.id);
-  if (balance < body.tokenAmount) {
-    return reply.code(400).send({ error: "insufficient balance" });
-  }
-
-  const { zecOut, newState } = quoteSell(token.curve, body.tokenAmount);
-  // Same 3% fee, taken off the seller's proceeds this time: they receive
-  // the net amount, the curve/reserve accounting still reflects the full
-  // gross zecOut (kept internally consistent with how the buy side works).
-  const { net: netPayout, creatorFee, platformFee } = splitFee(zecOut);
-
-  let txid: string;
   try {
-    ({ txid } = await sendPayout(body.refundAddress, netPayout));
+    const order = await withTokenLock(tokenCheck.id, async () => {
+      const token = await store.getTokenById(tokenCheck.id);
+      if (!token) throw new Error("token not found");
+
+      const balance = await store.getBalance(wallet.id, token.id);
+      if (balance < body.tokenAmount) {
+        throw Object.assign(new Error("insufficient balance"), { httpStatus: 400 });
+      }
+
+      const { zecOut, newState } = quoteSell(token.curve, body.tokenAmount);
+      // Same 3% fee, taken off the seller's proceeds this time: they
+      // receive the net amount, the curve/reserve accounting still
+      // reflects the full gross zecOut (kept internally consistent with
+      // how the buy side works).
+      const { net: netPayout, creatorFee, platformFee } = splitFee(zecOut);
+
+      const { txid } = await sendPayout(body.refundAddress, netPayout);
+
+      await store.updateTokenCurve(token.id, newState);
+      await store.recordPricePoint(token.id, newState, token.totalSupply);
+      await store.debitBalance(wallet.id, token.id, body.tokenAmount);
+      await store.accrueFees(token.id, creatorFee, platformFee);
+      // Remember this address so the Sell modal can pre-fill it next
+      // time, for a different token, without asking the payer to paste it
+      // in again (Brai, 2026-09-07). Best-effort: never let this fail a
+      // sell whose actual payout already went through.
+      await store.setDefaultRefundAddress(wallet.id, body.refundAddress).catch((err) => app.log.error(err, "failed to remember refund address"));
+
+      return store.createSellOrder({
+        internalWalletId: wallet.id,
+        tokenId: token.id,
+        tokenAmount: body.tokenAmount,
+        refundAddress: body.refundAddress,
+        zecAmount: zecOut,
+        executionTxid: txid,
+      });
+    });
+
+    return reply.send(order);
   } catch (err) {
-    app.log.error(err, `sell payout failed for wallet ${wallet.id} / token ${token.symbol}`);
+    const httpStatus = (err as { httpStatus?: number }).httpStatus;
+    if (httpStatus) return reply.code(httpStatus).send({ error: (err as Error).message });
+    app.log.error(err, `sell failed for wallet ${wallet.id} / token ${tokenCheck.symbol}`);
     return reply.code(502).send({ error: String((err as Error).message ?? err) });
   }
-
-  await store.updateTokenCurve(token.id, newState);
-  await store.recordPricePoint(token.id, newState, token.totalSupply);
-  await store.debitBalance(wallet.id, token.id, body.tokenAmount);
-  await store.accrueFees(token.id, creatorFee, platformFee);
-  // Remember this address so the Sell modal can pre-fill it next time,
-  // for a different token, without asking the payer to paste it in again
-  // (Brai, 2026-09-07). Best-effort: never let this fail a sell whose
-  // actual payout already went through.
-  await store.setDefaultRefundAddress(wallet.id, body.refundAddress).catch((err) => app.log.error(err, "failed to remember refund address"));
-
-  const order = await store.createSellOrder({
-    internalWalletId: wallet.id,
-    tokenId: token.id,
-    tokenAmount: body.tokenAmount,
-    refundAddress: body.refundAddress,
-    zecAmount: zecOut,
-    executionTxid: txid,
-  });
-
-  return reply.send(order);
 });
 
 // Manual recovery for the same-amount watcher collision bug (found
@@ -550,6 +575,26 @@ app.post("/api/admin/run-fee-distribution", async (req, reply) => {
   const result = await runFeeDistributionOnce(sendPayout, MAX_PAYOUT_ZEC, app.log, true);
   app.log.info(`[admin] manual fee distribution run: paid ${result.paid.length}, skipped ${result.skipped.length}`);
   return reply.send({ ok: true, ...result });
+});
+
+// Data repair, not a fund transfer -- see recomputeCurveFromOrders's big
+// comment in store.ts. Fixes a token's stored curve state (tokensSold /
+// realZecReserves / graduated) to match the true replay of its FILLED
+// orders, undoing any drift from the lost-update race that's now closed
+// by withTokenLock. Never touches balances or moves ZEC. Gated behind
+// ADMIN_TOKEN like the fee-distribution trigger, out of caution (it does
+// mutate financial-state data), even though it's safe to call any number
+// of times -- it always recomputes from the same source of truth.
+app.post("/api/admin/recompute-curve", async (req, reply) => {
+  if (!ADMIN_TOKEN) return reply.code(503).send({ error: "ADMIN_TOKEN is not configured" });
+  if (req.headers["x-admin-token"] !== ADMIN_TOKEN) return reply.code(401).send({ error: "unauthorized" });
+  const body = z.object({ symbol: z.string() }).safeParse(req.body);
+  if (!body.success) return reply.code(400).send({ error: "expected { symbol }" });
+  const token = await store.getToken(body.data.symbol.toUpperCase());
+  if (!token) return reply.code(404).send({ error: "token not found" });
+  const result = await withTokenLock(token.id, () => store.recomputeCurveFromOrders(token.id));
+  app.log.info(`[admin] recomputed curve for ${token.symbol}: tokensSold ${result.before.tokensSold} -> ${result.after.tokensSold}, reserve ${result.before.realZecReserves} -> ${result.after.realZecReserves} (${result.ordersReplayed} orders replayed)`);
+  return reply.send({ ok: true, symbol: token.symbol, ...result });
 });
 
 // Read-only: confirms the real wallet is funded/reachable without ever
