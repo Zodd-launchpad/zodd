@@ -46,6 +46,10 @@ export interface PendingPayment {
   address: string;
   expectedZecAmount: number;
   createdAt: number;
+  /** True wall-clock creation time, never reset by a resume. See
+   * HARD_MAX_LIFETIME_MS below -- this is what stops an abandoned order
+   * from watching (and stealing same-amount payments from) forever. */
+  originalCreatedAt: number;
 }
 
 type PaymentCallback = (orderId: string, confirmedZecAmount: number, txid: string) => void;
@@ -55,6 +59,23 @@ let onPayment: PaymentCallback | null = null;
 
 const POLL_INTERVAL_MS = 20_000; // real chain state -- no need to hammer it every few seconds
 const ORDER_EXPIRY_MS = 30 * 60_000; // an order nobody paid within 30min stops being watched
+
+// Found 2026-09-07: matching is amount-only (see the big comment below), so
+// two PENDING records open at once for the same expected amount race for
+// whichever note lands next -- and resumeWatching deliberately gives every
+// resumed order a FRESH 30min window (see its own comment) so a real
+// payment survives a redeploy. Combined, an old order nobody ever paid can
+// live forever: every redeploy re-resumes it with another fresh 30min,
+// so it never truly expires, and it keeps first-in-line priority (it was
+// registered before any later, actually-paid order of the same amount) to
+// steal that later order's payment. A real ZEC 0.0001 fee meant for a
+// token creation named FLORK got credited this way to an abandoned
+// creation from 36 minutes earlier instead. This hard cap, measured from
+// the ORIGINAL creation time and never reset by a resume, bounds how long
+// an order can stay in the running regardless of how many redeploys
+// happen -- generous enough to survive several redeploys in a row, but
+// short enough that a genuinely abandoned order stops competing.
+const HARD_MAX_LIFETIME_MS = 90 * 60_000;
 
 export function onPaymentDetected(cb: PaymentCallback) {
   onPayment = cb;
@@ -93,9 +114,12 @@ function startPolling() {
   pollingStarted = true;
   setInterval(async () => {
     for (const pending of [...watchers.values()]) {
-      if (Date.now() - pending.createdAt > ORDER_EXPIRY_MS) {
+      const hardExpired = Date.now() - pending.originalCreatedAt > HARD_MAX_LIFETIME_MS;
+      if (Date.now() - pending.createdAt > ORDER_EXPIRY_MS || hardExpired) {
         watchers.delete(pending.orderId);
-        console.warn(`[zcashReal] order ${pending.orderId} expired unpaid after 30min (address ${pending.address})`);
+        console.warn(
+          `[zcashReal] order ${pending.orderId} expired unpaid ${hardExpired ? `(hard cap: ${Math.round((Date.now() - pending.originalCreatedAt) / 60_000)}min since original creation)` : "after 30min"} (address ${pending.address})`
+        );
       }
     }
     if (watchers.size === 0) return;
@@ -129,7 +153,8 @@ export async function generateOrderAddress(orderId: string, expectedZecAmount: n
     );
   }
   const { address } = await call("/wallet/address", { method: "POST" });
-  watchers.set(orderId, { orderId, address, expectedZecAmount, createdAt: Date.now() });
+  const now = Date.now();
+  watchers.set(orderId, { orderId, address, expectedZecAmount, createdAt: now, originalCreatedAt: now });
   return address;
 }
 
@@ -158,7 +183,11 @@ export async function generateOrderAddress(orderId: string, expectedZecAmount: n
 export function resumeWatching(orderId: string, address: string, expectedZecAmount: number, createdAtMs: number) {
   if (watchers.has(orderId)) return; // already registered this process lifetime
   const ageMs = Date.now() - createdAtMs;
-  watchers.set(orderId, { orderId, address, expectedZecAmount, createdAt: Date.now() });
+  if (ageMs > HARD_MAX_LIFETIME_MS) {
+    console.warn(`[zcashReal] NOT resuming ${orderId} -- originally created ${Math.round(ageMs / 60_000)}min ago, past the ${HARD_MAX_LIFETIME_MS / 60_000}min hard cap (address ${address})`);
+    return;
+  }
+  watchers.set(orderId, { orderId, address, expectedZecAmount, createdAt: Date.now(), originalCreatedAt: createdAtMs });
   console.log(`[zcashReal] resumed watching ${orderId} (originally created ${Math.round(ageMs / 60_000)}min ago) with a fresh ${ORDER_EXPIRY_MS / 60_000}min window`);
   startPolling();
 }

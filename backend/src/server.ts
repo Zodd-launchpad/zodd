@@ -435,6 +435,32 @@ app.post("/api/orders/sell", async (req, reply) => {
   return reply.send(order);
 });
 
+// Manual recovery for the same-amount watcher collision bug (found
+// 2026-09-07: two PENDING token creations open at once with the same
+// expectedZecAmount -- an old abandoned one and a new real one -- race for
+// the next matching note, and since matching is amount-only (see
+// zcashReal.ts's big comment), whichever watcher was registered first wins,
+// even if the payer's intent was clearly the newer one). This lets a real,
+// already-received payment that got misattributed be credited to the
+// correct pending creation after the fact, without asking the payer to
+// send money twice. It does NOT move any funds -- the ZEC already sits in
+// the platform wallet either way -- it only finishes the token-creation
+// record. Guarded to real mode, PENDING-only (completePendingTokenCreation
+// already no-ops otherwise), and requires the id of a note actually seen by
+// the wallet, so this can't be used to spin up a token for free.
+app.post("/api/admin/force-complete-token-creation", async (req, reply) => {
+  if (ZCASH_MODE !== "real") return reply.code(404).send({ error: "not in real mode" });
+  const body = z.object({ creationId: z.string(), genesisMemoTxid: z.string().min(10) }).safeParse(req.body);
+  if (!body.success) return reply.code(400).send({ error: "expected creationId and genesisMemoTxid" });
+  const pending = await store.getPendingTokenCreation(body.data.creationId);
+  if (!pending) return reply.code(404).send({ error: "not found" });
+  if (pending.status !== "PENDING") return reply.code(409).send({ error: `already ${pending.status}` });
+  const token = await store.completePendingTokenCreation(body.data.creationId, body.data.genesisMemoTxid);
+  if (!token) return reply.code(500).send({ error: "completion failed" });
+  app.log.info(`[admin] force-completed pending creation ${body.data.creationId} -> token ${token.symbol} (manual recovery, txid ${body.data.genesisMemoTxid})`);
+  return reply.send({ ok: true, token });
+});
+
 // Read-only: confirms the real wallet is funded/reachable without ever
 // touching the seed or moving money. 404s outside real mode.
 app.get("/api/admin/zcash-status", async (_req, reply) => {
