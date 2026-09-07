@@ -81,6 +81,7 @@ export interface TokenWithCurve {
   logoDataUrl: string | null;
   description: string | null;
   twitterUrl: string | null;
+  websiteUrl: string | null;
 }
 
 function toTokenWithCurve(t: {
@@ -101,6 +102,7 @@ function toTokenWithCurve(t: {
   logoDataUrl: string | null;
   description: string | null;
   twitterUrl: string | null;
+  websiteUrl: string | null;
 }): TokenWithCurve {
   return {
     id: t.id,
@@ -119,6 +121,7 @@ function toTokenWithCurve(t: {
     logoDataUrl: t.logoDataUrl,
     description: t.description,
     twitterUrl: t.twitterUrl,
+    websiteUrl: t.websiteUrl,
   };
 }
 
@@ -139,6 +142,7 @@ export async function createToken(input: {
   logoDataUrl?: string;
   description?: string;
   twitterUrl?: string;
+  websiteUrl?: string;
 }): Promise<TokenWithCurve> {
   const t = await prisma.token.create({
     data: {
@@ -153,6 +157,7 @@ export async function createToken(input: {
       logoDataUrl: input.logoDataUrl ?? null,
       description: input.description ?? null,
       twitterUrl: input.twitterUrl ?? null,
+      websiteUrl: input.websiteUrl ?? null,
     },
   });
   const token = toTokenWithCurve(t);
@@ -614,6 +619,7 @@ export async function createPendingTokenCreation(input: {
   logoDataUrl?: string;
   description?: string;
   twitterUrl?: string;
+  websiteUrl?: string;
   expectedZecAmount: number;
 }) {
   const p = await prisma.pendingTokenCreation.create({
@@ -626,6 +632,7 @@ export async function createPendingTokenCreation(input: {
       logoDataUrl: input.logoDataUrl ?? null,
       description: input.description ?? null,
       twitterUrl: input.twitterUrl ?? null,
+      websiteUrl: input.websiteUrl ?? null,
       expectedZecAmount: input.expectedZecAmount,
     },
   });
@@ -682,6 +689,7 @@ export async function completePendingTokenCreation(id: string, genesisMemoTxid: 
     logoDataUrl: p.logoDataUrl ?? undefined,
     description: p.description ?? undefined,
     twitterUrl: p.twitterUrl ?? undefined,
+    websiteUrl: p.websiteUrl ?? undefined,
   });
 
   await prisma.pendingTokenCreation.update({

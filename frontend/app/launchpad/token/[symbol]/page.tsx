@@ -91,14 +91,21 @@ export default function TokenPage() {
             <p className="muted" style={{ margin: 0 }}>{token.name}</p>
           </div>
         </div>
-        {(token.description || token.twitterUrl) && (
+        {(token.description || token.twitterUrl || token.websiteUrl) && (
           <div style={{ marginTop: 10 }}>
             {token.description && <p className="muted" style={{ fontSize: 13 }}>{token.description}</p>}
-            {token.twitterUrl && (
-              <a href={token.twitterUrl} target="_blank" rel="noreferrer" className="btn btn-outline" style={{ fontSize: 12, display: "inline-block" }}>
-                {t("token.viewOnX")}
-              </a>
-            )}
+            <div style={{ display: "flex", gap: 8 }}>
+              {token.twitterUrl && (
+                <a href={token.twitterUrl} target="_blank" rel="noreferrer" className="btn btn-outline" style={{ fontSize: 12, display: "inline-block" }}>
+                  {t("token.viewOnX")}
+                </a>
+              )}
+              {token.websiteUrl && (
+                <a href={token.websiteUrl} target="_blank" rel="noreferrer" className="btn btn-outline" style={{ fontSize: 12, display: "inline-block" }}>
+                  {t("token.viewWebsite")}
+                </a>
+              )}
+            </div>
           </div>
         )}
 

@@ -42,6 +42,7 @@ model Token {
   logoDataUrl       String?  @db.Text // imagen como data URL (base64), ya redimensionada en el navegador
   description       String?  @db.Text
   twitterUrl        String?
+  websiteUrl        String?
 
   // Estado de la bonding curve (ver lib/bondingCurve.ts para la matemática)
   curveReserveZec   Decimal  @db.Decimal(20, 8) // ZEC efectivo acumulado en la curva
@@ -134,6 +135,7 @@ model PendingTokenCreation {
   logoDataUrl          String?             @db.Text
   description          String?             @db.Text
   twitterUrl           String?
+  websiteUrl           String?
   zecAddress           String?
   expectedZecAmount    Decimal             @db.Decimal(20, 8)
   status               TokenCreationStatus @default(PENDING)

@@ -101,6 +101,7 @@ const createTokenSchema = z.object({
     .optional(),
   description: z.string().max(500).optional(),
   twitterUrl: z.string().max(200).optional(),
+  websiteUrl: z.string().max(200).optional(),
 });
 
 /** Accepts "@handle", "handle", or a full URL and normalizes to a full
@@ -112,6 +113,17 @@ function normalizeTwitter(input: string | undefined): string | undefined {
   if (/^https?:\/\//i.test(trimmed)) return trimmed;
   const handle = trimmed.replace(/^@/, "");
   return `https://x.com/${handle}`;
+}
+
+/** Same idea as normalizeTwitter: accepts "example.com" or a full URL and
+ * always returns something starting with http(s):// so the frontend can
+ * just render it as a link without guessing. */
+function normalizeWebsite(input: string | undefined): string | undefined {
+  if (!input) return undefined;
+  const trimmed = input.trim();
+  if (!trimmed) return undefined;
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  return `https://${trimmed}`;
 }
 
 // Same model as SHLD.fun and as our own buy orders: the CREATOR pays the
@@ -142,6 +154,7 @@ app.post("/api/tokens", async (req, reply) => {
     logoDataUrl: body.logoDataUrl,
     description: body.description,
     twitterUrl: normalizeTwitter(body.twitterUrl),
+    websiteUrl: normalizeWebsite(body.websiteUrl),
     expectedZecAmount: TOKEN_CREATE_FEE_ZEC,
   });
 
@@ -222,6 +235,7 @@ async function serializeToken(t: store.TokenWithCurve) {
     logoDataUrl: t.logoDataUrl,
     description: t.description,
     twitterUrl: t.twitterUrl,
+    websiteUrl: t.websiteUrl,
     fee: {
       tradeFeeBps: TRADE_FEE_BPS,
       creatorFeeBps: CREATOR_FEE_BPS,

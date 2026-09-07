@@ -56,6 +56,60 @@ function GraduationBar({ pct, graduated }: { pct: number; graduated: boolean }) 
   );
 }
 
+// Tiny inline icons for the twitter/website links under a token's name in
+// the market table (Brai, 2026-09-07: "un mini link (un icono)"). Kept as
+// inline SVG paths -- no icon library in this project -- and each link
+// stops the click from bubbling to the row's onClick (which navigates to
+// the token page), since these should just open the external link.
+function TwitterIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+    </svg>
+  );
+}
+function WebsiteIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M3 12h18M12 3c2.5 2.5 3.8 5.6 3.8 9s-1.3 6.5-3.8 9c-2.5-2.5-3.8-5.6-3.8-9s1.3-6.5 3.8-9z" />
+    </svg>
+  );
+}
+function TokenLinks({ twitterUrl, websiteUrl }: { twitterUrl: string | null; websiteUrl: string | null }) {
+  if (!twitterUrl && !websiteUrl) return null;
+  return (
+    <div style={{ display: "flex", gap: 6, marginTop: 2 }}>
+      {twitterUrl && (
+        <a
+          href={twitterUrl}
+          target="_blank"
+          rel="noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="muted"
+          style={{ display: "inline-flex", color: "inherit" }}
+          title="Twitter / X"
+        >
+          <TwitterIcon />
+        </a>
+      )}
+      {websiteUrl && (
+        <a
+          href={websiteUrl}
+          target="_blank"
+          rel="noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="muted"
+          style={{ display: "inline-flex", color: "inherit" }}
+          title="Website"
+        >
+          <WebsiteIcon />
+        </a>
+      )}
+    </div>
+  );
+}
+
 type FilterKey = "new" | "marketCap" | "graduated";
 
 const FILTERS: { key: FilterKey; labelKey: "market.filter.new" | "market.filter.marketCap" | "market.filter.graduated" }[] = [
@@ -167,6 +221,7 @@ export default function MarketPage() {
                       <div>
                         <strong>{t2.symbol}</strong>
                         <div className="muted">{t2.name}</div>
+                        <TokenLinks twitterUrl={t2.twitterUrl} websiteUrl={t2.websiteUrl} />
                       </div>
                     </div>
                   </td>

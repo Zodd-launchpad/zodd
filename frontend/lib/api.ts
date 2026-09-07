@@ -26,6 +26,7 @@ export interface TokenSummary {
   logoDataUrl: string | null;
   description: string | null;
   twitterUrl: string | null;
+  websiteUrl: string | null;
   fee: {
     tradeFeeBps: number;
     creatorFeeBps: number;
@@ -99,6 +100,7 @@ export const api = {
     logoDataUrl?: string;
     description?: string;
     twitterUrl?: string;
+    websiteUrl?: string;
   }): Promise<{ creationId: string; zecAddress: string; zecAmount: number; status: "PENDING" }> =>
     req("/api/tokens", { method: "POST", body: JSON.stringify(data) }),
   getTokenCreation: (

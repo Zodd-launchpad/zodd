@@ -16,6 +16,7 @@ export default function CreatePage() {
   const [creatorPayoutAddress, setCreatorPayoutAddress] = useState("");
   const [description, setDescription] = useState("");
   const [twitterUrl, setTwitterUrl] = useState("");
+  const [websiteUrl, setWebsiteUrl] = useState("");
   const [logoDataUrl, setLogoDataUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -61,6 +62,7 @@ export default function CreatePage() {
         logoDataUrl: logoDataUrl ?? undefined,
         description: description.trim() || undefined,
         twitterUrl: twitterUrl.trim() || undefined,
+        websiteUrl: websiteUrl.trim() || undefined,
       });
       setCreationId(res.creationId);
       setZecAddress(res.zecAddress);
@@ -239,6 +241,10 @@ export default function CreatePage() {
         <div className="field">
           <label>{t("create.twitterLabel")}</label>
           <input value={twitterUrl} onChange={(e) => setTwitterUrl(e.target.value)} placeholder={t("create.twitterPlaceholder")} maxLength={200} />
+        </div>
+        <div className="field">
+          <label>{t("create.websiteLabel")}</label>
+          <input value={websiteUrl} onChange={(e) => setWebsiteUrl(e.target.value)} placeholder={t("create.websitePlaceholder")} maxLength={200} />
         </div>
         <div className="field">
           <label>{t("create.creatorPayoutLabel")}</label>

@@ -124,6 +124,8 @@ export const translations = {
   "create.descriptionPlaceholder": { en: "What's this token about?", zh: "这个代币是关于什么的？" },
   "create.twitterLabel": { en: "Twitter / X (optional)", zh: "Twitter / X（可选）" },
   "create.twitterPlaceholder": { en: "@handle or full link", zh: "@用户名 或完整链接" },
+  "create.websiteLabel": { en: "Website (optional)", zh: "网站（可选）" },
+  "create.websitePlaceholder": { en: "example.com or full link", zh: "example.com 或完整链接" },
 
   // ---------- Portfolio page ----------
   "portfolio.connectFirst": { en: "Connect your wallet above to see your portfolio.", zh: "请先在上方连接钱包以查看你的持仓。" },
@@ -219,6 +221,7 @@ export const translations = {
   "token.onChain.finalized": { en: "finalized", zh: "完成" },
   "token.onChain.creationTxid": { en: "creation txid", zh: "创建交易 ID" },
   "token.viewOnX": { en: "View on X", zh: "在 X 上查看" },
+  "token.viewWebsite": { en: "Website", zh: "网站" },
 
   // ---------- Creator fee card ----------
   "token.fee.heading": { en: "CREATOR FEE", zh: "创建者分成" },
