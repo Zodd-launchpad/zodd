@@ -42,8 +42,11 @@ export function onPaymentDetected(cb: PaymentCallback) {
   onPayment = cb;
 }
 
-/** Generates a one-time address for a buy order and simulates the payment. */
-export function generateOrderAddress(orderId: string, expectedZecAmount: number): string {
+/** Generates a one-time address for a buy order and simulates the payment.
+ * Returns the (unchanged, mock mode has no amount-collision risk -- each
+ * order resolves on its own orderId-keyed timer) expectedZecAmount too, to
+ * match zcashReal.ts's shape (see its pickUniqueAmount). */
+export function generateOrderAddress(orderId: string, expectedZecAmount: number): { address: string; expectedZecAmount: number } {
   const address = fakeShieldedAddress();
   watchers.set(orderId, { orderId, address, expectedZecAmount });
 
@@ -58,7 +61,7 @@ export function generateOrderAddress(orderId: string, expectedZecAmount: number)
     onPayment?.(orderId, pending.expectedZecAmount, fakeTxid);
   }, delayMs);
 
-  return address;
+  return { address, expectedZecAmount };
 }
 
 /** No-op in mock mode: a simulated payment always confirms within a few

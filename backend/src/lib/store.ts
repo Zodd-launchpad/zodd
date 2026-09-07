@@ -422,8 +422,16 @@ export async function createSellOrder(input: {
   return toOrderView(o);
 }
 
-export async function setOrderAddress(orderId: string, zecAddress: string) {
-  const o = await prisma.order.update({ where: { id: orderId }, data: { zecAddress } });
+/** zecAmount is optional because zcashReal.ts's generateOrderAddress may
+ * return an amount that was bumped by a few thousand zatoshis to keep it
+ * unique among currently-watched orders (see pickUniqueAmount there) -- when
+ * given, this persists that adjusted, real amount so the DB matches what
+ * the payer is actually shown/charged. */
+export async function setOrderAddress(orderId: string, zecAddress: string, zecAmount?: number) {
+  const o = await prisma.order.update({
+    where: { id: orderId },
+    data: { zecAddress, ...(zecAmount !== undefined ? { zecAmount } : {}) },
+  });
   return toOrderView(o);
 }
 
@@ -544,8 +552,13 @@ export async function createPendingTokenCreation(input: {
   return toPendingTokenCreationView(p);
 }
 
-export async function setPendingTokenCreationAddress(id: string, zecAddress: string) {
-  const p = await prisma.pendingTokenCreation.update({ where: { id }, data: { zecAddress } });
+/** expectedZecAmount is optional for the same reason as setOrderAddress's
+ * zecAmount param -- see its comment. */
+export async function setPendingTokenCreationAddress(id: string, zecAddress: string, expectedZecAmount?: number) {
+  const p = await prisma.pendingTokenCreation.update({
+    where: { id },
+    data: { zecAddress, ...(expectedZecAmount !== undefined ? { expectedZecAmount } : {}) },
+  });
   return toPendingTokenCreationView(p);
 }
 

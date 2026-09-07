@@ -141,19 +141,25 @@ app.post("/api/tokens", async (req, reply) => {
   });
 
   let zecAddress: string;
+  let zecAmount: number;
   try {
-    zecAddress = await generateOrderAddress(pending.id, TOKEN_CREATE_FEE_ZEC);
+    const res = await generateOrderAddress(pending.id, TOKEN_CREATE_FEE_ZEC);
+    zecAddress = res.address;
+    zecAmount = res.expectedZecAmount;
   } catch (err) {
     app.log.error(err, `couldn't generate a create-fee address for pending token creation ${pending.id}`);
     await store.failPendingTokenCreation(pending.id).catch(() => {});
     return reply.code(502).send({ error: "couldn't generate a payment address, try again" });
   }
-  await store.setPendingTokenCreationAddress(pending.id, zecAddress);
+  // zecAmount may be a hair above TOKEN_CREATE_FEE_ZEC -- see
+  // pickUniqueAmount in zcashReal.ts -- so persist and return the real
+  // adjusted amount, not the base fee.
+  await store.setPendingTokenCreationAddress(pending.id, zecAddress, zecAmount);
 
   return reply.send({
     creationId: pending.id,
     zecAddress,
-    zecAmount: TOKEN_CREATE_FEE_ZEC,
+    zecAmount,
     status: "PENDING",
   });
 });
@@ -252,19 +258,25 @@ app.post("/api/orders/buy", async (req, reply) => {
   // The address IS the order: any payment that lands there executes at
   // the price of the block it confirms in (see zcashMock.ts / zcashReal.ts).
   let zecAddress: string;
+  let zecAmount: number;
   try {
-    zecAddress = await generateOrderAddress(order.id, body.zecAmount);
+    const res = await generateOrderAddress(order.id, body.zecAmount);
+    zecAddress = res.address;
+    zecAmount = res.expectedZecAmount;
   } catch (err) {
     app.log.error(err, `couldn't generate an order address for ${order.id}`);
     await store.failOrder(order.id).catch(() => {});
     return reply.code(502).send({ error: String((err as Error).message ?? err) });
   }
-  await store.setOrderAddress(order.id, zecAddress);
+  // zecAmount may be a hair above what was requested -- see
+  // pickUniqueAmount in zcashReal.ts -- so persist and return the real
+  // amount the payer must actually send.
+  await store.setOrderAddress(order.id, zecAddress, zecAmount);
 
   return reply.send({
     orderId: order.id,
     zecAddress,
-    zecAmount: body.zecAmount,
+    zecAmount,
     status: "PENDING",
   });
 });

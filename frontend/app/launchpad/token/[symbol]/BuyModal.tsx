@@ -9,6 +9,13 @@ type Phase = "amount" | "waiting" | "filled" | "failed";
 export default function BuyModal({ symbol, walletId, onClose }: { symbol: string; walletId: string; onClose: () => void }) {
   const { t } = useLanguage();
   const [zecAmount, setZecAmount] = useState("0.01");
+  // The exact amount the backend is actually watching for -- can be a hair
+  // above what was typed (see pickUniqueAmount in zcashReal.ts, which
+  // nudges the amount by a few thousand zatoshis when needed so two orders
+  // never watch for the identical amount at once). Sending the typed
+  // amount instead of this would never be detected, so once the order
+  // exists this -- not the input -- is what's shown/encoded in the QR.
+  const [exactZecAmount, setExactZecAmount] = useState<number | null>(null);
   const [phase, setPhase] = useState<Phase>("amount");
   const [address, setAddress] = useState<string | null>(null);
   const [qr, setQr] = useState<string | null>(null);
@@ -29,7 +36,8 @@ export default function BuyModal({ symbol, walletId, onClose }: { symbol: string
       const order = await api.buy({ walletId, symbol, zecAmount: amount });
       setAddress(order.zecAddress);
       setOrderId(order.orderId);
-      const uri = `zcash:${order.zecAddress}?amount=${amount}`; // simplified ZIP-321 format
+      setExactZecAmount(order.zecAmount);
+      const uri = `zcash:${order.zecAddress}?amount=${order.zecAmount}`; // simplified ZIP-321 format
       setQr(await QRCode.toDataURL(uri, { margin: 1, width: 220 }));
       setPhase("waiting");
     } catch (e: any) {
@@ -72,8 +80,8 @@ export default function BuyModal({ symbol, walletId, onClose }: { symbol: string
 
         {phase === "waiting" && (
           <>
-            <h2 style={{ marginTop: 0, textAlign: "center" }}>{zecAmount} ZEC</h2>
-            <p className="muted" style={{ textAlign: "center" }}>{t("buy.sendAtLeast", { amount: zecAmount })}</p>
+            <h2 style={{ marginTop: 0, textAlign: "center" }}>{exactZecAmount ?? zecAmount} ZEC</h2>
+            <p className="muted" style={{ textAlign: "center" }}>{t("buy.sendAtLeast", { amount: exactZecAmount ?? zecAmount })}</p>
             {qr && (
               <div style={{ background: "#fff", padding: 12, borderRadius: 6, display: "flex", justifyContent: "center", margin: "12px 0" }}>
                 <img src={qr} alt="qr" />
