@@ -36,6 +36,17 @@ export default function HeaderBar() {
             <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
           </svg>
         </a>
+        <a
+          href="https://t.me/zodd_zcash"
+          target="_blank"
+          rel="noreferrer"
+          aria-label="ZODD on Telegram"
+          style={{ display: "flex", alignItems: "center", color: "var(--text-dim)" }}
+        >
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M21.94 4.6 18.6 20.36c-.25 1.1-.9 1.38-1.83.86l-5.06-3.73-2.44 2.35c-.27.27-.5.5-1.02.5l.37-5.16 9.4-8.5c.41-.36-.09-.56-.63-.2L6.02 13.4l-5.02-1.57c-1.09-.34-1.11-1.09.23-1.61L20.6 3.36c.91-.34 1.71.2 1.34 1.24z" />
+          </svg>
+        </a>
         <Link href="/" className="logo">
           <img src="/zodd-logo.png" alt="ZODD" width={30} height={30} style={{ borderRadius: 6, display: "block" }} />
           ZODD<span className="accent">.FUN</span>
