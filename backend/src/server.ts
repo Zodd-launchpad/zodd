@@ -921,7 +921,7 @@ app.get("/api/admin/value-to-address-by-index-debug", async (req, reply) => {
     const list = (addrRaw as any)?.addresses ?? addrRaw;
     const entry = Array.isArray(list) ? list[index] : undefined;
     if (!entry) return reply.code(404).send({ error: "no address at that index", indexTried: index, count: Array.isArray(list) ? list.length : null });
-    const address = entry.address ?? entry.unified_address ?? entry;
+    const address = entry.encoded_address ?? entry.address ?? entry.unified_address ?? entry;
     const raw = await (zcashService as typeof import("./lib/zcashReal.js")).rawValueToAddressDebug(address);
     return reply.send({ addressUsed: address, index, raw });
   } catch (err) {
