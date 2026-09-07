@@ -104,6 +104,14 @@ export default function HeaderBar() {
         </button>
       </div>
 
+      <Link
+        href="/launchpad/create"
+        className="btn btn-gold"
+        style={{ fontSize: 13, padding: "8px 16px", marginRight: 8, fontWeight: 700 }}
+      >
+        {t("market.createToken")}
+      </Link>
+
       <button
         className="btn btn-outline"
         style={{ fontSize: 12, padding: "6px 12px", marginRight: 4 }}
@@ -111,6 +119,12 @@ export default function HeaderBar() {
       >
         {t("nav.help")}
       </button>
+
+      {!loading && wallet && (
+        <Link href="/launchpad/portfolio" className="btn btn-outline" style={{ fontSize: 12, padding: "6px 12px", marginRight: 4 }}>
+          {t("launchpad.nav.portfolio")}
+        </Link>
+      )}
 
       {!loading && wallet && (
         <div className="wallet-chip mono" onClick={() => setShowDetail(true)}>

@@ -145,17 +145,79 @@ function startPolling() {
   }, POLL_INTERVAL_MS);
 }
 
-/** Generates a real one-time address for a buy order via the wallet service. */
-export async function generateOrderAddress(orderId: string, expectedZecAmount: number): Promise<string> {
+// Found 2026-09-07, same incident as HARD_MAX_LIFETIME_MS above: matching
+// is amount-only, so two orders open at once for the identical amount is a
+// straight-up ambiguity the code cannot resolve correctly -- whichever was
+// registered first always wins the next matching note, even when it's the
+// wrong one (a stale abandoned creation stole a real FLORK payment this
+// way). The hard-lifetime cap above narrows the window this can happen in,
+// but doesn't remove it: two orders can still be legitimately open, unpaid,
+// at the same moment. The actual fix is to never let that ambiguity exist
+// in the first place -- every new order gets a tiny, effectively invisible
+// (a few thousand zatoshis, a fraction of a cent) bump added on top of the
+// requested amount until it no longer matches any currently-watched order,
+// so the amount itself is always a unique fingerprint. The caller must
+// display/charge this adjusted amount, not the original request.
+//
+// IMPORTANT (caught 2026-09-07, before shipping -- Brai: "si sumas un
+// pelito en 20 a la vez... se te van a pisar los numeros, chequea que no
+// este usado el numero"): picking the amount and reserving it are NOT the
+// same moment. The obvious version of this -- check watchers, then `await`
+// the wallet-service call for a fresh address, then finally add the picked
+// amount to watchers -- has a real race: with 20 people buying 0.1 ZEC
+// within the same ~second, every one of those 20 requests can run its
+// "is 0.1 taken?" check BEFORE any of them has reached the watchers.set()
+// at the end (they're all sitting mid-`await` on the address call at that
+// point), so all 20 see "not taken" and all 20 collide on 0.1 anyway --
+// exactly the bug this function exists to prevent, just moved one step
+// later. The fix: reserve the picked amount in `watchers` SYNCHRONOUSLY,
+// before the first `await` in generateOrderAddress. Node only switches
+// between concurrent requests at an `await`, so nothing can see a
+// half-picked amount as "free" -- reservation is atomic with the pick.
+const DISAMBIGUATION_BUMP_ZATS = 1000; // 0.00001 ZEC per collision retry
+function pickAndReserveAmount(orderId: string, expectedZecAmount: number): number {
+  let candidate = expectedZecAmount;
+  let bumps = 0;
+  const isTaken = (zec: number) => {
+    const zats = Math.round(zec * ZATOSHIS_PER_ZEC);
+    return [...watchers.values()].some((w) => Math.round(w.expectedZecAmount * ZATOSHIS_PER_ZEC) === zats);
+  };
+  while (isTaken(candidate) && bumps < 200) {
+    bumps += 1;
+    candidate = expectedZecAmount + (bumps * DISAMBIGUATION_BUMP_ZATS) / ZATOSHIS_PER_ZEC;
+  }
+  // Reserve it right here, same tick, before any await -- the address is
+  // filled in afterward once we have it. An empty address doesn't affect
+  // matching (matching is amount-only, see the poll loop above).
+  const now = Date.now();
+  watchers.set(orderId, { orderId, address: "", expectedZecAmount: candidate, createdAt: now, originalCreatedAt: now });
+  return candidate;
+}
+
+/** Generates a real one-time address for a buy order via the wallet
+ * service. Returns the address AND the actual expectedZecAmount to charge
+ * -- may be a hair above what was requested, see pickAndReserveAmount --
+ * which the caller must persist and show to the payer instead of the
+ * original request. */
+export async function generateOrderAddress(orderId: string, expectedZecAmount: number): Promise<{ address: string; expectedZecAmount: number }> {
   if (expectedZecAmount > MAX_ZEC_PER_ORDER) {
     throw new Error(
       `order of ${expectedZecAmount} ZEC exceeds the current safety cap of ${MAX_ZEC_PER_ORDER} ZEC per order`
     );
   }
-  const { address } = await call("/wallet/address", { method: "POST" });
-  const now = Date.now();
-  watchers.set(orderId, { orderId, address, expectedZecAmount, createdAt: now, originalCreatedAt: now });
-  return address;
+  // Reserved synchronously before the address call's `await` -- see the
+  // comment on pickAndReserveAmount for why that ordering matters.
+  const uniqueAmount = pickAndReserveAmount(orderId, expectedZecAmount);
+  let address: string;
+  try {
+    ({ address } = await call("/wallet/address", { method: "POST" }));
+  } catch (err) {
+    watchers.delete(orderId); // don't leave a dangling reservation with no address
+    throw err;
+  }
+  const pending = watchers.get(orderId);
+  if (pending) pending.address = address; // fill in the address on the already-reserved watcher
+  return { address, expectedZecAmount: uniqueAmount };
 }
 
 /** Re-registers a watcher for an address that was already generated in a
