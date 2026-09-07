@@ -4,7 +4,7 @@ import * as store from "./lib/store.js";
 import { generateTwelveWords } from "./lib/wordlist.js";
 import { quoteBuy, quoteSell, currentPrice, marketCapZec, isGraduated } from "./lib/bondingCurve.js";
 import { simulatedInscriptionFor } from "./lib/simulatedChain.js";
-import { splitFee, TRADE_FEE_BPS, CREATOR_FEE_BPS, TOKEN_CREATE_FEE_ZEC, MIN_SELL_PAYOUT_ZEC } from "./lib/fees.js";
+import { splitFee, TRADE_FEE_BPS, CREATOR_FEE_BPS, TOKEN_CREATE_FEE_ZEC, computeSellerPayout, NETWORK_FEE_ZEC } from "./lib/fees.js";
 import { startFeeDistributor, runFeeDistributionOnce } from "./lib/feeDistributor.js";
 import { withTokenLock } from "./lib/mutex.js";
 import { checkOrderRateLimit } from "./lib/rateLimit.js";
@@ -500,26 +500,31 @@ app.post("/api/orders/sell", async (req, reply) => {
       }
 
       const { zecOut, newState } = quoteSell(token.curve, body.tokenAmount);
-      // Same 3% fee, taken off the seller's proceeds this time: they
-      // receive the net amount, the curve/reserve accounting still
-      // reflects the full gross zecOut (kept internally consistent with
-      // how the buy side works).
+      // 2% trade fee (1% creator + 1% platform), taken off the gross curve
+      // output -- unaffected by the network-fee deduction below, so the
+      // creator and platform always get their full cut regardless of how
+      // small the sell is.
       const { net: netPayout, creatorFee, platformFee } = splitFee(zecOut);
 
-      // Brai, 2026-09-07: block sells whose net payout wouldn't clear the
-      // real Zcash network fee -- see MIN_SELL_PAYOUT_ZEC in fees.ts for
-      // the full reasoning. Checked here, before sendPayout ever runs, so
-      // no real ZEC moves and the curve/balance are never touched.
-      if (netPayout <= MIN_SELL_PAYOUT_ZEC) {
+      // Brai, 2026-09-07: "el fee [de red] lo tiene que pagar el
+      // vendedor... si no supera el fee, no se puede vender... es para q
+      // la plataforma no pierda dinero" -- the real Zcash network fee
+      // comes out of the SELLER's share (netPayout), not the platform's,
+      // so the platform never nets negative on a sell. If that leaves
+      // nothing to send, block the sell entirely before sendPayout ever
+      // runs -- no real ZEC moves and the curve/balance are never touched.
+      // See computeSellerPayout in fees.ts.
+      const { sellerPayout, blocked } = computeSellerPayout(netPayout);
+      if (blocked) {
         throw Object.assign(
           new Error(
-            `sell amount too small -- net payout would be ${netPayout.toFixed(8)} ZEC, below the ${MIN_SELL_PAYOUT_ZEC} ZEC minimum (the network fee would cost more than the sale). Sell a larger amount.`
+            `sell amount too small -- after the ~${NETWORK_FEE_ZEC} ZEC network fee there'd be nothing left to send you (net payout would be ${netPayout.toFixed(8)} ZEC). Sell a larger amount.`
           ),
           { httpStatus: 400 }
         );
       }
 
-      const { txid } = await sendPayout(body.refundAddress, netPayout);
+      const { txid } = await sendPayout(body.refundAddress, sellerPayout);
 
       await store.updateTokenCurve(token.id, newState);
       await store.recordPricePoint(token.id, newState, token.totalSupply);

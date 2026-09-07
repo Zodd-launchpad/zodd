@@ -43,18 +43,36 @@ export const TOKEN_CREATE_FEE_ZEC = Number(process.env.ZCASH_TOKEN_CREATE_FEE_ZE
 
 /**
  * Brai, 2026-09-07: "si el minimo a enviar no supera el fee no te deje
- * vender, que haga el calculo" -- a real ZEC send (sendPayout, see
- * zcashReal.ts) costs the platform a Zcash network/miner fee of roughly
- * 0.0001 ZEC, paid separately out of the platform wallet's own balance (the
- * seller always receives the full quoted payout -- see the big comment on
- * MIN_CREATOR_PAYOUT_ZEC in feeDistributor.ts for the same reasoning
- * applied to creator-fee payouts). If someone sells for a net payout at or
- * below that, the platform is spending more on the network fee than the
- * transfer is even worth -- pointless and, at scale, a way to slowly drain
- * the platform wallet via a flood of dust sells. Same 0.001 ZEC floor used
- * for creator payouts (10x the ~0.0001 ZEC fee, comfortable margin without
- * blocking any real trade -- typical sells on this curve are 0.01-0.05
- * ZEC). Checked against the NET payout (after the 2% trade fee), in
- * server.ts's /api/orders/sell, before ever calling sendPayout.
+ * vender" -- then, clarifying: "yo no quiero perder, asi que el fee lo
+ * tiene que pagar el vendedor... de ahi saco mi 1% y el otro 1% para el
+ * creador y el resto le llega al vendedor... si no supera el fee, no se
+ * puede vender... es para q la plataforma no pierda dinero".
+ *
+ * A real ZEC send (sendPayout, see zcashReal.ts) always costs the platform
+ * wallet a real Zcash network/miner fee of roughly 0.0001 ZEC -- that's a
+ * protocol fact, paid out of whichever wallet initiates the transaction, no
+ * matter what amount we tell it to send. Previously the platform just
+ * absorbed that as a cost; now, per the above, the SELLER's share absorbs
+ * it instead, so the platform never nets negative on a sell: the creator's
+ * 1% and the platform's 1% (splitFee below) are computed on the full gross
+ * zecOut exactly as before and are untouched by this, and only what's LEFT
+ * for the seller (netPayout) has the network fee taken off it before
+ * sending. If that would leave nothing (or less than nothing) for the
+ * seller, the sell is blocked outright -- see computeSellerPayout, used in
+ * server.ts's /api/orders/sell before ever calling sendPayout.
  */
-export const MIN_SELL_PAYOUT_ZEC = 0.001;
+export const NETWORK_FEE_ZEC = 0.0001;
+
+export interface SellPayoutResult {
+  /** What actually gets sent to the seller: netPayout minus the network
+   * fee. Only meaningful when `blocked` is false. */
+  sellerPayout: number;
+  /** True when sellerPayout wouldn't be positive -- the sell should be
+   * rejected before ever calling sendPayout. */
+  blocked: boolean;
+}
+
+export function computeSellerPayout(netPayout: number): SellPayoutResult {
+  const sellerPayout = netPayout - NETWORK_FEE_ZEC;
+  return { sellerPayout, blocked: sellerPayout <= 0 };
+}
