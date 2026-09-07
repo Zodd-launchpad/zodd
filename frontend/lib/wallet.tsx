@@ -12,6 +12,7 @@ interface WalletCtx {
   wallet: WalletData | null;
   loading: boolean;
   createWallet: () => Promise<void>;
+  importWallet: (words: string[]) => Promise<void>;
   logout: () => void;
 }
 
@@ -43,6 +44,22 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  // Logging back in with the 12 words shown at creation time: the backend
+  // just re-finds the same wallet (see /api/wallets/import), it doesn't
+  // hand back a fresh one, so this is the way back in after a logout --
+  // previously logout() was a dead end that only offered creating a new
+  // (empty) wallet, with no way back to the tokens in the old one.
+  async function importWallet(words: string[]) {
+    const data = await api.importWallet(words);
+    const walletData: WalletData = { ...data, words };
+    setWallet(walletData);
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(walletData));
+    } catch {
+      /* ignorar */
+    }
+  }
+
   function logout() {
     setWallet(null);
     try {
@@ -52,7 +69,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  return <Ctx.Provider value={{ wallet, loading, createWallet, logout }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ wallet, loading, createWallet, importWallet, logout }}>{children}</Ctx.Provider>;
 }
 
 export function useWallet() {

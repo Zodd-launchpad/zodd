@@ -33,6 +33,24 @@ app.post("/api/wallets", async (_req, reply) => {
   return reply.send({ walletId: wallet.id, walletTag: wallet.walletTag, words });
 });
 
+const importWalletSchema = z.object({
+  words: z.array(z.string().min(1)).length(12, "expected exactly 12 words"),
+});
+
+// "Log back in" with the 12 words shown at creation time -- the only way
+// back into an existing wallet, since disconnecting only clears the
+// browser's localStorage, not the wallet itself (found 2026-09-07: without
+// this, logging out was a dead end with no way back to your tokens).
+app.post("/api/wallets/import", async (req, reply) => {
+  const body = importWalletSchema.safeParse(req.body);
+  if (!body.success) return reply.code(400).send({ error: "expected exactly 12 words" });
+  const normalized = body.data.words.map((w) => w.trim().toLowerCase()).filter(Boolean);
+  if (normalized.length !== 12) return reply.code(400).send({ error: "expected exactly 12 words" });
+  const wallet = await store.findWalletBySeedWords(normalized);
+  if (!wallet) return reply.code(404).send({ error: "no wallet found for those words" });
+  return reply.send({ walletId: wallet.id, walletTag: wallet.walletTag });
+});
+
 app.get("/api/wallets/:id/portfolio", async (req, reply) => {
   const { id } = req.params as { id: string };
   const wallet = await store.getWallet(id);

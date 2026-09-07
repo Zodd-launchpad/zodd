@@ -4,15 +4,16 @@ import { api } from "@/lib/api";
 import { useWallet } from "@/lib/wallet";
 import { useLanguage } from "@/lib/i18n";
 
-type Step = "intro" | "words" | "confirm" | "creating";
+type Step = "intro" | "words" | "confirm" | "creating" | "import";
 
 export default function WalletOnboardModal({ onClose }: { onClose: () => void }) {
   const [step, setStep] = useState<Step>("intro");
   const [words, setWords] = useState<string[]>([]);
   const [checkboxOk, setCheckboxOk] = useState(false);
   const [checkInputs, setCheckInputs] = useState(["", "", ""]);
+  const [importText, setImportText] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const { createWallet } = useWallet();
+  const { createWallet, importWallet } = useWallet();
   const { t } = useLanguage();
 
   // For the demo we show the words before they're persisted anywhere: the
@@ -53,6 +54,21 @@ export default function WalletOnboardModal({ onClose }: { onClose: () => void })
     location.reload(); // simple: refresh wallet context
   }
 
+  async function submitImport() {
+    setError(null);
+    const parsed = importText.trim().split(/\s+/).filter(Boolean);
+    if (parsed.length !== 12) {
+      setError(t("onboard.error.wordCount"));
+      return;
+    }
+    try {
+      await importWallet(parsed);
+      onClose();
+    } catch (e: any) {
+      setError(e.message === "no wallet found for those words" ? t("onboard.error.notFound") : e.message);
+    }
+  }
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal card" onClick={(e) => e.stopPropagation()}>
@@ -63,6 +79,59 @@ export default function WalletOnboardModal({ onClose }: { onClose: () => void })
             <p className="muted">{t("onboard.body.intro")}</p>
             <button className="btn btn-gold" style={{ width: "100%" }} onClick={startWords}>
               {t("onboard.createButton")}
+            </button>
+            <div style={{ textAlign: "center", margin: "14px 0 8px", fontSize: 12 }} className="muted">
+              {t("onboard.orImport")}
+            </div>
+            <button
+              className="btn btn-outline"
+              style={{ width: "100%" }}
+              onClick={() => {
+                setError(null);
+                setStep("import");
+              }}
+            >
+              {t("onboard.importButton")}
+            </button>
+          </>
+        )}
+
+        {step === "import" && (
+          <>
+            <div className="badge">{t("onboard.badge.import")}</div>
+            <h2 style={{ marginTop: 0 }}>{t("onboard.title.import")}</h2>
+            <p className="muted" style={{ fontSize: 13 }}>{t("onboard.import.hint")}</p>
+            <div className="field">
+              <textarea
+                value={importText}
+                onChange={(e) => setImportText(e.target.value)}
+                placeholder={t("onboard.import.placeholder")}
+                rows={3}
+                style={{
+                  width: "100%",
+                  background: "#0d0d0f",
+                  border: "1px solid var(--border)",
+                  borderRadius: 6,
+                  color: "var(--text)",
+                  padding: 10,
+                  fontSize: 13,
+                  resize: "vertical",
+                }}
+              />
+            </div>
+            {error && <p style={{ color: "var(--red)", fontSize: 13 }}>{error}</p>}
+            <button className="btn btn-gold" style={{ width: "100%" }} onClick={submitImport}>
+              {t("onboard.importSubmit")}
+            </button>
+            <button
+              className="btn"
+              style={{ width: "100%", marginTop: 8, background: "transparent" }}
+              onClick={() => {
+                setError(null);
+                setStep("intro");
+              }}
+            >
+              {t("onboard.back")}
             </button>
           </>
         )}

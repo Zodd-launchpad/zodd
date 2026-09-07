@@ -64,6 +64,8 @@ let modePromise: Promise<{ zcashMode: "real" | "mock"; tokenCreateFeeZec: number
 
 export const api = {
   createWallet: () => req("/api/wallets", { method: "POST" }),
+  importWallet: (words: string[]): Promise<{ walletId: string; walletTag: string }> =>
+    req("/api/wallets/import", { method: "POST", body: JSON.stringify({ words }) }),
   // Cached for the life of the page load: this never changes mid-session,
   // and every "is this simulated?" note (and the create-fee display) needs it.
   getMode: (): Promise<{ zcashMode: "real" | "mock"; tokenCreateFeeZec: number }> => {

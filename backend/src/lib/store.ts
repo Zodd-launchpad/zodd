@@ -40,6 +40,17 @@ export async function getWallet(id: string) {
   return wallet ? { id: wallet.id, walletTag: wallet.walletTag, createdAt: wallet.createdAt.toISOString() } : null;
 }
 
+/** "Log back in" to a wallet created earlier on another device/session: the
+ * 12 words are never stored in the clear (see InternalWallet.seedHashHex),
+ * so this just re-hashes what was typed and looks for a match -- same
+ * mechanism createWallet used to store it, just in reverse. Returns null
+ * if nothing matches (wrong words, or a wallet that was never created here). */
+export async function findWalletBySeedWords(words: string[]) {
+  const seedHashHex = createHash("sha256").update(words.join(" ")).digest("hex");
+  const wallet = await prisma.internalWallet.findFirst({ where: { seedHashHex } });
+  return wallet ? { id: wallet.id, walletTag: wallet.walletTag, createdAt: wallet.createdAt.toISOString() } : null;
+}
+
 // ---------- Tokens ----------
 
 export interface TokenWithCurve {
