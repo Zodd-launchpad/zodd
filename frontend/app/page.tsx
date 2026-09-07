@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useLanguage } from "@/lib/i18n";
+import HomeTokenBoards from "./HomeTokenBoards";
 
 export default function HomePage() {
   const { t } = useLanguage();
@@ -16,11 +17,7 @@ export default function HomePage() {
         <div className="tagline">{t("home.tagline")}</div>
       </div>
 
-      <div className="lore">
-        <div className="badge">{t("home.badge")}</div>
-        <p>{t("home.lore1")}</p>
-        <p>{t("home.lore2")}</p>
-      </div>
+      <HomeTokenBoards />
 
       <div className="explore-grid">
         <Link href="/launchpad" className="explore-card">
