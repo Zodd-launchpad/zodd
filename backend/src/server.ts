@@ -341,6 +341,19 @@ onPaymentDetected(async (orderId: string, confirmedZecAmount: number, txid: stri
       const token = await store.completePendingTokenCreation(orderId, genesisMemoTxid);
       if (token) {
         app.log.info(`token ${token.symbol} created: creator paid ${confirmedZecAmount} ZEC create fee (txid ${txid})`);
+        // Brai, 2026-09-07: "tenemos que hacer un sistema que ponga la
+        // wallet por si falla la transaccion" -- same remembered-address
+        // mechanism as a sell's refund address (see setDefaultRefundAddress
+        // below), now also fed by a successful token creation, so the
+        // creator payout address they typed here pre-fills next time too
+        // (a retry after a failed/expired creation, a second token, or the
+        // Sell modal). Best-effort: never let this fail a creation that
+        // already went through.
+        if (token.creatorPayoutAddress) {
+          await store
+            .setDefaultRefundAddress(token.creatorWalletId, token.creatorPayoutAddress)
+            .catch((err) => app.log.error(err, "failed to remember creator payout address"));
+        }
       }
     } catch (err) {
       await store.failPendingTokenCreation(orderId).catch(() => {});

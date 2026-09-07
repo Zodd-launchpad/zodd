@@ -40,6 +40,24 @@ export default function CreatePage() {
       .catch(() => {});
   }, []);
 
+  useEffect(() => {
+    if (!wallet) return;
+    // Brai, 2026-09-07: "tenemos que hacer un sistema que ponga la wallet
+    // por si falla la transaccion" -- same pre-fill SellModal already does
+    // with defaultRefundAddress (Brai, earlier: "cuando toco SELL ya me
+    // queda asociada"). If this creator already has a real Zcash address
+    // on file from a previous sell or token creation, fill it in here too,
+    // so a failed/expired creation (or just a second token) doesn't force
+    // re-typing/re-pasting it from scratch. Still fully editable -- this
+    // only sets the initial value, so it never fights with what's typed.
+    api
+      .portfolio(wallet.walletId)
+      .then((p) => {
+        if (p.defaultRefundAddress) setCreatorPayoutAddress((prev) => prev || p.defaultRefundAddress!);
+      })
+      .catch(() => {});
+  }, [wallet]);
+
   async function onLogoChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;

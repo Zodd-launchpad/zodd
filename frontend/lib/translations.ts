@@ -157,6 +157,10 @@ export const translations = {
   "onboard.error.notFound": { en: "no wallet found for those words -- check them and try again", zh: "未找到与这些词匹配的钱包——请检查后重试" },
   "onboard.badge.words": { en: "WRITE THESE DOWN NOW", zh: "现在就记下来" },
   "onboard.title.words": { en: "Your twelve words", zh: "你的十二个助记词" },
+  "onboard.words.disclaimer": {
+    en: "This is your login for ZODD only — not a Zcash seed phrase. It doesn't hold or control any ZEC; your real Zcash wallet (Zashi, Ywallet, Zingo, Zodl) is completely separate and we never touch it. Still worth writing down: it's the only way back into your ZODD account and token holdings.",
+    zh: "这只是你登录 ZODD 平台的凭证——不是 Zcash 助记词。它不持有也不控制任何 ZEC；你真正的 Zcash 钱包（Zashi、Ywallet、Zingo、Zodl）完全独立，我们不会碰它。不过还是建议记下来：这是找回你的 ZODD 账户和代币持仓的唯一方式。",
+  },
   "onboard.checkbox": { en: "I have written all twelve down, in order.", zh: "我已按顺序把十二个词都记下来了。" },
   "onboard.wroteThemDown": { en: "I wrote them down", zh: "我已经记下来了" },
   "onboard.badge.confirm": { en: "ONE CHECK", zh: "最后确认一下" },

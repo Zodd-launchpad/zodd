@@ -140,6 +140,9 @@ export default function WalletOnboardModal({ onClose }: { onClose: () => void })
           <>
             <div className="badge">{t("onboard.badge.words")}</div>
             <h2 style={{ marginTop: 0 }}>{t("onboard.title.words")}</h2>
+            <p className="muted" style={{ fontSize: 12, marginTop: -4, marginBottom: 12 }}>
+              {t("onboard.words.disclaimer")}
+            </p>
             <div
               style={{
                 display: "grid",
