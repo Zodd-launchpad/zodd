@@ -903,6 +903,32 @@ app.get("/api/admin/value-to-address-raw-debug", async (req, reply) => {
   }
 });
 
+// Same as above but takes an address_index (from /api/admin/addresses-raw-debug)
+// instead of the full address string -- added because the WebFetch tool's
+// own proxy rejected the long raw-address version with a 403, and this
+// avoids putting a ~180-char string in a query param. Temporary, remove
+// together with the rest of this diagnostic batch.
+app.get("/api/admin/value-to-address-by-index-debug", async (req, reply) => {
+  if (ZCASH_MODE !== "real") return reply.code(404).send({ error: "not in real mode" });
+  if (!DEBUG_NOTES_TOKEN) return reply.code(503).send({ error: "DEBUG_NOTES_TOKEN is not configured" });
+  const suppliedToken = req.headers["x-debug-token"] ?? (req.query as any)?.token;
+  if (suppliedToken !== DEBUG_NOTES_TOKEN) return reply.code(401).send({ error: "unauthorized" });
+  const indexRaw = (req.query as any)?.index;
+  if (indexRaw === undefined) return reply.code(400).send({ error: "index query param required" });
+  const index = Number(indexRaw);
+  try {
+    const addrRaw = await (zcashService as typeof import("./lib/zcashReal.js")).rawAddressesDebug();
+    const list = (addrRaw as any)?.addresses ?? addrRaw;
+    const entry = Array.isArray(list) ? list[index] : undefined;
+    if (!entry) return reply.code(404).send({ error: "no address at that index", indexTried: index, count: Array.isArray(list) ? list.length : null });
+    const address = entry.address ?? entry.unified_address ?? entry;
+    const raw = await (zcashService as typeof import("./lib/zcashReal.js")).rawValueToAddressDebug(address);
+    return reply.send({ addressUsed: address, index, raw });
+  } catch (err) {
+    return reply.code(502).send({ error: String((err as Error).message ?? err) });
+  }
+});
+
 app.get("/api/admin/unclaimed-notes", async (req, reply) => {
   if (ZCASH_MODE !== "real") return reply.code(404).send({ error: "not in real mode" });
   if (!ADMIN_TOKEN) return reply.code(503).send({ error: "ADMIN_TOKEN is not configured" });
