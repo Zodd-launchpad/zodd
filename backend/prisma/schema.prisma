@@ -84,6 +84,29 @@ model CreatorFeePayout {
   @@index([tokenId, createdAt])
 }
 
+// Brai, 2026-09-07: "los fee [de la plataforma], como claimeo" -- the
+// platform's 1% cut was never paid out anywhere (see PLATFORM_FEE_BPS in
+// fees.ts: "kept simply by never paying it out"), so it just sits inside
+// the platform's real Zcash wallet balance forever. Token.platformFeeTotalZec
+// is a lifetime, never-decremented running total (explicitly "solo
+// informativo" -- not safe to withdraw against directly, since most of
+// the wallet's balance is actually the bonding-curve reserve owed to
+// future sellers, not "free" platform money). This table is the ledger of
+// what's actually been withdrawn, so the claimable amount can be computed
+// as sum(Token.platformFeeTotalZec) - sum(PlatformWithdrawal.amountZec) --
+// see getPlatformFeeStatus / recordPlatformWithdrawal in store.ts and the
+// admin routes in server.ts. Not tied to a single token (it's the
+// platform-wide cut), so no tokenId here, unlike CreatorFeePayout above.
+model PlatformWithdrawal {
+  id        String   @id @default(cuid())
+  amountZec Decimal  @db.Decimal(20, 8)
+  toAddress String
+  txid      String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
 // One row per trade (and one at token creation), so the chart has real
 // history to draw instead of only the latest curve state.
 model PricePoint {

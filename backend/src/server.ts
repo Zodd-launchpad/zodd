@@ -648,6 +648,54 @@ app.post("/api/admin/set-token-links", async (req, reply) => {
   return reply.send({ ok: true, symbol: token.symbol });
 });
 
+// Brai, 2026-09-07: "los fee [de la plataforma], como claimeo" -- read-only
+// check of how much of the platform's own 1% cut is claimable right now
+// (see getPlatformFeeStatus's comment in store.ts for why this isn't just
+// Token.platformFeeTotalZec). Gated behind ADMIN_TOKEN since it's
+// financial info, even though it never moves funds.
+app.get("/api/admin/platform-fee-status", async (req, reply) => {
+  if (!ADMIN_TOKEN) return reply.code(503).send({ error: "ADMIN_TOKEN is not configured" });
+  if (req.headers["x-admin-token"] !== ADMIN_TOKEN) return reply.code(401).send({ error: "unauthorized" });
+  const status = await store.getPlatformFeeStatus();
+  return reply.send({ ok: true, ...status });
+});
+
+// The actual withdrawal -- moves REAL ZEC out of the platform wallet to
+// `toAddress`, same as run-fee-distribution does for creators. Same
+// ADMIN_TOKEN gate, same shielded-address check, same MAX_PAYOUT_ZEC cap.
+// `amountZec` is optional: omit it to withdraw everything currently
+// claimable (capped at MAX_PAYOUT_ZEC per send, same as any other payout);
+// pass it to withdraw a specific amount instead. Always capped at what's
+// actually claimable so this can never eat into the bonding-curve reserve
+// or unpaid creator fees sitting in the same wallet balance.
+const withdrawPlatformFeeBody = z.object({
+  toAddress: z.string().refine(isShieldedAddress, "toAddress must be shielded (starts with u1 or zs1)"),
+  amountZec: z.number().positive().optional(),
+});
+app.post("/api/admin/withdraw-platform-fee", async (req, reply) => {
+  if (ZCASH_MODE !== "real") return reply.code(404).send({ error: "not in real mode" });
+  if (!ADMIN_TOKEN) return reply.code(503).send({ error: "ADMIN_TOKEN is not configured" });
+  if (req.headers["x-admin-token"] !== ADMIN_TOKEN) return reply.code(401).send({ error: "unauthorized" });
+  const body = withdrawPlatformFeeBody.safeParse(req.body);
+  if (!body.success) return reply.code(400).send({ error: "expected { toAddress, amountZec? }", details: body.error.flatten() });
+
+  const status = await store.getPlatformFeeStatus();
+  const requested = body.data.amountZec ?? status.claimableZec;
+  const amountZec = Math.min(requested, status.claimableZec, MAX_PAYOUT_ZEC);
+  if (amountZec <= 0) {
+    return reply.code(400).send({ error: "nothing claimable right now", ...status });
+  }
+  if (body.data.amountZec && body.data.amountZec > status.claimableZec) {
+    return reply.code(400).send({ error: `only ${status.claimableZec} ZEC is claimable, cannot withdraw ${body.data.amountZec}`, ...status });
+  }
+
+  const { txid } = await sendPayout(body.data.toAddress, amountZec);
+  await store.recordPlatformWithdrawal(amountZec, body.data.toAddress, txid ?? null);
+  app.log.info(`[admin] platform-fee withdrawal: ${amountZec} ZEC -> ${body.data.toAddress} (txid ${txid})`);
+  const after = await store.getPlatformFeeStatus();
+  return reply.send({ ok: true, amountZec, toAddress: body.data.toAddress, txid, claimableBefore: status.claimableZec, claimableAfter: after.claimableZec });
+});
+
 // Read-only: confirms the real wallet is funded/reachable without ever
 // touching the seed or moving money. 404s outside real mode.
 app.get("/api/admin/zcash-status", async (_req, reply) => {

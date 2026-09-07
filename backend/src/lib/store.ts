@@ -256,6 +256,31 @@ export async function accrueFees(tokenId: string, creatorFeeZec: number, platfor
   });
 }
 
+/** Brai, 2026-09-07: "los fee [de la plataforma], como claimeo" -- the
+ * platform's 1% never gets paid out anywhere (it just sits in the real
+ * wallet balance), so unlike the creator side there's no per-token
+ * "accrued but unpaid" counter to read directly: Token.platformFeeTotalZec
+ * is a lifetime total that never decrements. Claimable = everything ever
+ * earned across every token, minus everything ever actually withdrawn
+ * (PlatformWithdrawal). Deliberately NOT the real wallet's total balance
+ * -- most of that balance is the bonding-curve reserve owed to future
+ * sellers and unpaid creator fees, not free platform money. */
+export async function getPlatformFeeStatus(): Promise<{ totalEarnedZec: number; totalWithdrawnZec: number; claimableZec: number }> {
+  const [earned, withdrawn] = await Promise.all([
+    prisma.token.aggregate({ _sum: { platformFeeTotalZec: true } }),
+    prisma.platformWithdrawal.aggregate({ _sum: { amountZec: true } }),
+  ]);
+  const totalEarnedZec = num(earned._sum.platformFeeTotalZec ?? 0);
+  const totalWithdrawnZec = num(withdrawn._sum.amountZec ?? 0);
+  return { totalEarnedZec, totalWithdrawnZec, claimableZec: Math.max(0, totalEarnedZec - totalWithdrawnZec) };
+}
+
+/** Records one platform-fee withdrawal so it counts against the claimable
+ * balance from then on (see getPlatformFeeStatus). */
+export async function recordPlatformWithdrawal(amountZec: number, toAddress: string, txid: string | null) {
+  await prisma.platformWithdrawal.create({ data: { amountZec, toAddress, txid } });
+}
+
 /** Tokens with an unpaid creator fee balance, a payout address on file,
  * and whose last payout (or creation, if never paid) is at least
  * `intervalMs` in the past -- i.e. due for their next 24h distribution.
