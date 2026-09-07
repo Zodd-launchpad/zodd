@@ -174,6 +174,23 @@ export async function heightInfo() {
  *      account_id (always 0 so far), scope. So per-order matching can't be
  *      done by address here either; it has to be done by AMOUNT, in the
  *      backend, against its own set of pending orders (see zcashReal.ts). */
+// Brai, 2026-09-07: "TIENE QUE SER SI O SI UN SISTEMA QUE NO SE PUEDAN
+// CRUZAR NUNCA" -- before building anything else, confirm for real whether
+// zingo-cli's `notes` output has ANY field that identifies which
+// (diversified) address a note was sent to, which unspentNotes() below
+// does NOT currently surface (it only pulls value/txid/time/status/memo).
+// If that field exists, per-order unique addresses become a genuine,
+// unambiguous match with no memo and no amount trickery needed at all --
+// the real fix. If it doesn't, that confirms the dead end already
+// documented on unspentNotes() below and rules that path out for good
+// instead of guessing. Temporary diagnostic only, safe (read-only, no
+// wallet.dat mutation) -- remove once answered.
+export async function rawNotesDebug() {
+  const out = await runCli(["notes"], { timeout: 3 * 60_000, waitsync: true });
+  const { json, raw } = parseMaybeJson(out);
+  return json ?? raw;
+}
+
 export async function unspentNotes() {
   const out = await runCli(["notes"], { timeout: 3 * 60_000, waitsync: true });
   const { json, raw } = parseMaybeJson(out);

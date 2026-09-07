@@ -21,6 +21,11 @@ const { generateOrderAddress, onPaymentDetected, sendPayout, MAX_PAYOUT_ZEC, bui
 // default, so that route stays refused until Brai deliberately sets this in
 // Railway's variables and only he knows the value.
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
+// Temporary, self-contained diagnostic token -- separate from ADMIN_TOKEN
+// on purpose, so checking this doesn't touch/depend on that one. See the
+// route below and the comment on rawNotesDebug in zcash-wallet-service's
+// cli.js. Remove both once answered.
+const DEBUG_NOTES_TOKEN = process.env.DEBUG_NOTES_TOKEN;
 
 const app = Fastify({ logger: true });
 app.log.info(`ZCASH_MODE=${ZCASH_MODE} -- ${ZCASH_MODE === "real" ? "REAL ZEC IS LIVE ON THIS DEPLOYMENT" : "using the simulated zcash service, no real funds move"}`);
@@ -88,8 +93,15 @@ app.get("/api/wallets/:id/portfolio", async (req, reply) => {
 // SHIELDED refund address ... the launch fee can only be returned to a
 // shielded destination"). We enforce the same rule for the creator payout
 // address, since it goes through the identical automated-send code path.
+// Brai, 2026-09-07: "estoy copiando mi wallet shielded recien copiada y no
+// me deja comprar... me dice que invalid wallet" -- some wallets' "copy
+// address" includes a trailing newline or leading/trailing spaces, which
+// broke this prefix check even for a genuinely valid address. Trimmed
+// here, and every zod schema below that accepts one of these addresses
+// also has `.trim()` so the stored value itself is clean too, not just
+// this check.
 function isShieldedAddress(addr: string): boolean {
-  return /^(u1|zs1)/.test(addr);
+  return /^(u1|zs1)/.test(addr.trim());
 }
 
 const createTokenSchema = z.object({
@@ -101,6 +113,7 @@ const createTokenSchema = z.object({
   // 24h. Optional -- without it, the fee still accrues but nobody claims it.
   creatorPayoutAddress: z
     .string()
+    .trim()
     .min(10)
     .refine(isShieldedAddress, "creator payout address must be shielded (starts with u1 or zs1)")
     .optional(),
@@ -292,6 +305,7 @@ const buySchema = z.object({
   zecAmount: z.number().positive(),
   refundAddress: z
     .string()
+    .trim()
     .min(10)
     .refine(isShieldedAddress, "refund address must be shielded (starts with u1 or zs1)"),
 });
@@ -516,6 +530,7 @@ const sellSchema = z.object({
   // the create-token payout address had the check.
   refundAddress: z
     .string()
+    .trim()
     .min(10)
     .refine(isShieldedAddress, "refund address must be shielded (starts with u1 or zs1)"),
 });
@@ -721,7 +736,7 @@ app.get("/api/admin/platform-fee-status", async (req, reply) => {
 // actually claimable so this can never eat into the bonding-curve reserve
 // or unpaid creator fees sitting in the same wallet balance.
 const withdrawPlatformFeeBody = z.object({
-  toAddress: z.string().refine(isShieldedAddress, "toAddress must be shielded (starts with u1 or zs1)"),
+  toAddress: z.string().trim().refine(isShieldedAddress, "toAddress must be shielded (starts with u1 or zs1)"),
   amountZec: z.number().positive().optional(),
 });
 app.post("/api/admin/withdraw-platform-fee", async (req, reply) => {
@@ -810,6 +825,20 @@ app.get("/api/admin/zcash-status", async (_req, reply) => {
 // funds -- cross-checks the wallet's real notes against every txid this
 // backend already knows about (any completed buy, sell payout, token
 // creation, or fee payout), so what's left is genuinely unaccounted for.
+// Temporary diagnostic -- see DEBUG_NOTES_TOKEN above. Read-only, calls the
+// wallet-service's own temporary debug route. Remove once answered.
+app.get("/api/admin/notes-raw-debug", async (req, reply) => {
+  if (ZCASH_MODE !== "real") return reply.code(404).send({ error: "not in real mode" });
+  if (!DEBUG_NOTES_TOKEN) return reply.code(503).send({ error: "DEBUG_NOTES_TOKEN is not configured" });
+  if (req.headers["x-debug-token"] !== DEBUG_NOTES_TOKEN) return reply.code(401).send({ error: "unauthorized" });
+  try {
+    const raw = await (zcashService as typeof import("./lib/zcashReal.js")).rawNotesDebug();
+    return reply.send(raw);
+  } catch (err) {
+    return reply.code(502).send({ error: String((err as Error).message ?? err) });
+  }
+});
+
 app.get("/api/admin/unclaimed-notes", async (req, reply) => {
   if (ZCASH_MODE !== "real") return reply.code(404).send({ error: "not in real mode" });
   if (!ADMIN_TOKEN) return reply.code(503).send({ error: "ADMIN_TOKEN is not configured" });

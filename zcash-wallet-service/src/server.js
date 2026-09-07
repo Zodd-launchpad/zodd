@@ -89,6 +89,19 @@ app.get("/wallet/notes", async (_req, reply) => {
   }
 });
 
+// Temporary diagnostic (see the comment on cli.rawNotesDebug) -- read-only,
+// same internal-token gate as everything else here. Remove once answered.
+app.get("/wallet/notes-raw-debug", async (_req, reply) => {
+  if (!ready) return reply.code(503).send({ error: "wallet not ready yet", detail: readyError });
+  try {
+    const raw = await cli.rawNotesDebug();
+    return reply.send(raw);
+  } catch (err) {
+    app.log.error(err);
+    return reply.code(500).send({ error: String(err.message ?? err) });
+  }
+});
+
 app.post("/wallet/send", async (req, reply) => {
   if (!ready) return reply.code(503).send({ error: "wallet not ready yet", detail: readyError });
   const { address, zatoshis, memo } = req.body ?? {};

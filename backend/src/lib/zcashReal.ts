@@ -211,12 +211,40 @@ function startPolling() {
         onPayment?.(pending.orderId, paidZec, note.txid, { isRepeat });
       }
 
-      // Pass 2, amount fallback: unchanged from before -- only reached by
-      // whatever's left of `available` (memo matches above already spliced
-      // theirs out) and whatever watchers pass 1 didn't already resolve.
-      // Still needed for a payer whose wallet doesn't attach ZIP-321 memos.
+      // Pass 2, amount fallback: only reached by whatever's left of
+      // `available` (memo matches above already spliced theirs out) and
+      // whatever watchers pass 1 didn't already resolve. Still needed for a
+      // payer whose wallet doesn't attach ZIP-321 memos.
+      //
+      // Brai, 2026-09-07: requested amounts are never bumped to stay unique
+      // (see the big comment on pickAndReserveAmount above -- he rejected
+      // every version of that tradeoff, "ESTO NO PUEDE PASAR" /
+      // "nadie va a pagar 0.00100000000000001"), which means two
+      // *different* orders genuinely CAN share the exact same expected
+      // amount at the same moment. Matching "whichever pending order we
+      // happen to iterate to first" in that case is exactly the bug that
+      // stole a real FLORK payment before (see the comment above the
+      // memo pass). So: before matching by amount, count how many
+      // currently-watched orders expect this exact amount right now. Only
+      // 1 -> safe, unambiguous, match it. 2+ -> a real collision, and
+      // there's no way to tell them apart without a memo -- so don't
+      // guess. The note stays unconsumed (available for a later tick, once
+      // the ambiguity resolves itself -- e.g. the other order expires or
+      // gets matched by memo instead) and the affected orders stay
+      // PENDING. Funds are still safe in the platform wallet either way;
+      // an order stuck like this is findable later via the order-lookup
+      // forensics route for manual reconciliation, rather than silently
+      // risking the wrong buyer getting credited.
+      const countByZats = new Map<number, number>();
+      for (const w of watchers.values()) {
+        const zats = Math.round(w.expectedZecAmount * ZATOSHIS_PER_ZEC);
+        countByZats.set(zats, (countByZats.get(zats) ?? 0) + 1);
+      }
       for (const pending of [...watchers.values()]) {
         const expectedZats = Math.round(pending.expectedZecAmount * ZATOSHIS_PER_ZEC);
+        if ((countByZats.get(expectedZats) ?? 0) > 1) {
+          continue; // ambiguous right now -- see comment above, don't guess
+        }
         const idx = available.findIndex((n: any) => Number(n.valueZatoshis) === expectedZats);
         if (idx === -1) continue;
         const note = available[idx];
@@ -274,43 +302,45 @@ export function buildPaymentMemoBase64(orderId: string): string {
 // amount was a straight-up ambiguity the code couldn't resolve correctly --
 // whichever was registered first always won the next matching note, even
 // when it was the wrong one (a stale abandoned creation stole a real FLORK
-// payment this way). This function originally "fixed" that by bumping the
-// requested amount by a few thousand zatoshis until it was unique, and
-// making the caller display/charge that bumped amount instead of what was
-// actually requested.
+// payment this way).
 //
-// Brai, 2026-09-07 (later): "yo pongo comprar 0.0001 y me pone q tengo q
-// pagar 0.00015000000000000001 ... vos tenes que hacer que yo pague 0.0001
-// ... q la gente pague el monto que quiere comprar" -- charging a bumped,
-// floating-point-ugly amount the buyer never asked for is bad UX, and by
-// this point it's also no longer the primary defense: the memo-based match
-// added above (Pass 1 in the poll loop) already identifies each order by
-// its own unique orderId regardless of amount, so a same-amount collision
-// between two DIFFERENT orders is no longer ambiguous for any wallet that
-// preserves the ZIP-321 memo. The bump is now removed -- every order is
-// watched for the exact amount requested. The one residual gap: a payer
-// whose wallet drops the memo entirely (manual retype, non-ZIP-321 wallet)
-// still falls back to amount-only matching (Pass 2), so two such payments
-// for the identical amount, open at the same moment, could in theory still
-// cross-match -- same accepted, fund-safe-only risk described above (money
-// always lands in the platform wallet either way; only the credited
-// PENDING RECORD could be wrong). Considered an acceptable tradeoff for no
-// longer charging buyers an amount they didn't ask for.
+// History, 2026-09-07 -- three attempts before landing on the real fix:
+// (1) bump the requested amount by a few thousand zatoshis until unique,
+// charge/display that instead -- Brai: "es estupido", buyers were shown
+// amounts like 0.00015 for a requested 0.0001, sometimes with ugly float
+// noise on top. (2) remove the bump entirely, rely only on the memo-based
+// match (Pass 1 below) -- Brai overruled this: "ESTO NO PUEDE PASAR", the
+// residual chance of two non-memo payments for the exact same amount
+// crossing which order gets credited was not acceptable even though funds
+// were never actually at risk (money always lands in the platform wallet
+// either way -- only the credited PENDING RECORD could be wrong). (3) a
+// smaller, near-invisible 1-zatoshi bump -- still rejected, and rightly
+// so: ANY deviation from the amount the buyer actually typed means the
+// number they have to manually send doesn't match what they asked to buy,
+// which is exactly as error-prone/annoying whether the tail is
+// "00015" or "0001" -- Brai: "nadie va a pagar 0.00100000000000001 se van
+// a volver loco escribiendo eso".
 //
-// IMPORTANT (caught 2026-09-07, before shipping the original bump -- Brai:
-// "si sumas un pelito en 20 a la vez... se te van a pisar los numeros,
-// chequea que no este usado el numero"): picking the amount and reserving
-// it must NOT be two separate moments, even without a bump to pick --
-// registering the watcher still has to happen synchronously, before the
-// first `await` in generateOrderAddress, so a burst of concurrent requests
-// can't all read `watchers` in an inconsistent state. Node only switches
-// between concurrent requests at an `await`, so reserving here first keeps
-// that atomic.
+// The actual fix doesn't touch the amount at all -- it's in Pass 2 of the
+// poll loop below, not here. This function now just reserves the exact
+// requested amount (no bump, ever), and the poll loop's amount-fallback
+// pass refuses to guess whenever more than one currently-watched order
+// shares that amount, instead of blindly matching whichever was registered
+// first. See the big comment on that pass for the full reasoning -- this
+// keeps both of Brai's requirements true at once: buyers always send
+// exactly what they asked to buy, and two orders can never be silently
+// cross-credited.
+//
+// IMPORTANT (still applies even without a bump to pick -- caught 2026-09-07
+// before shipping the original version of this function, Brai: "si sumas
+// un pelito en 20 a la vez... se te van a pisar los numeros, chequea que
+// no este usado el numero"): registering the watcher must happen
+// SYNCHRONOUSLY, before the first `await` in generateOrderAddress. Node
+// only switches between concurrent requests at an `await`, so reserving
+// here first (rather than after the address call resolves) keeps a burst
+// of simultaneous requests from ever reading `watchers` in a
+// half-updated state.
 function pickAndReserveAmount(orderId: string, expectedZecAmount: number): number {
-  // Reserve it right here, same tick, before any await -- the address is
-  // filled in afterward once we have it. An empty address doesn't affect
-  // matching (memo matching doesn't use the address at all; amount
-  // matching only needs expectedZecAmount, already set below).
   const now = Date.now();
   watchers.set(orderId, { orderId, address: "", expectedZecAmount, createdAt: now, originalCreatedAt: now });
   return expectedZecAmount;
@@ -376,6 +406,13 @@ export async function listUnclaimedNotes(
       // caller can decide how to interpret it; 0 if the field was missing.
       timeRaw: Number(n.time ?? 0),
     }));
+}
+
+// Temporary diagnostic -- see the comment on rawNotesDebug in
+// zcash-wallet-service's cli.js and DEBUG_NOTES_TOKEN in server.ts. Remove
+// once answered.
+export async function rawNotesDebug(): Promise<unknown> {
+  return call(`/wallet/notes-raw-debug`);
 }
 
 /** Re-registers a watcher for an address that was already generated in a
