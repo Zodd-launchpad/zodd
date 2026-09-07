@@ -720,6 +720,27 @@ export async function failOrder(orderId: string) {
  * match) is deliberate, since the persisted amount can be the bumped one,
  * not the round number the buyer typed. Read-only.
  */
+/** Same forensics need as findOrdersNearAmount, but against
+ * PendingTokenCreation -- in case a stray note was actually meant to pay a
+ * token-creation fee, not a buy order (different table entirely). */
+export async function findTokenCreationsNearAmount(zecAmount: number, toleranceZec = 0.001) {
+  const rows = await prisma.pendingTokenCreation.findMany({
+    where: { expectedZecAmount: { gte: zecAmount - toleranceZec, lte: zecAmount + toleranceZec } },
+    orderBy: { createdAt: "desc" },
+    take: 25,
+  });
+  return rows.map((c: (typeof rows)[number]) => ({
+    id: c.id,
+    symbol: c.symbol,
+    status: c.status,
+    zecAddress: c.zecAddress,
+    expectedZecAmount: Number(c.expectedZecAmount),
+    creatorPayoutAddress: c.creatorPayoutAddress,
+    createdAt: c.createdAt,
+    completedAt: c.completedAt,
+  }));
+}
+
 export async function findOrdersNearAmount(zecAmount: number, toleranceZec = 0.001) {
   const rows = await prisma.order.findMany({
     where: {

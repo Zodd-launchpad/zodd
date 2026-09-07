@@ -815,8 +815,11 @@ app.get("/api/admin/orders-by-amount", async (req, reply) => {
   if (req.headers["x-admin-token"] !== ADMIN_TOKEN) return reply.code(401).send({ error: "unauthorized" });
   try {
     const q = orderLookupSchema.parse(req.query);
-    const orders = await store.findOrdersNearAmount(q.amount, q.tolerance ?? 0.001);
-    return reply.send({ ok: true, count: orders.length, orders });
+    const [orders, tokenCreations] = await Promise.all([
+      store.findOrdersNearAmount(q.amount, q.tolerance ?? 0.001),
+      store.findTokenCreationsNearAmount(q.amount, q.tolerance ?? 0.001),
+    ]);
+    return reply.send({ ok: true, count: orders.length, orders, tokenCreationCount: tokenCreations.length, tokenCreations });
   } catch (err) {
     return reply.code(400).send({ error: String((err as Error).message ?? err) });
   }
