@@ -1,14 +1,23 @@
 "use client";
 import { useEffect, useState } from "react";
 import QRCode from "qrcode";
-import { api } from "@/lib/api";
+import { api, formatUsd } from "@/lib/api";
 import { useLanguage } from "@/lib/i18n";
+import { useZecUsdPrice } from "@/lib/zecPrice";
 
 type Phase = "amount" | "waiting" | "filled" | "failed";
 
+// Mirrors the backend's isShieldedAddress check (server.ts) so the error
+// shows up immediately instead of after a round trip.
+function isShieldedAddress(addr: string): boolean {
+  return /^(u1|zs1)/.test(addr);
+}
+
 export default function BuyModal({ symbol, walletId, onClose }: { symbol: string; walletId: string; onClose: () => void }) {
   const { t } = useLanguage();
+  const usdRate = useZecUsdPrice();
   const [zecAmount, setZecAmount] = useState("0.01");
+  const [refundAddress, setRefundAddress] = useState("");
   // The exact amount the backend is actually watching for -- can be a hair
   // above what was typed (see pickUniqueAmount in zcashReal.ts, which
   // nudges the amount by a few thousand zatoshis when needed so two orders
@@ -18,26 +27,82 @@ export default function BuyModal({ symbol, walletId, onClose }: { symbol: string
   const [exactZecAmount, setExactZecAmount] = useState<number | null>(null);
   const [phase, setPhase] = useState<Phase>("amount");
   const [address, setAddress] = useState<string | null>(null);
+  // Brai, 2026-09-07: "haz ese parche" -- the full ZIP-321 payment link
+  // (address + amount + memo), not just the bare address. Copying/pasting
+  // this into a wallet that understands it carries the same collision-proof
+  // memo protection as scanning the QR; copying the bare address alone
+  // never did (the memo lives only in this URI, see submitBuy below).
+  const [paymentUri, setPaymentUri] = useState<string | null>(null);
   const [qr, setQr] = useState<string | null>(null);
   const [orderId, setOrderId] = useState<string | null>(null);
   const [tokensOut, setTokensOut] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isRealMode, setIsRealMode] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  // Brai, 2026-09-07: "esa wallet que te aparece ahi para pagar cualquier
+  // compra tiene que ser un boton que si lo clickeas se auto copia" -- the
+  // deposit address box itself is now the copy button, not just text next
+  // to one.
+  //
+  // Brai, 2026-09-07 (later): this used to copy the full paymentUri
+  // (zcash:<addr>?amount=..&memo=..) instead of the plain address -- looked
+  // to Brai like clicking "copy address" copied "a completely different
+  // address" ("copia otra direccion totalmente diferente"), and in practice
+  // most wallets (Noir included) fail to parse that whole string when
+  // pasted manually, only the bare address. Switched to copying just
+  // `address` so what's copied matches what's shown in the box. The QR
+  // still encodes the full URI (with amount+memo) for wallets that scan it
+  // -- and the backend nudges each order's amount to be unique anyway (see
+  // buildPaymentMemoBase64 in zcashReal.ts), so a pasted bare address still
+  // can't collide with someone else's order even without the memo.
+  async function copyAddress() {
+    if (!address) return;
+    try {
+      await navigator.clipboard.writeText(address);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // clipboard not available -- the address is still selectable/visible
+    }
+  }
 
   useEffect(() => {
     api.getMode().then((m) => setIsRealMode(m.zcashMode === "real")).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    // Brai, 2026-09-07: "que la gente cuando vaya a comprar te deje la
+    // wallet" -- pre-fill with the address this wallet already has on file
+    // (from a previous buy, sell, or token creation), same mechanism as
+    // SellModal/create's defaultRefundAddress. Still fully editable.
+    api
+      .portfolio(walletId)
+      .then((p) => {
+        if (p.defaultRefundAddress) setRefundAddress((prev) => prev || p.defaultRefundAddress!);
+      })
+      .catch(() => {});
+  }, [walletId]);
 
   async function submitBuy() {
     setError(null);
     try {
       const amount = parseFloat(zecAmount);
       if (!(amount > 0)) throw new Error(t("buy.error.invalidAmount"));
-      const order = await api.buy({ walletId, symbol, zecAmount: amount });
+      if (refundAddress.length < 10 || !isShieldedAddress(refundAddress)) throw new Error(t("buy.error.invalidAddress"));
+      const order = await api.buy({ walletId, symbol, zecAmount: amount, refundAddress });
       setAddress(order.zecAddress);
       setOrderId(order.orderId);
       setExactZecAmount(order.zecAmount);
-      const uri = `zcash:${order.zecAddress}?amount=${order.zecAmount}`; // simplified ZIP-321 format
+      // Brai, 2026-09-07: "esto tiene que ir por frase semilla" -- the memo
+      // param (ZIP-321) is what lets the backend match this exact order by
+      // id instead of guessing by amount, so it can't collide with anyone
+      // else's purchase no matter how many are open at once. A wallet that
+      // scans this QR fills the memo in on its own; see the big comment on
+      // buildPaymentMemoBase64 in zcashReal.ts for the full reasoning and
+      // its one caveat (a manually-pasted address skips the memo).
+      const uri = `zcash:${order.zecAddress}?amount=${order.zecAmount}${order.memo ? `&memo=${order.memo}` : ""}`;
+      setPaymentUri(uri);
       setQr(await QRCode.toDataURL(uri, { margin: 1, width: 220 }));
       setPhase("waiting");
     } catch (e: any) {
@@ -70,6 +135,16 @@ export default function BuyModal({ symbol, walletId, onClose }: { symbol: string
             <div className="field">
               <label>{t("buy.youPay")}</label>
               <input value={zecAmount} onChange={(e) => setZecAmount(e.target.value)} />
+              {formatUsd(parseFloat(zecAmount) || 0, usdRate) && (
+                <span className="muted" style={{ fontSize: 11, marginTop: 4, display: "block" }}>
+                  ≈ {formatUsd(parseFloat(zecAmount) || 0, usdRate)}
+                </span>
+              )}
+            </div>
+            <div className="field">
+              <label>{t("buy.refundAddressLabel")}</label>
+              <input value={refundAddress} onChange={(e) => setRefundAddress(e.target.value)} placeholder="u1... / zs1..." />
+              <span className="muted" style={{ fontSize: 11, marginTop: 4, display: "block" }}>{t("buy.refundAddressHint")}</span>
             </div>
             {error && <p style={{ color: "var(--red)", fontSize: 13 }}>{error}</p>}
             <button className="btn btn-gold" style={{ width: "100%" }} onClick={submitBuy}>
@@ -80,17 +155,46 @@ export default function BuyModal({ symbol, walletId, onClose }: { symbol: string
 
         {phase === "waiting" && (
           <>
-            <h2 style={{ marginTop: 0, textAlign: "center" }}>{exactZecAmount ?? zecAmount} ZEC</h2>
+            <h2 style={{ marginTop: 0, textAlign: "center" }}>
+              {exactZecAmount ?? zecAmount} ZEC
+              {formatUsd(exactZecAmount ?? (parseFloat(zecAmount) || 0), usdRate) && (
+                <span className="muted" style={{ fontSize: 14, fontWeight: 400, marginLeft: 6 }}>
+                  (≈ {formatUsd(exactZecAmount ?? (parseFloat(zecAmount) || 0), usdRate)})
+                </span>
+              )}
+            </h2>
             <p className="muted" style={{ textAlign: "center" }}>{t("buy.sendAtLeast", { amount: exactZecAmount ?? zecAmount })}</p>
             {qr && (
               <div style={{ background: "#fff", padding: 12, borderRadius: 6, display: "flex", justifyContent: "center", margin: "12px 0" }}>
                 <img src={qr} alt="qr" />
               </div>
             )}
-            <div className="mono-break" style={{ fontSize: 11, color: "var(--accent)", border: "1px solid var(--border)", padding: 8, borderRadius: 4 }}>
-              {address}
-            </div>
+            <button
+              type="button"
+              onClick={copyAddress}
+              className="mono-break"
+              style={{
+                display: "block",
+                width: "100%",
+                textAlign: "left",
+                fontSize: 11,
+                color: copied ? "var(--green)" : "var(--accent)",
+                background: "transparent",
+                border: `1px solid ${copied ? "var(--green)" : "var(--border)"}`,
+                padding: 8,
+                borderRadius: 4,
+                cursor: "pointer",
+              }}
+            >
+              {copied ? `✓ ${t("buy.addressCopied")}` : address}
+            </button>
+            {isRealMode && (
+              <p className="muted" style={{ fontSize: 11, marginTop: 4 }}>{t("payment.copyHint")}</p>
+            )}
             <p className="muted" style={{ marginTop: 14, fontSize: 12 }}>{isRealMode ? t("buy.realNote") : t("buy.simulatedNote")}</p>
+            {isRealMode && (
+              <p className="muted" style={{ fontSize: 11, marginTop: 4 }}>{t("payment.recommendedWallets")}</p>
+            )}
             {isRealMode && (
               <button
                 className="btn btn-outline"
