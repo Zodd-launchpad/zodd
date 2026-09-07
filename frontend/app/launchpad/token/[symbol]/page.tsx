@@ -8,6 +8,7 @@ import BuyModal from "./BuyModal";
 import SellModal from "./SellModal";
 import Chart from "./Chart";
 import TradesList from "./TradesList";
+import Hourglass from "./Hourglass";
 
 function fmt(n: number, digits = 6) {
   if (n === 0) return "0";
@@ -123,10 +124,8 @@ export default function TokenPage() {
 
         <div className="card" style={{ marginTop: 16 }}>
           <div className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>{t("token.graduation")}</div>
-          <div className="grad-bar">
-            <div className="grad-bar-fill" style={{ width: `${gradPct}%` }} />
-          </div>
-          <p className={token.graduated ? "pill up" : "muted"} style={{ marginTop: 8, marginBottom: 0, fontSize: 12 }}>
+          <Hourglass pct={gradPct} />
+          <p className={token.graduated ? "pill up" : "muted"} style={{ marginTop: 4, marginBottom: 0, fontSize: 12, textAlign: "center" }}>
             {token.graduated ? t("token.graduated") : t("token.pctDone", { pct: gradPct.toFixed(1) })}
           </p>
         </div>
