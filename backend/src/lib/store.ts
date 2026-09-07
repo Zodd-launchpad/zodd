@@ -194,6 +194,25 @@ export async function updateTokenCurve(tokenId: string, curve: CurveState) {
   });
 }
 
+/** Brai, 2026-09-07: found that BAMAMA's website was saved as
+ * "https://www.zodd.fun" -- the "www" subdomain has no DNS record (only
+ * the bare domain does), so the link 404s/NXDOMAINs even though it was
+ * typed correctly and normalizeWebsite worked as intended. There's no
+ * "edit token" UI yet, so this is the one-off admin fix for a typo'd
+ * link -- pass undefined for a field to leave it as-is, or an empty
+ * string to clear it. Gated by ADMIN_TOKEN in server.ts, same as the
+ * other admin routes; this only ever touches these two display fields,
+ * never balances, the curve, or anything financial. */
+export async function setTokenLinks(tokenId: string, links: { twitterUrl?: string | null; websiteUrl?: string | null }) {
+  await prisma.token.update({
+    where: { id: tokenId },
+    data: {
+      ...(links.twitterUrl !== undefined ? { twitterUrl: links.twitterUrl || null } : {}),
+      ...(links.websiteUrl !== undefined ? { websiteUrl: links.websiteUrl || null } : {}),
+    },
+  });
+}
+
 // ---------- Balances ----------
 // Keyed by tokenId (the schema's foreign key), not symbol.
 

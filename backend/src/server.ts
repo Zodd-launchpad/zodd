@@ -625,6 +625,29 @@ app.post("/api/admin/recompute-curve", async (req, reply) => {
   return reply.send({ ok: true, symbol: token.symbol, ...result });
 });
 
+// Brai, 2026-09-07: no "edit token" UI exists yet, so this is the admin
+// route for fixing a token's twitter/website link after creation (found
+// via BAMAMA's website being saved as "https://www.zodd.fun" -- a typo'd
+// "www." with no DNS record). Pure data edit, not a fund transfer, but
+// gated behind ADMIN_TOKEN anyway since it's an admin-only write. Pass an
+// empty string for a field to clear it; omit a field to leave it as-is.
+app.post("/api/admin/set-token-links", async (req, reply) => {
+  if (!ADMIN_TOKEN) return reply.code(503).send({ error: "ADMIN_TOKEN is not configured" });
+  if (req.headers["x-admin-token"] !== ADMIN_TOKEN) return reply.code(401).send({ error: "unauthorized" });
+  const body = z
+    .object({ symbol: z.string(), twitterUrl: z.string().max(200).optional(), websiteUrl: z.string().max(200).optional() })
+    .safeParse(req.body);
+  if (!body.success) return reply.code(400).send({ error: "expected { symbol, twitterUrl?, websiteUrl? }" });
+  const token = await store.getToken(body.data.symbol.toUpperCase());
+  if (!token) return reply.code(404).send({ error: "token not found" });
+  await store.setTokenLinks(token.id, {
+    twitterUrl: body.data.twitterUrl !== undefined ? normalizeTwitter(body.data.twitterUrl) ?? "" : undefined,
+    websiteUrl: body.data.websiteUrl !== undefined ? normalizeWebsite(body.data.websiteUrl) ?? "" : undefined,
+  });
+  app.log.info(`[admin] updated links for ${token.symbol}: ${JSON.stringify(body.data)}`);
+  return reply.send({ ok: true, symbol: token.symbol });
+});
+
 // Read-only: confirms the real wallet is funded/reachable without ever
 // touching the seed or moving money. 404s outside real mode.
 app.get("/api/admin/zcash-status", async (_req, reply) => {
