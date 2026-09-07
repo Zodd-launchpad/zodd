@@ -7,6 +7,7 @@ import { simulatedInscriptionFor } from "./lib/simulatedChain.js";
 import { splitFee, TRADE_FEE_BPS, CREATOR_FEE_BPS, TOKEN_CREATE_FEE_ZEC } from "./lib/fees.js";
 import { startFeeDistributor, runFeeDistributionOnce } from "./lib/feeDistributor.js";
 import { withTokenLock } from "./lib/mutex.js";
+import { checkOrderRateLimit } from "./lib/rateLimit.js";
 
 // ZCASH_MODE=real switches every payment/inscription in this service to
 // actually move ZEC through zcash-wallet-service, instead of the mock.
@@ -266,6 +267,10 @@ const buySchema = z.object({
 
 app.post("/api/orders/buy", async (req, reply) => {
   const body = buySchema.parse(req.body);
+  // Brai, 2026-09-07: cap spam buy/sell requests per wallet -- see
+  // rateLimit.ts. Checked before any DB writes or wallet-service calls.
+  const rl = checkOrderRateLimit(body.walletId);
+  if (!rl.allowed) return reply.code(429).send({ error: rl.message });
   const wallet = await store.getWallet(body.walletId);
   const token = await store.getToken(body.symbol.toUpperCase());
   if (!wallet) return reply.code(400).send({ error: "invalid wallet" });
@@ -474,6 +479,11 @@ const sellSchema = z.object({
 // this one).
 app.post("/api/orders/sell", async (req, reply) => {
   const body = sellSchema.parse(req.body);
+  // Same per-wallet cap as buy -- counts against the same 5-per-20s budget
+  // (see rateLimit.ts), since a sell is the more expensive one to spam
+  // (it sends a real payout on every success).
+  const rl = checkOrderRateLimit(body.walletId);
+  if (!rl.allowed) return reply.code(429).send({ error: rl.message });
   const wallet = await store.getWallet(body.walletId);
   const tokenCheck = await store.getToken(body.symbol.toUpperCase());
   if (!wallet) return reply.code(400).send({ error: "invalid wallet" });
