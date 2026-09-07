@@ -523,7 +523,12 @@ app.post("/api/admin/run-fee-distribution", async (req, reply) => {
   if (ZCASH_MODE !== "real") return reply.code(404).send({ error: "not in real mode" });
   if (!ADMIN_TOKEN) return reply.code(503).send({ error: "ADMIN_TOKEN is not configured" });
   if (req.headers["x-admin-token"] !== ADMIN_TOKEN) return reply.code(401).send({ error: "unauthorized" });
-  const result = await runFeeDistributionOnce(sendPayout, MAX_PAYOUT_ZEC, app.log);
+  // ignoreInterval: true -- this is Brai deliberately choosing to run it
+  // right now, so it pays out everything currently accrued (with a payout
+  // address) instead of also requiring 24h since token creation/last
+  // payout, which is a pacing rule that only makes sense for the automatic
+  // cycle (see getTokensDueForFeePayout's comment).
+  const result = await runFeeDistributionOnce(sendPayout, MAX_PAYOUT_ZEC, app.log, true);
   app.log.info(`[admin] manual fee distribution run: paid ${result.paid.length}, skipped ${result.skipped.length}`);
   return reply.send({ ok: true, ...result });
 });
@@ -540,9 +545,14 @@ app.get("/api/admin/zcash-status", async (_req, reply) => {
   }
 });
 
-// Every 15min, pays out any token's accrued creator fee that hasn't been
-// distributed in the last 24h. Same code path in mock and real mode.
-startFeeDistributor(sendPayout, MAX_PAYOUT_ZEC, app.log);
+// Brai (2026-09-07): "quiero hacerlo yo solo el claim... quiero estar
+// seguro que se hace, de otra forma no lo controlo" -- the automatic 24h
+// cycle is intentionally OFF. Real ZEC creator-fee payouts only ever move
+// through the manual, ADMIN_TOKEN-gated /api/admin/run-fee-distribution
+// route below, which he triggers himself. Do not re-enable this without
+// him explicitly asking for automatic payouts back -- it's disabled for
+// fund-safety reasons, not by oversight.
+// startFeeDistributor(sendPayout, MAX_PAYOUT_ZEC, app.log);
 
 const port = Number(process.env.PORT ?? 8787);
 app.listen({ port, host: "0.0.0.0" }).then(() => {
