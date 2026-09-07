@@ -1,7 +1,9 @@
 import "./globals.css";
 import { WalletProvider } from "@/lib/wallet";
 import { LanguageProvider } from "@/lib/i18n";
+import { ZecPriceProvider } from "@/lib/zecPrice";
 import DemoBanner from "./DemoBanner";
+import TickerBar from "./TickerBar";
 import HeaderBar from "./HeaderBar";
 import DisclaimerBanner from "./DisclaimerBanner";
 
@@ -14,12 +16,15 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body>
         <LanguageProvider>
-          <WalletProvider>
-            <DemoBanner />
-            <HeaderBar />
-            {children}
-            <DisclaimerBanner />
-          </WalletProvider>
+          <ZecPriceProvider>
+            <WalletProvider>
+              <DemoBanner />
+              <TickerBar />
+              <HeaderBar />
+              {children}
+              <DisclaimerBanner />
+            </WalletProvider>
+          </ZecPriceProvider>
         </LanguageProvider>
       </body>
     </html>

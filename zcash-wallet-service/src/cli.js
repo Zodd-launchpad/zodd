@@ -193,6 +193,19 @@ export async function unspentNotes() {
       txid: n.txid,
       time: Number(n.time ?? 0),
       status: n.status,
+      // Brai, 2026-09-07: "esto tiene que ir por frase semilla" -- amount-only
+      // matching can't scale (two buyers who both type a round number like
+      // 0.05 or 0.2 ZEC collide, see the incident this same day). zingo-cli
+      // still can't tell us which ADDRESS a note landed on, but it CAN
+      // decrypt the memo field of a shielded note sent to this wallet's own
+      // viewing key -- and every order/token-creation already has a
+      // globally-unique id. The backend now asks payers to include that id
+      // as the memo (via the same zcash: URI used for the QR, per ZIP-321),
+      // and matches by memo first -- an exact, collision-proof key,
+      // regardless of how many orders are open at once -- falling back to
+      // the old amount-based guess only for notes with no usable memo (a
+      // wallet that doesn't support ZIP-321 memos, or a manual paste).
+      memo: typeof n.memo === "string" ? n.memo : "",
     }));
 }
 

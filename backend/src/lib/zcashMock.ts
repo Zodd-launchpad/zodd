@@ -77,6 +77,14 @@ export function resumeWatching(_orderId: string, _address: string, _expectedZecA
  * real notes). */
 export function seedConsumedTxids(_txids: string[]) {}
 
+/** Mirrors zcashReal.ts's buildPaymentMemoBase64 so server.ts can call this
+ * generically regardless of ZCASH_MODE -- meaningless in mock mode (nothing
+ * real to attach a memo to), kept only so the two services have the same
+ * shape. */
+export function buildPaymentMemoBase64(orderId: string): string {
+  return Buffer.from(orderId, "utf8").toString("base64");
+}
+
 /** Simulates sending a real payout (sell / graduation). */
 export function sendPayout(toAddress: string, zecAmount: number): { txid: string } {
   const fakeTxid = [...Array(64)].map(() => "0123456789abcdef"[Math.floor(Math.random() * 16)]).join("");

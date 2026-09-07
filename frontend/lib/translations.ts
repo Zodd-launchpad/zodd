@@ -110,6 +110,25 @@ export const translations = {
     zh: "真实 ZEC：任何能发送屏蔽 ZEC 的钱包都可以。Zcash 出块较慢——确认可能需要 10 到 15 分钟。请不要关闭此页面。",
   },
   "create.waiting.copyAddress": { en: "Copy address", zh: "复制地址" },
+  // Brai, 2026-09-07: "aclara en el menu de pago las wallets admitidas para
+  // pagar empezando por ZODL" -- shared between the buy and create-token
+  // waiting screens. ZODL (formerly Zashi) first since it's the wallet the
+  // demo banner already references; Ywallet and Nighthawk are the other two
+  // current unified-address/Orchard-shielded wallets worth naming (see
+  // zcash.school's wallet guide, checked live 2026-09-07) -- deliberately
+  // NOT listing Zecwallet Lite, which still hasn't shipped Orchard support
+  // and isn't a safe recommendation for a u1... address. Any shielded
+  // wallet still works via the amount fallback (see buy.realNote /
+  // create.waiting.realNote) -- this is a recommendation for the
+  // QR+memo-protected path, not an exclusion list.
+  "payment.recommendedWallets": {
+    en: "Works best with: ZODL, Ywallet, or Nighthawk (scan the QR — it protects your payment with a unique ID, no mix-ups even if many people are buying at once).",
+    zh: "推荐搭配使用：ZODL、Ywallet 或 Nighthawk（扫描二维码——会用唯一 ID 保护你的付款，即使很多人同时购买也不会弄混）。",
+  },
+  "payment.copyHint": {
+    en: "Copies the full payment link (address + amount + your unique order ID) — pasting it into a compatible wallet is as safe as scanning the QR.",
+    zh: "会复制完整的付款链接（地址 + 金额 + 你的唯一订单 ID）——粘贴到兼容的钱包里和扫描二维码一样安全。",
+  },
   "create.created.title": { en: "TOKEN DEPLOYED", zh: "代币已部署" },
   "create.created.body": { en: "{symbol} is live.", zh: "{symbol} 已上线。" },
   "create.created.viewButton": { en: "View {symbol}", zh: "查看 {symbol}" },
@@ -134,6 +153,7 @@ export const translations = {
   "portfolio.col.token": { en: "Token", zh: "代币" },
   "portfolio.col.amount": { en: "Amount", zh: "数量" },
   "portfolio.col.price": { en: "Price", zh: "价格" },
+  "portfolio.col.value": { en: "Value", zh: "价值" },
 
   // ---------- Wallet onboarding modal ----------
   "onboard.badge.intro": { en: "BEFORE YOUR FIRST TRADE", zh: "开始交易之前" },
@@ -141,6 +161,30 @@ export const translations = {
   "onboard.body.intro": {
     en: "The token wallet is created by this platform and holds what you buy. Your real Zcash wallet (Zashi, Ywallet, Zingo, Zodl) is the one that pays for every trade — we never touch it.",
     zh: "代币钱包由本平台创建，用于存放你买到的代币。你真正的 Zcash 钱包（Zashi、Ywallet、Zingo、Zodl）才是用来支付每笔交易的——我们不会碰它。",
+  },
+  // Brai, 2026-09-07: "asi funciona el sistema de wallets en la otra
+  // plataforma... el primero tiene que decir wallet de ZODD y sino importa
+  // tu wallet de ZCASH" -- two-card breakdown of onboard.body.intro above
+  // (kept for anywhere that still wants the one-paragraph version). Same
+  // two-wallet distinction, just laid out as two visually separate cards
+  // instead of one paragraph, so it reads as two DIFFERENT THINGS at a
+  // glance instead of one dense sentence to parse.
+  "onboard.cards.tokens.label": { en: "TOKENS", zh: "代币" },
+  "onboard.cards.tokens.title": { en: "Your ZODD wallet", zh: "你的 ZODD 钱包" },
+  "onboard.cards.tokens.body": {
+    en: "Created here. Holds the tokens you buy; backed up once, with twelve words.",
+    zh: "在这里创建，用于存放你买到的代币；只需备份一次，十二个助记词。",
+  },
+  "onboard.cards.money.label": { en: "MONEY", zh: "资金" },
+  "onboard.cards.money.title": { en: "Your Zcash wallet", zh: "你的 Zcash 钱包" },
+  "onboard.cards.money.body": {
+    en: "Zodl, Ywallet, whichever you use. Holds your ZEC and pays for every trade; we never see it.",
+    zh: "Zodl、Ywallet，随你用哪个。存放你的 ZEC，支付每一笔交易；我们看不到它。",
+  },
+  "onboard.cards.reassurance": { en: "Nothing here can touch your ZEC.", zh: "这里的任何东西都碰不到你的 ZEC。" },
+  "onboard.cards.restoreHint": {
+    en: "Bought here before? Restore your phrase: a new wallet will not find those tokens.",
+    zh: "以前在这里买过？请恢复你的助记词——新建钱包找不到那些代币。",
   },
   "onboard.createButton": { en: "Create a new wallet", zh: "创建新钱包" },
   "onboard.orImport": { en: "Already have a wallet?", zh: "已经有钱包了？" },

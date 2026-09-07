@@ -1,8 +1,9 @@
 "use client";
 import { useEffect, useState } from "react";
 import QRCode from "qrcode";
-import { api } from "@/lib/api";
+import { api, formatUsd } from "@/lib/api";
 import { useLanguage } from "@/lib/i18n";
+import { useZecUsdPrice } from "@/lib/zecPrice";
 
 type Phase = "amount" | "waiting" | "filled" | "failed";
 
@@ -14,6 +15,7 @@ function isShieldedAddress(addr: string): boolean {
 
 export default function BuyModal({ symbol, walletId, onClose }: { symbol: string; walletId: string; onClose: () => void }) {
   const { t } = useLanguage();
+  const usdRate = useZecUsdPrice();
   const [zecAmount, setZecAmount] = useState("0.01");
   const [refundAddress, setRefundAddress] = useState("");
   // The exact amount the backend is actually watching for -- can be a hair
@@ -25,6 +27,12 @@ export default function BuyModal({ symbol, walletId, onClose }: { symbol: string
   const [exactZecAmount, setExactZecAmount] = useState<number | null>(null);
   const [phase, setPhase] = useState<Phase>("amount");
   const [address, setAddress] = useState<string | null>(null);
+  // Brai, 2026-09-07: "haz ese parche" -- the full ZIP-321 payment link
+  // (address + amount + memo), not just the bare address. Copying/pasting
+  // this into a wallet that understands it carries the same collision-proof
+  // memo protection as scanning the QR; copying the bare address alone
+  // never did (the memo lives only in this URI, see submitBuy below).
+  const [paymentUri, setPaymentUri] = useState<string | null>(null);
   const [qr, setQr] = useState<string | null>(null);
   const [orderId, setOrderId] = useState<string | null>(null);
   const [tokensOut, setTokensOut] = useState<number | null>(null);
@@ -35,11 +43,11 @@ export default function BuyModal({ symbol, walletId, onClose }: { symbol: string
   // Brai, 2026-09-07: "esa wallet que te aparece ahi para pagar cualquier
   // compra tiene que ser un boton que si lo clickeas se auto copia" -- the
   // deposit address box itself is now the copy button, not just text next
-  // to one.
+  // to one. Copies paymentUri (see above), displays the plain address.
   async function copyAddress() {
-    if (!address) return;
+    if (!paymentUri) return;
     try {
-      await navigator.clipboard.writeText(address);
+      await navigator.clipboard.writeText(paymentUri);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
@@ -74,7 +82,15 @@ export default function BuyModal({ symbol, walletId, onClose }: { symbol: string
       setAddress(order.zecAddress);
       setOrderId(order.orderId);
       setExactZecAmount(order.zecAmount);
-      const uri = `zcash:${order.zecAddress}?amount=${order.zecAmount}`; // simplified ZIP-321 format
+      // Brai, 2026-09-07: "esto tiene que ir por frase semilla" -- the memo
+      // param (ZIP-321) is what lets the backend match this exact order by
+      // id instead of guessing by amount, so it can't collide with anyone
+      // else's purchase no matter how many are open at once. A wallet that
+      // scans this QR fills the memo in on its own; see the big comment on
+      // buildPaymentMemoBase64 in zcashReal.ts for the full reasoning and
+      // its one caveat (a manually-pasted address skips the memo).
+      const uri = `zcash:${order.zecAddress}?amount=${order.zecAmount}${order.memo ? `&memo=${order.memo}` : ""}`;
+      setPaymentUri(uri);
       setQr(await QRCode.toDataURL(uri, { margin: 1, width: 220 }));
       setPhase("waiting");
     } catch (e: any) {
@@ -107,6 +123,11 @@ export default function BuyModal({ symbol, walletId, onClose }: { symbol: string
             <div className="field">
               <label>{t("buy.youPay")}</label>
               <input value={zecAmount} onChange={(e) => setZecAmount(e.target.value)} />
+              {formatUsd(parseFloat(zecAmount) || 0, usdRate) && (
+                <span className="muted" style={{ fontSize: 11, marginTop: 4, display: "block" }}>
+                  ≈ {formatUsd(parseFloat(zecAmount) || 0, usdRate)}
+                </span>
+              )}
             </div>
             <div className="field">
               <label>{t("buy.refundAddressLabel")}</label>
@@ -122,7 +143,14 @@ export default function BuyModal({ symbol, walletId, onClose }: { symbol: string
 
         {phase === "waiting" && (
           <>
-            <h2 style={{ marginTop: 0, textAlign: "center" }}>{exactZecAmount ?? zecAmount} ZEC</h2>
+            <h2 style={{ marginTop: 0, textAlign: "center" }}>
+              {exactZecAmount ?? zecAmount} ZEC
+              {formatUsd(exactZecAmount ?? (parseFloat(zecAmount) || 0), usdRate) && (
+                <span className="muted" style={{ fontSize: 14, fontWeight: 400, marginLeft: 6 }}>
+                  (≈ {formatUsd(exactZecAmount ?? (parseFloat(zecAmount) || 0), usdRate)})
+                </span>
+              )}
+            </h2>
             <p className="muted" style={{ textAlign: "center" }}>{t("buy.sendAtLeast", { amount: exactZecAmount ?? zecAmount })}</p>
             {qr && (
               <div style={{ background: "#fff", padding: 12, borderRadius: 6, display: "flex", justifyContent: "center", margin: "12px 0" }}>
@@ -148,7 +176,13 @@ export default function BuyModal({ symbol, walletId, onClose }: { symbol: string
             >
               {copied ? `✓ ${t("buy.addressCopied")}` : address}
             </button>
+            {isRealMode && (
+              <p className="muted" style={{ fontSize: 11, marginTop: 4 }}>{t("payment.copyHint")}</p>
+            )}
             <p className="muted" style={{ marginTop: 14, fontSize: 12 }}>{isRealMode ? t("buy.realNote") : t("buy.simulatedNote")}</p>
+            {isRealMode && (
+              <p className="muted" style={{ fontSize: 11, marginTop: 4 }}>{t("payment.recommendedWallets")}</p>
+            )}
             {isRealMode && (
               <button
                 className="btn btn-outline"

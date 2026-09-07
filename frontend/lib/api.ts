@@ -65,6 +65,18 @@ export interface Trade {
 
 let modePromise: Promise<{ zcashMode: "real" | "mock"; tokenCreateFeeZec: number }> | null = null;
 
+/** Formats a ZEC amount as a USD string, e.g. "$1,234.56" or "<$0.01" for
+ * dust amounts that would otherwise round to "$0.00". `usdRate` is the
+ * live ZEC/USD price from useZecUsdPrice()/api.getZecUsdPrice(); returns
+ * null when there's no rate yet so callers can hide the figure entirely
+ * instead of showing a wrong "$0.00". */
+export function formatUsd(zecAmount: number, usdRate: number | null): string | null {
+  if (usdRate === null || !Number.isFinite(zecAmount)) return null;
+  const usd = zecAmount * usdRate;
+  if (usd > 0 && usd < 0.01) return "<$0.01";
+  return usd.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: usd < 1 ? 4 : 2 });
+}
+
 export const api = {
   createWallet: () => req("/api/wallets", { method: "POST" }),
   importWallet: (words: string[]): Promise<{ walletId: string; walletTag: string }> =>
@@ -75,6 +87,10 @@ export const api = {
     if (!modePromise) modePromise = req("/api/mode");
     return modePromise;
   },
+  // Live ZEC/USD rate, server-cached (see backend zecPrice.ts). Not memoized
+  // like getMode -- this one actually changes, so useZecUsdPrice() (lib/zecPrice.tsx)
+  // polls it periodically instead of fetching once.
+  getZecUsdPrice: (): Promise<{ usd: number | null; updatedAt: string | null }> => req("/api/zec-usd-price"),
   portfolio: (
     walletId: string
   ): Promise<{
@@ -101,7 +117,7 @@ export const api = {
     description?: string;
     twitterUrl?: string;
     websiteUrl?: string;
-  }): Promise<{ creationId: string; zecAddress: string; zecAmount: number; status: "PENDING" }> =>
+  }): Promise<{ creationId: string; zecAddress: string; zecAmount: number; memo: string; status: "PENDING" }> =>
     req("/api/tokens", { method: "POST", body: JSON.stringify(data) }),
   getTokenCreation: (
     id: string

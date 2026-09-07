@@ -76,23 +76,64 @@ export default function WalletOnboardModal({ onClose }: { onClose: () => void })
           <>
             <div className="badge">{t("onboard.badge.intro")}</div>
             <h2 style={{ marginTop: 0 }}>{t("onboard.title.intro")}</h2>
-            <p className="muted">{t("onboard.body.intro")}</p>
-            <button className="btn btn-gold" style={{ width: "100%" }} onClick={startWords}>
-              {t("onboard.createButton")}
-            </button>
-            <div style={{ textAlign: "center", margin: "14px 0 8px", fontSize: 12 }} className="muted">
-              {t("onboard.orImport")}
-            </div>
-            <button
-              className="btn btn-outline"
-              style={{ width: "100%" }}
-              onClick={() => {
-                setError(null);
-                setStep("import");
+
+            {/* Brai, 2026-09-07: "el primero tiene que decir wallet de ZODD
+                y sino importa tu wallet de ZCASH" -- two cards, not one
+                paragraph, so the platform's token wallet and the payer's
+                own real Zcash wallet read as two clearly separate things. */}
+            <div
+              style={{
+                border: "1px solid var(--accent)",
+                borderRadius: 6,
+                padding: 14,
+                marginBottom: 10,
               }}
             >
-              {t("onboard.importButton")}
-            </button>
+              <span
+                className="badge"
+                style={{ background: "var(--accent)", color: "var(--bg)", fontSize: 10, padding: "2px 8px" }}
+              >
+                {t("onboard.cards.tokens.label")}
+              </span>
+              <p style={{ fontWeight: 700, margin: "8px 0 4px", fontSize: 15 }}>{t("onboard.cards.tokens.title")}</p>
+              <p className="muted" style={{ fontSize: 13, margin: 0 }}>{t("onboard.cards.tokens.body")}</p>
+            </div>
+            <div
+              style={{
+                border: "1px solid var(--border)",
+                borderRadius: 6,
+                padding: 14,
+                marginBottom: 14,
+              }}
+            >
+              <span
+                className="badge"
+                style={{ background: "var(--border)", color: "var(--text)", fontSize: 10, padding: "2px 8px" }}
+              >
+                {t("onboard.cards.money.label")}
+              </span>
+              <p style={{ fontWeight: 700, margin: "8px 0 4px", fontSize: 15 }}>{t("onboard.cards.money.title")}</p>
+              <p className="muted" style={{ fontSize: 13, margin: 0 }}>{t("onboard.cards.money.body")}</p>
+            </div>
+
+            <p style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>{t("onboard.cards.reassurance")}</p>
+            <p className="muted" style={{ fontSize: 12, marginBottom: 16 }}>{t("onboard.cards.restoreHint")}</p>
+
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                className="btn btn-outline"
+                style={{ flex: 1 }}
+                onClick={() => {
+                  setError(null);
+                  setStep("import");
+                }}
+              >
+                {t("onboard.importButton")}
+              </button>
+              <button className="btn btn-gold" style={{ flex: 1 }} onClick={startWords}>
+                {t("onboard.createButton")}
+              </button>
+            </div>
           </>
         )}
 

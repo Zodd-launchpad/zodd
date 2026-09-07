@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { PricePoint, Trade } from "@/lib/api";
+import { formatUsd, type PricePoint, type Trade } from "@/lib/api";
 import { useLanguage } from "@/lib/i18n";
+import { useZecUsdPrice } from "@/lib/zecPrice";
 
 const INTERVALS = [
   { key: "5m", tkey: "chart.interval.5m" as const, ms: 5 * 60_000 },
@@ -72,6 +73,7 @@ function fmtNum(n: number) {
 
 export default function Chart({ history, trades }: { history: PricePoint[]; trades: Trade[] }) {
   const { t } = useLanguage();
+  const usdRate = useZecUsdPrice();
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<any>(null);
   const candleSeriesRef = useRef<any>(null);
@@ -151,8 +153,14 @@ export default function Chart({ history, trades }: { history: PricePoint[]; trad
               <span>{t("chart.o")} <span style={{ color: "var(--text)" }}>{fmtNum(last.open)}</span></span>
               <span>{t("chart.h")} <span style={{ color: "var(--text)" }}>{fmtNum(last.high)}</span></span>
               <span>{t("chart.l")} <span style={{ color: "var(--text)" }}>{fmtNum(last.low)}</span></span>
-              <span>{t("chart.c")} <span style={{ color: "var(--text)" }}>{fmtNum(last.close)}</span> ZEC</span>
-              <span>{t("chart.vol")} <span style={{ color: "var(--text)" }}>{fmtNum(last.volume)}</span> ZEC</span>
+              <span>
+                {t("chart.c")} <span style={{ color: "var(--text)" }}>{fmtNum(last.close)}</span> ZEC
+                {formatUsd(last.close, usdRate) && <span> ({formatUsd(last.close, usdRate)})</span>}
+              </span>
+              <span>
+                {t("chart.vol")} <span style={{ color: "var(--text)" }}>{fmtNum(last.volume)}</span> ZEC
+                {formatUsd(last.volume, usdRate) && <span> ({formatUsd(last.volume, usdRate)})</span>}
+              </span>
             </>
           )}
         </div>

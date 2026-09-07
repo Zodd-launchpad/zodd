@@ -1,12 +1,14 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useWallet } from "@/lib/wallet";
-import { api } from "@/lib/api";
+import { api, formatUsd } from "@/lib/api";
 import { useLanguage } from "@/lib/i18n";
+import { useZecUsdPrice } from "@/lib/zecPrice";
 
 export default function PortfolioPage() {
   const { wallet, loading } = useWallet();
   const { t } = useLanguage();
+  const usdRate = useZecUsdPrice();
   const [holdings, setHoldings] = useState<any[] | null>(null);
 
   useEffect(() => {
@@ -28,16 +30,27 @@ export default function PortfolioPage() {
               <th>{t("portfolio.col.token")}</th>
               <th>{t("portfolio.col.amount")}</th>
               <th>{t("portfolio.col.price")}</th>
+              <th>{t("portfolio.col.value")}</th>
             </tr>
           </thead>
           <tbody>
-            {holdings.map((h) => (
-              <tr key={h.symbol} onClick={() => (location.href = `/launchpad/token/${h.symbol}`)}>
-                <td>{h.symbol}</td>
-                <td>{h.amount.toFixed(0)}</td>
-                <td>{h.priceZec.toExponential(3)} ZEC</td>
-              </tr>
-            ))}
+            {holdings.map((h) => {
+              const valueZec = h.amount * h.priceZec;
+              return (
+                <tr key={h.symbol} onClick={() => (location.href = `/launchpad/token/${h.symbol}`)}>
+                  <td>{h.symbol}</td>
+                  <td>{h.amount.toFixed(0)}</td>
+                  <td>
+                    {h.priceZec.toExponential(3)} ZEC
+                    {formatUsd(h.priceZec, usdRate) && <div className="muted" style={{ fontSize: 11 }}>{formatUsd(h.priceZec, usdRate)}</div>}
+                  </td>
+                  <td>
+                    {valueZec.toFixed(6)} ZEC
+                    {formatUsd(valueZec, usdRate) && <div className="muted" style={{ fontSize: 11 }}>{formatUsd(valueZec, usdRate)}</div>}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       )}

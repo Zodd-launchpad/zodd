@@ -2,8 +2,9 @@
 import { useEffect, useState } from "react";
 import QRCode from "qrcode";
 import { useWallet } from "@/lib/wallet";
-import { api } from "@/lib/api";
+import { api, formatUsd } from "@/lib/api";
 import { useLanguage } from "@/lib/i18n";
+import { useZecUsdPrice } from "@/lib/zecPrice";
 import { fileToSquareDataUrl } from "@/lib/imageResize";
 
 type Phase = "form" | "waiting" | "created" | "failed";
@@ -11,6 +12,7 @@ type Phase = "form" | "waiting" | "created" | "failed";
 export default function CreatePage() {
   const { wallet } = useWallet();
   const { t } = useLanguage();
+  const usdRate = useZecUsdPrice();
   const [symbol, setSymbol] = useState("");
   const [name, setName] = useState("");
   const [creatorPayoutAddress, setCreatorPayoutAddress] = useState("");
@@ -28,6 +30,10 @@ export default function CreatePage() {
   const [isRealMode, setIsRealMode] = useState(false);
   const [createFeeZec, setCreateFeeZec] = useState<number | null>(null);
   const [copied, setCopied] = useState(false);
+  // Brai, 2026-09-07: "haz ese parche" -- same reasoning as BuyModal.tsx:
+  // copy/paste needs the full payment link (with memo) to get the same
+  // collision protection scanning the QR already gets.
+  const [paymentUri, setPaymentUri] = useState<string | null>(null);
   const [createdSymbol, setCreatedSymbol] = useState<string | null>(null);
 
   useEffect(() => {
@@ -85,7 +91,15 @@ export default function CreatePage() {
       setCreationId(res.creationId);
       setZecAddress(res.zecAddress);
       setZecAmount(res.zecAmount);
-      const uri = `zcash:${res.zecAddress}?amount=${res.zecAmount}`; // simplified ZIP-321 format
+      // Brai, 2026-09-07: "esto tiene que ir por frase semilla" -- every
+      // token creation pays the exact same fixed fee, so amount collisions
+      // here are actually the MOST likely of all (see the matching comment
+      // in BuyModal.tsx / buildPaymentMemoBase64 in zcashReal.ts). The memo
+      // makes this creation's payment identifiable by its own unique id
+      // regardless of how many other creators are paying the same fee at
+      // the same time.
+      const uri = `zcash:${res.zecAddress}?amount=${res.zecAmount}${res.memo ? `&memo=${res.memo}` : ""}`;
+      setPaymentUri(uri);
       setQr(await QRCode.toDataURL(uri, { margin: 1, width: 220 }));
       setPhase("waiting");
     } catch (e: any) {
@@ -118,14 +132,15 @@ export default function CreatePage() {
     setCreationId(null);
     setZecAddress(null);
     setZecAmount(null);
+    setPaymentUri(null);
     setQr(null);
     setError(null);
   }
 
   async function copyAddress() {
-    if (!zecAddress) return;
+    if (!paymentUri) return;
     try {
-      await navigator.clipboard.writeText(zecAddress);
+      await navigator.clipboard.writeText(paymentUri);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
@@ -141,6 +156,9 @@ export default function CreatePage() {
             {t("create.waiting.title")}
           </p>
           <h2 style={{ marginTop: 0, textAlign: "center", fontSize: 40, lineHeight: 1.1 }}>{zecAmount} ZEC</h2>
+          {formatUsd(zecAmount ?? 0, usdRate) && (
+            <p className="muted" style={{ textAlign: "center", marginTop: -8 }}>≈ {formatUsd(zecAmount ?? 0, usdRate)}</p>
+          )}
           <p className="muted" style={{ textAlign: "center" }}>
             {t("create.waiting.sendExactly", { amount: zecAmount ?? "", symbol })}
           </p>
@@ -155,9 +173,15 @@ export default function CreatePage() {
           <button className="btn btn-outline" style={{ width: "100%", marginTop: 8 }} onClick={copyAddress}>
             {copied ? "✓" : t("create.waiting.copyAddress")}
           </button>
+          {isRealMode && (
+            <p className="muted" style={{ fontSize: 11, marginTop: 4 }}>{t("payment.copyHint")}</p>
+          )}
           <p className="muted" style={{ marginTop: 14, fontSize: 12 }}>
             {isRealMode ? t("create.waiting.realNote") : t("create.waiting.simulatedNote")}
           </p>
+          {isRealMode && (
+            <p className="muted" style={{ fontSize: 11, marginTop: 4 }}>{t("payment.recommendedWallets")}</p>
+          )}
           {isRealMode && (
             <button
               className="btn btn-outline"
@@ -207,6 +231,7 @@ export default function CreatePage() {
       <h1 style={{ fontSize: 18 }}>{t("create.title")}</h1>
       <p className="muted" style={{ marginBottom: 8 }}>
         {t("create.feeNote", { amount: createFeeZec ?? "…" })}
+        {createFeeZec != null && formatUsd(createFeeZec, usdRate) && ` (≈ ${formatUsd(createFeeZec, usdRate)})`}
       </p>
       <p className="muted" style={{ marginBottom: 20 }}>
         {t("create.tradingFeeNote")}

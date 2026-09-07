@@ -1,6 +1,7 @@
 "use client";
-import type { Trade } from "@/lib/api";
+import { formatUsd, type Trade } from "@/lib/api";
 import { useLanguage } from "@/lib/i18n";
+import { useZecUsdPrice } from "@/lib/zecPrice";
 
 function fmtTokens(n: number) {
   return n.toLocaleString("en-US", { maximumFractionDigits: 0 });
@@ -8,6 +9,7 @@ function fmtTokens(n: number) {
 
 export default function TradesList({ trades }: { trades: Trade[] }) {
   const { t } = useLanguage();
+  const usdRate = useZecUsdPrice();
 
   function timeAgo(iso: string): string {
     const diffMs = Date.now() - new Date(iso).getTime();
@@ -47,6 +49,9 @@ export default function TradesList({ trades }: { trades: Trade[] }) {
             </span>
             <span className="mono muted" style={{ minWidth: 110, textAlign: "right" }}>
               {tr.zecAmount.toFixed(6)} ZEC
+              {formatUsd(tr.zecAmount, usdRate) && (
+                <div style={{ fontSize: 11 }}>{formatUsd(tr.zecAmount, usdRate)}</div>
+              )}
             </span>
             <span className="muted" style={{ minWidth: 70, textAlign: "right", fontSize: 12 }}>
               {timeAgo(tr.createdAt)}

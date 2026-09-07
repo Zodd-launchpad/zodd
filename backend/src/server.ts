@@ -6,6 +6,7 @@ import { quoteBuy, quoteSell, currentPrice, marketCapZec, isGraduated } from "./
 import { simulatedInscriptionFor } from "./lib/simulatedChain.js";
 import { splitFee, TRADE_FEE_BPS, CREATOR_FEE_BPS, TOKEN_CREATE_FEE_ZEC, computeSellerPayout, NETWORK_FEE_ZEC } from "./lib/fees.js";
 import { startFeeDistributor, runFeeDistributionOnce } from "./lib/feeDistributor.js";
+import { startZecPricePolling, getZecUsdPrice } from "./lib/zecPrice.js";
 import { withTokenLock } from "./lib/mutex.js";
 import { checkOrderRateLimit } from "./lib/rateLimit.js";
 
@@ -14,7 +15,7 @@ import { checkOrderRateLimit } from "./lib/rateLimit.js";
 // This must be the ONLY place that decides which one is in effect.
 const ZCASH_MODE = process.env.ZCASH_MODE === "real" ? "real" : "mock";
 const zcashService = ZCASH_MODE === "real" ? await import("./lib/zcashReal.js") : await import("./lib/zcashMock.js");
-const { generateOrderAddress, onPaymentDetected, sendPayout, MAX_PAYOUT_ZEC } = zcashService;
+const { generateOrderAddress, onPaymentDetected, sendPayout, MAX_PAYOUT_ZEC, buildPaymentMemoBase64 } = zcashService;
 
 // Guards /api/admin/run-fee-distribution (real ZEC payouts) -- unset by
 // default, so that route stays refused until Brai deliberately sets this in
@@ -31,6 +32,16 @@ app.register(import("@fastify/cors"), { origin: true });
 // vice versa) -- see BuyModal.tsx and the create-token waiting screen. Also
 // exposes the current create fee so the form can show it before submission.
 app.get("/api/mode", async (_req, reply) => reply.send({ zcashMode: ZCASH_MODE, tokenCreateFeeZec: TOKEN_CREATE_FEE_ZEC }));
+
+// Brai, 2026-09-07: "tiene que tener precio en dolares, todo" -- live ZEC/USD
+// rate for the frontend to convert every ZEC-denominated price it shows.
+// Polled server-side (see zecPrice.ts) so every client isn't hammering a
+// public price API directly; this route just serves whatever's cached.
+// { usd: null, updatedAt: null } means the very first poll hasn't landed
+// yet (only possible in the first ~seconds after a boot) -- the frontend
+// just hides the USD figure until it has a real number.
+app.get("/api/zec-usd-price", async (_req, reply) => reply.send(getZecUsdPrice()));
+startZecPricePolling(app.log);
 
 // ---------- Wallets ----------
 
@@ -180,6 +191,13 @@ app.post("/api/tokens", async (req, reply) => {
     creationId: pending.id,
     zecAddress,
     zecAmount,
+    // Brai, 2026-09-07: "esto tiene que ir por frase semilla" -- base64
+    // memo for the payment URI (see buildPaymentMemoBase64 in
+    // zcashReal.ts). The frontend drops this into the zcash: URI/QR as
+    // memo=..., so a memo-aware wallet matches this creation by its unique
+    // id instead of by amount -- immune to the same-fee-amount collision
+    // every OTHER token creation is otherwise exposed to.
+    memo: buildPaymentMemoBase64(pending.id),
     status: "PENDING",
   });
 });
@@ -321,6 +339,10 @@ app.post("/api/orders/buy", async (req, reply) => {
     orderId: order.id,
     zecAddress,
     zecAmount,
+    // Brai, 2026-09-07: "esto tiene que ir por frase semilla" -- see the
+    // matching comment on the token-creation route above and the big one on
+    // buildPaymentMemoBase64 in zcashReal.ts for the full reasoning.
+    memo: buildPaymentMemoBase64(order.id),
     status: "PENDING",
   });
 });

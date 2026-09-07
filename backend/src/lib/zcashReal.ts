@@ -175,7 +175,7 @@ function startPolling() {
       if (Date.now() - pending.createdAt > ORDER_EXPIRY_MS || hardExpired) {
         watchers.delete(pending.orderId);
         console.warn(
-          `[zcashReal] order ${pending.orderId} expired unpaid ${hardExpired ? `(hard cap: ${Math.round((Date.now() - pending.originalCreatedAt) / 60_000)}min since original creation)` : "after 30min"} (address ${pending.address})`
+          `[zcashReal] order ${pending.orderId} expired unpaid ${hardExpired ? `(hard cap: ${Math.round((Date.now() - pending.originalCreatedAt) / 60_000)}min since original creation)` : `after ${ORDER_EXPIRY_MS / 60_000}min`} (address ${pending.address})`
         );
       }
     }
@@ -185,6 +185,36 @@ function startPolling() {
       const available = (notes ?? []).filter(
         (n: any) => typeof n.status === "string" && n.status.toLowerCase().includes("confirmed") && !consumedTxids.has(n.txid)
       );
+
+      // Pass 1, memo match: collision-proof, see the big comment on
+      // buildPaymentMemo below. Every watcher's orderId is a unique cuid, so
+      // a note whose decrypted memo equals it can belong to exactly one
+      // watcher -- no amount guessing, no bump, works at any concurrency.
+      // Credits the REAL amount the note is worth (not the requested/
+      // expected one), since the memo alone already proves which order this
+      // is for. Runs before the amount pass so a memo-carrying note is
+      // never accidentally claimed by amount from an unrelated watcher.
+      for (const pending of [...watchers.values()]) {
+        const idx = available.findIndex((n: any) => typeof n.memo === "string" && n.memo.trim() === pending.orderId);
+        if (idx === -1) continue;
+        const note = available[idx];
+        available.splice(idx, 1);
+        consumedTxids.add(note.txid);
+        const paidZec = Number(note.valueZatoshis) / ZATOSHIS_PER_ZEC;
+        const isRepeat = pending.firstMatchedAt != null;
+        if (isRepeat) {
+          console.log(`[zcashReal] order ${pending.orderId} matched AGAIN by memo: note worth ${paidZec} ZEC (txid ${note.txid}) -- crediting as an additional buy`);
+        } else {
+          pending.firstMatchedAt = Date.now();
+          console.log(`[zcashReal] order ${pending.orderId} matched by memo: note worth ${paidZec} ZEC (txid ${note.txid})`);
+        }
+        onPayment?.(pending.orderId, paidZec, note.txid, { isRepeat });
+      }
+
+      // Pass 2, amount fallback: unchanged from before -- only reached by
+      // whatever's left of `available` (memo matches above already spliced
+      // theirs out) and whatever watchers pass 1 didn't already resolve.
+      // Still needed for a payer whose wallet doesn't attach ZIP-321 memos.
       for (const pending of [...watchers.values()]) {
         const expectedZats = Math.round(pending.expectedZecAmount * ZATOSHIS_PER_ZEC);
         const idx = available.findIndex((n: any) => Number(n.valueZatoshis) === expectedZats);
@@ -194,10 +224,10 @@ function startPolling() {
         consumedTxids.add(note.txid);
         const isRepeat = pending.firstMatchedAt != null;
         if (isRepeat) {
-          console.log(`[zcashReal] order ${pending.orderId} matched AGAIN: note worth ${pending.expectedZecAmount} ZEC (txid ${note.txid}) -- crediting as an additional buy`);
+          console.log(`[zcashReal] order ${pending.orderId} matched AGAIN by amount: note worth ${pending.expectedZecAmount} ZEC (txid ${note.txid}) -- crediting as an additional buy`);
         } else {
           pending.firstMatchedAt = Date.now();
-          console.log(`[zcashReal] order ${pending.orderId} matched: note worth ${pending.expectedZecAmount} ZEC (txid ${note.txid})`);
+          console.log(`[zcashReal] order ${pending.orderId} matched by amount: note worth ${pending.expectedZecAmount} ZEC (txid ${note.txid})`);
         }
         onPayment?.(pending.orderId, pending.expectedZecAmount, note.txid, { isRepeat });
       }
@@ -205,6 +235,38 @@ function startPolling() {
       console.error(`[zcashReal] poll failed:`, err);
     }
   }, POLL_INTERVAL_MS);
+}
+
+// Brai, 2026-09-07: "esto tiene que ir por frase semilla ... para q no haya
+// ni una posibilidad de que suceda" -- this is the real fix, not just a
+// patch on pickAndReserveAmount's bump. zingo-cli still can't tell us which
+// diversified ADDRESS a note landed on (confirmed again today, see the big
+// comment above unspentNotes' original version), so a true one-wallet-per-
+// order scheme isn't buildable on this tooling without a much bigger
+// rewrite (a separate lightclient/derived key per order). Memos get
+// (almost) the same guarantee far more cheaply: every order/token-creation
+// id is already a globally-unique cuid, zingo-cli's `quicksend` already
+// proves this wallet can read/write shielded memos correctly (used for the
+// token-creation genesis proof), and ZIP-321 (the same `zcash:` URI scheme
+// the QR already uses) has a standard `memo` parameter that memo-aware
+// wallets (Zashi, YWallet, Nighthawk, and others that implement ZIP-321)
+// fill in automatically from a scanned QR -- no manual typing, so no
+// mistyped/rounded amount either.
+// Caveat, stated plainly: a payer who pastes the address by hand into a
+// wallet that ignores the memo param (or retypes it outside the QR flow)
+// still falls back to the old amount-based guess -- that path still isn't
+// literally impossible to collide, only the memo path is. There is no way
+// to force a third-party wallet to honor a memo; this is the strongest fix
+// available without replacing the wallet library.
+// ZIP-321 (the `zcash:` payment URI the QR already encodes) carries the
+// memo as base64 of the raw bytes -- a compliant wallet decodes that and
+// writes the raw text as the note's actual on-chain memo, which is exactly
+// what comes back as the plain (non-base64) `n.memo` in unspentNotes()
+// above. So this is base64 OUT (for the URI); the poll loop above compares
+// against the plain orderId because that's what a matching note decrypts
+// back to.
+export function buildPaymentMemoBase64(orderId: string): string {
+  return Buffer.from(orderId, "utf8").toString("base64");
 }
 
 // Found 2026-09-07, same incident as HARD_MAX_LIFETIME_MS above: matching
@@ -295,7 +357,7 @@ export async function generateOrderAddress(orderId: string, expectedZecAmount: n
 // surplus payment instead of it silently staying unclaimed forever.
 export async function listUnclaimedNotes(
   knownTxids: string[]
-): Promise<{ txid: string; zatoshis: number; zec: number; status: string; timeRaw: number }[]> {
+): Promise<{ txid: string; zatoshis: number; zec: number; status: string; timeRaw: number; memo: string }[]> {
   const { notes } = await call(`/wallet/notes`);
   const known = new Set(knownTxids);
   return (notes ?? [])
@@ -305,6 +367,12 @@ export async function listUnclaimedNotes(
       zatoshis: Number(n.valueZatoshis),
       zec: Number(n.valueZatoshis) / ZATOSHIS_PER_ZEC,
       status: n.status,
+      // If this is non-empty and STILL shows up here as unclaimed, the memo
+      // path (see buildPaymentMemoBase64) either didn't match any currently
+      // -watched order (already expired/filled by the time this note
+      // confirmed) or the payer typed/pasted a memo that doesn't correspond
+      // to any real order -- useful signal for manual admin triage.
+      memo: typeof n.memo === "string" ? n.memo : "",
       // zingo-cli's note `time` field -- seconds-since-epoch when observed,
       // per cli.js's unspentNotes(). Kept raw (not converted) here so the
       // caller can decide how to interpret it; 0 if the field was missing.

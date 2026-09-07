@@ -1,8 +1,9 @@
 "use client";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { api, TokenSummary } from "@/lib/api";
+import { api, TokenSummary, formatUsd } from "@/lib/api";
 import { useLanguage } from "@/lib/i18n";
+import { useZecUsdPrice } from "@/lib/zecPrice";
 
 const BOARD_SIZE = 10;
 
@@ -32,7 +33,8 @@ function WebsiteIcon() {
   );
 }
 
-function TokenCard({ token, graduatedTag }: { token: TokenSummary; graduatedTag?: boolean }) {
+function TokenCard({ token, graduatedTag, usdRate }: { token: TokenSummary; graduatedTag?: boolean; usdRate: number | null }) {
+  const mcUsd = formatUsd(token.marketCapZec, usdRate);
   return (
     <Link href={`/launchpad/token/${token.symbol}`} className="board-card">
       {graduatedTag && <div className="board-card-pill">GRAD</div>}
@@ -43,7 +45,9 @@ function TokenCard({ token, graduatedTag }: { token: TokenSummary; graduatedTag?
       )}
       <div className="sym">{token.symbol}</div>
       <div className="name">{token.name}</div>
-      <div className="mc">{fmtMcap(token.marketCapZec)} ZEC</div>
+      <div className="mc">
+        {fmtMcap(token.marketCapZec)} ZEC{mcUsd && <span className="muted"> · {mcUsd}</span>}
+      </div>
       {(token.twitterUrl || token.websiteUrl) && (
         <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
           {token.twitterUrl && (
@@ -80,6 +84,7 @@ function TokenCard({ token, graduatedTag }: { token: TokenSummary; graduatedTag?
 
 export default function HomeTokenBoards() {
   const { t } = useLanguage();
+  const usdRate = useZecUsdPrice();
   const [tokens, setTokens] = useState<TokenSummary[] | null>(null);
 
   useEffect(() => {
@@ -122,7 +127,7 @@ export default function HomeTokenBoards() {
         ) : (
           <div className="board-grid">
             {graduated.slice(0, BOARD_SIZE).map((tk) => (
-              <TokenCard key={tk.symbol} token={tk} graduatedTag />
+              <TokenCard key={tk.symbol} token={tk} graduatedTag usdRate={usdRate} />
             ))}
           </div>
         )}
@@ -141,7 +146,7 @@ export default function HomeTokenBoards() {
         ) : (
           <div className="board-grid">
             {exploring.slice(0, BOARD_SIZE).map((tk) => (
-              <TokenCard key={tk.symbol} token={tk} />
+              <TokenCard key={tk.symbol} token={tk} usdRate={usdRate} />
             ))}
           </div>
         )}

@@ -1,9 +1,10 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { api, TokenSummary, PricePoint, Trade } from "@/lib/api";
+import { api, TokenSummary, PricePoint, Trade, formatUsd } from "@/lib/api";
 import { useWallet } from "@/lib/wallet";
 import { useLanguage } from "@/lib/i18n";
+import { useZecUsdPrice } from "@/lib/zecPrice";
 import BuyModal from "./BuyModal";
 import SellModal from "./SellModal";
 import Chart from "./Chart";
@@ -41,6 +42,7 @@ export default function TokenPage() {
   const { symbol } = useParams<{ symbol: string }>();
   const { wallet } = useWallet();
   const { t } = useLanguage();
+  const usdRate = useZecUsdPrice();
   const [token, setToken] = useState<TokenSummary | null>(null);
   const [history, setHistory] = useState<PricePoint[]>([]);
   const [trades, setTrades] = useState<Trade[]>([]);
@@ -117,6 +119,9 @@ export default function TokenPage() {
         <div className="card">
           <p style={{ marginTop: 0 }}>
             {t("token.price")} <strong>{fmt(token.priceZec, 12)} ZEC</strong>
+            {formatUsd(token.priceZec, usdRate) && (
+              <span className="muted" style={{ marginLeft: 6 }}>({formatUsd(token.priceZec, usdRate)})</span>
+            )}
           </p>
           <button className="btn btn-green" style={{ width: "100%", marginBottom: 8 }} onClick={() => setShowBuy(true)} disabled={!wallet}>
             {t("token.buy")}
@@ -131,10 +136,12 @@ export default function TokenPage() {
           <div>
             <div className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>{t("token.stat.volume24h")}</div>
             <div style={{ fontWeight: 700 }}>{fmt(volume24h)} ZEC</div>
+            {formatUsd(volume24h, usdRate) && <div className="muted" style={{ fontSize: 11 }}>{formatUsd(volume24h, usdRate)}</div>}
           </div>
           <div>
             <div className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>{t("token.stat.marketCap")}</div>
             <div style={{ fontWeight: 700 }}>{fmt(token.marketCapZec)} ZEC</div>
+            {formatUsd(token.marketCapZec, usdRate) && <div className="muted" style={{ fontSize: 11 }}>{formatUsd(token.marketCapZec, usdRate)}</div>}
           </div>
           <div>
             <div className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>{t("token.stat.realReserve")}</div>

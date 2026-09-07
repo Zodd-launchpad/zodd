@@ -1,8 +1,9 @@
 "use client";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { api, TokenSummary } from "@/lib/api";
+import { api, TokenSummary, formatUsd } from "@/lib/api";
 import { useLanguage } from "@/lib/i18n";
+import { useZecUsdPrice } from "@/lib/zecPrice";
 
 function fmt(n: number, digits = 4) {
   if (n === 0) return "0";
@@ -120,6 +121,7 @@ const FILTERS: { key: FilterKey; labelKey: "market.filter.new" | "market.filter.
 
 export default function MarketPage() {
   const { t } = useLanguage();
+  const usdRate = useZecUsdPrice();
   const [tokens, setTokens] = useState<TokenSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterKey>("new");
@@ -225,8 +227,14 @@ export default function MarketPage() {
                       </div>
                     </div>
                   </td>
-                  <td className="mono">{fmtPrice(t2.priceZec)} ZEC</td>
-                  <td className="mono">{fmt(t2.marketCapZec)} ZEC</td>
+                  <td className="mono">
+                    {fmtPrice(t2.priceZec)} ZEC
+                    {formatUsd(t2.priceZec, usdRate) && <div className="muted" style={{ fontSize: 11 }}>{formatUsd(t2.priceZec, usdRate)}</div>}
+                  </td>
+                  <td className="mono">
+                    {fmt(t2.marketCapZec)} ZEC
+                    {formatUsd(t2.marketCapZec, usdRate) && <div className="muted" style={{ fontSize: 11 }}>{formatUsd(t2.marketCapZec, usdRate)}</div>}
+                  </td>
                   <td className="mono" style={{ color: change == null ? undefined : change > 0 ? "var(--green)" : change < 0 ? "var(--red)" : undefined }}>
                     {change == null ? "—" : `${change > 0 ? "+" : ""}${change.toFixed(2)}%`}
                   </td>
