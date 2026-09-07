@@ -126,31 +126,25 @@ export const translations = {
     zh: "推荐搭配使用：ZODL、Ywallet 或 Nighthawk（扫描二维码——会用唯一 ID 保护你的付款，即使很多人同时购买也不会弄混）。",
   },
   "payment.copyHint": {
-    en: "Copies the full payment link (address + amount + your unique order ID) — pasting it into a compatible wallet is as safe as scanning the QR.",
-    zh: "会复制完整的付款链接（地址 + 金额 + 你的唯一订单 ID）——粘贴到兼容的钱包里和扫描二维码一样安全。",
+    en: "Copies just the address shown above. Scan the QR instead if your wallet supports it — it also fills in the amount for you.",
+    zh: "只会复制上方显示的地址。如果你的钱包支持，建议扫描二维码——还会自动填好金额。",
   },
-  // Brai, 2026-09-07: "noir acepta memo pero va en la segunda linea" -- some
-  // wallets (confirmed with Noir) don't parse the zcash: URI when pasted --
-  // they treat the whole string as an invalid address and the send fails.
-  // What they DO support is their own separate MEMO field on the send
-  // screen. First tried a quiet "copy address+memo as 2 lines" button;
-  // Brai wanted it impossible to miss instead -- "un cartel grande" -- so
-  // now the memo itself is shown big, front and center (see the bronze box
-  // in BuyModal.tsx/create/page.tsx's waiting screen).
-  "payment.noirBanner.title": {
-    en: "GOT NOIR? TAP ONCE BELOW",
-    zh: "用 NOIR 钱包？点一下下面",
-  },
-  // Brai, 2026-09-07 (round 2): "cuando vas a copiar el ID del memo se te
-  // cerro la noir y no podes pegar el memo" -- copying the address, then
-  // separately copying the memo, meant switching to Noir twice, and the
-  // second switch was closing Noir before the memo could be pasted. Now
-  // one tap copies BOTH (address + memo, Noir splits it on its own) so the
-  // whole thing is one switch to Noir, one paste.
-  "payment.noirBanner.body": {
-    en: "This copies the address AND the memo (shown below) together — paste it once into Noir and don't switch back here until it's sent, switching apps again can close Noir before it pastes.",
-    zh: "这会把地址和下面显示的备注一起复制——粘贴到 Noir 一次就行，发送之前不要切回这里，再次切换应用可能会导致 Noir 在粘贴前关闭。",
-  },
+  // Brai, 2026-09-07: tried a Noir-specific banner (first a quiet 2-line
+  // copy button, then a big bronze "GOT NOIR" box copying address+memo
+  // together) across a few rounds, but it still didn't work reliably for
+  // Noir buyers in practice -- Brai asked to pull it entirely ("no
+  // funciona"). Removed from BuyModal.tsx/create/page.tsx.
+  //
+  // Brai, 2026-09-07 (later): turned out the real bug was one level below
+  // that banner -- the plain "copy address" button was copying the full
+  // zcash:<addr>?amount=..&memo=.. URI, not the address shown in the box,
+  // which is why it looked to Brai like clicking copy gave "a completely
+  // different address". Most wallets (Noir included) can't parse that
+  // pasted URI at all, only a bare address. Fixed copyAddress() in both
+  // BuyModal.tsx and create/page.tsx to copy the plain address instead --
+  // the backend's per-order unique amount (see zcashReal.ts) still prevents
+  // any collision even without the memo, so nothing is lost. The QR still
+  // encodes the full URI for wallets that scan it.
   "create.created.title": { en: "TOKEN DEPLOYED", zh: "代币已部署" },
   "create.created.body": { en: "{symbol} is live.", zh: "{symbol} 已上线。" },
   "create.created.viewButton": { en: "View {symbol}", zh: "查看 {symbol}" },

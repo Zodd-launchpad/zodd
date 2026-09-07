@@ -30,10 +30,9 @@ export default function CreatePage() {
   const [isRealMode, setIsRealMode] = useState(false);
   const [createFeeZec, setCreateFeeZec] = useState<number | null>(null);
   const [copied, setCopied] = useState(false);
-  const [copiedTwoLine, setCopiedTwoLine] = useState(false);
-  // Brai, 2026-09-07: "haz ese parche" -- same reasoning as BuyModal.tsx:
-  // copy/paste needs the full payment link (with memo) to get the same
-  // collision protection scanning the QR already gets.
+  // paymentUri still feeds the QR (see submit() below) -- kept for wallets
+  // that scan it and auto-fill amount+memo. The copy button copies the
+  // plain zecAddress instead; see the comment on copyAddress() for why.
   const [paymentUri, setPaymentUri] = useState<string | null>(null);
   const [createdSymbol, setCreatedSymbol] = useState<string | null>(null);
 
@@ -138,32 +137,20 @@ export default function CreatePage() {
     setError(null);
   }
 
+  // Brai, 2026-09-07 (later): used to copy the full paymentUri instead of
+  // the plain address -- same issue as BuyModal.tsx (see its copyAddress
+  // comment): what got pasted didn't match what was shown, and most
+  // wallets can't parse the full zcash:...&amount=..&memo=.. string when
+  // pasted by hand. The backend's per-order unique amount already prevents
+  // collisions, so a bare address is safe to copy on its own.
   async function copyAddress() {
-    if (!paymentUri) return;
+    if (!zecAddress) return;
     try {
-      await navigator.clipboard.writeText(paymentUri);
+      await navigator.clipboard.writeText(zecAddress);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
       // clipboard not available — the address is still selectable/visible
-    }
-  }
-
-  // Brai, 2026-09-07 (round 2): "cuando vas a copiar el ID del memo se te
-  // cerro la noir y no podes pegar el memo" -- same fix as BuyModal.tsx: a
-  // separate memo-only copy meant switching to Noir twice, and the second
-  // switch was closing Noir before the memo could be pasted. One tap now
-  // copies address+memo together -- one switch to Noir, one paste, Noir
-  // splits it on its own. creationId is already the plain, un-base64'd
-  // memo text.
-  async function copyAddressAndMemo() {
-    if (!zecAddress || !creationId) return;
-    try {
-      await navigator.clipboard.writeText(`${zecAddress}\n${creationId}`);
-      setCopiedTwoLine(true);
-      setTimeout(() => setCopiedTwoLine(false), 1500);
-    } catch {
-      // clipboard not available — address/memo are still visible above
     }
   }
 
@@ -194,46 +181,6 @@ export default function CreatePage() {
           </button>
           {isRealMode && (
             <p className="muted" style={{ fontSize: 11, marginTop: 4 }}>{t("payment.copyHint")}</p>
-          )}
-          {/* Brai, 2026-09-07: "un cartel grande que diga SI TENES NOIR USA
-              MEMO Y EL MEMO: ..." -- big, unmissable box; the button copies
-              address+memo together in one tap (see copyAddressAndMemo). */}
-          {isRealMode && creationId && zecAddress && (
-            <div
-              style={{
-                marginTop: 12,
-                padding: "12px 14px",
-                borderRadius: 8,
-                border: "2px solid var(--bronze, #c9a24b)",
-                background: "rgba(201,162,75,0.1)",
-                textAlign: "center",
-              }}
-            >
-              <p style={{ margin: "0 0 6px", fontWeight: 800, fontSize: 14, letterSpacing: 0.3, color: "var(--bronze, #c9a24b)" }}>
-                {t("payment.noirBanner.title")}
-              </p>
-              <p className="muted" style={{ margin: "0 0 8px", fontSize: 12 }}>{t("payment.noirBanner.body")}</p>
-              <button
-                type="button"
-                onClick={copyAddressAndMemo}
-                className="mono"
-                style={{
-                  display: "block",
-                  width: "100%",
-                  fontSize: 22,
-                  fontWeight: 800,
-                  padding: "12px 8px",
-                  borderRadius: 6,
-                  border: `1px solid ${copiedTwoLine ? "var(--green)" : "var(--border)"}`,
-                  background: "transparent",
-                  color: copiedTwoLine ? "var(--green)" : "var(--text)",
-                  cursor: "pointer",
-                  wordBreak: "break-all",
-                }}
-              >
-                {copiedTwoLine ? "✓" : creationId}
-              </button>
-            </div>
           )}
           <p className="muted" style={{ marginTop: 14, fontSize: 12 }}>
             {isRealMode ? t("create.waiting.realNote") : t("create.waiting.simulatedNote")}
