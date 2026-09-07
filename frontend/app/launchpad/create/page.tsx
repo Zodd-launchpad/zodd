@@ -28,7 +28,6 @@ export default function CreatePage() {
   const [createFeeZec, setCreateFeeZec] = useState<number | null>(null);
   const [copied, setCopied] = useState(false);
   const [createdSymbol, setCreatedSymbol] = useState<string | null>(null);
-  const [paidAck, setPaidAck] = useState(false);
 
   useEffect(() => {
     api
@@ -68,7 +67,6 @@ export default function CreatePage() {
       setZecAmount(res.zecAmount);
       const uri = `zcash:${res.zecAddress}?amount=${res.zecAmount}`; // simplified ZIP-321 format
       setQr(await QRCode.toDataURL(uri, { margin: 1, width: 220 }));
-      setPaidAck(false);
       setPhase("waiting");
     } catch (e: any) {
       setError(e.message);
@@ -141,17 +139,13 @@ export default function CreatePage() {
             {isRealMode ? t("create.waiting.realNote") : t("create.waiting.simulatedNote")}
           </p>
           {isRealMode && (
-            paidAck ? (
-              <p className="muted" style={{ marginTop: 10, fontSize: 12, textAlign: "center" }}>{t("buy.alreadyPaidAck.confirmed")}</p>
-            ) : (
-              <button
-                className="btn btn-outline"
-                style={{ width: "100%", marginTop: 10, fontSize: 12, lineHeight: 1.4 }}
-                onClick={() => setPaidAck(true)}
-              >
-                {t("buy.alreadyPaidAck")}
-              </button>
-            )
+            <button
+              className="btn btn-outline"
+              style={{ width: "100%", marginTop: 10, fontSize: 12, lineHeight: 1.4 }}
+              onClick={() => (location.href = "/launchpad")}
+            >
+              {t("buy.alreadyPaidAck")}
+            </button>
           )}
         </div>
       </div>

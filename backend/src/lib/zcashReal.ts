@@ -58,24 +58,37 @@ const watchers = new Map<string, PendingPayment>();
 let onPayment: PaymentCallback | null = null;
 
 const POLL_INTERVAL_MS = 20_000; // real chain state -- no need to hammer it every few seconds
-const ORDER_EXPIRY_MS = 30 * 60_000; // an order nobody paid within 30min stops being watched
+
+// Found 2026-09-07 (Brai): 30min is too tight for a real chain -- if the
+// Zcash network is congested, a genuine payment can take a lot longer than
+// that to confirm, and an order that expires while the money is still
+// in-flight loses a real customer's purchase. Orders now stay watched for
+// at least 2 hours before giving up.
+const ORDER_EXPIRY_MS = 2 * 60 * 60_000; // an order nobody paid within 2h stops being watched
 
 // Found 2026-09-07: matching is amount-only (see the big comment below), so
 // two PENDING records open at once for the same expected amount race for
 // whichever note lands next -- and resumeWatching deliberately gives every
-// resumed order a FRESH 30min window (see its own comment) so a real
-// payment survives a redeploy. Combined, an old order nobody ever paid can
-// live forever: every redeploy re-resumes it with another fresh 30min,
-// so it never truly expires, and it keeps first-in-line priority (it was
+// resumed order a FRESH window (see its own comment) so a real payment
+// survives a redeploy. Combined, an old order nobody ever paid can live
+// forever: every redeploy re-resumes it with another fresh window, so it
+// never truly expires, and it keeps first-in-line priority (it was
 // registered before any later, actually-paid order of the same amount) to
 // steal that later order's payment. A real ZEC 0.0001 fee meant for a
 // token creation named FLORK got credited this way to an abandoned
-// creation from 36 minutes earlier instead. This hard cap, measured from
-// the ORIGINAL creation time and never reset by a resume, bounds how long
-// an order can stay in the running regardless of how many redeploys
-// happen -- generous enough to survive several redeploys in a row, but
-// short enough that a genuinely abandoned order stops competing.
-const HARD_MAX_LIFETIME_MS = 90 * 60_000;
+// creation from 36 minutes earlier instead.
+//
+// That specific failure mode (two orders silently sharing one amount) is
+// now closed a different way -- see pickAndReserveAmount below, which
+// makes every order's amount a unique fingerprint the moment it's created,
+// so there is no longer any ambiguity for a note to fall into even if two
+// orders are open at once. This hard cap is what's left as a second,
+// independent line of defense against the SAME underlying risk (an
+// abandoned order that never truly goes away) for orders created before
+// that fix, or by any future bug in it -- not the primary mechanism
+// anymore, so it can afford to sit comfortably above the 2h soft window
+// instead of well below it.
+const HARD_MAX_LIFETIME_MS = 3 * 60 * 60_000;
 
 export function onPaymentDetected(cb: PaymentCallback) {
   onPayment = cb;
