@@ -210,6 +210,32 @@ export async function rawHelpDebug() {
   return out;
 }
 
+// Brai, 2026-09-07: the real find -- zingo-cli's own help lists
+// `value_transfers` ("List all value transfers for this wallet") and
+// `value_to_address` ("Show by address value transfers for this seed"),
+// neither of which cli.js has ever called before now. If either of these
+// actually includes the destination address per transfer (unlike `notes`,
+// confirmed address-less via rawNotesDebug), that's the real fix: no
+// memo, no amount bump, no tool swap, no per-user wallet -- just ask
+// "what landed on THIS address" directly, the same way SHLD.fun's "la
+// direccion ES la orden" implies they do. Testing both raw before wiring
+// anything up. Temporary diagnostics, remove once answered.
+export async function rawValueTransfersDebug() {
+  const out = await runCli(["value_transfers"], { timeout: 3 * 60_000, waitsync: true });
+  const { json, raw } = parseMaybeJson(out);
+  return json ?? raw;
+}
+
+export async function rawValueToAddressDebug(address) {
+  const out = await runCli(["value_to_address", address], { timeout: 3 * 60_000, waitsync: true });
+  const { json, raw } = parseMaybeJson(out);
+  return json ?? raw;
+}
+
+export async function rawAddressesDebug() {
+  return listAddresses();
+}
+
 export async function unspentNotes() {
   const out = await runCli(["notes"], { timeout: 3 * 60_000, waitsync: true });
   const { json, raw } = parseMaybeJson(out);

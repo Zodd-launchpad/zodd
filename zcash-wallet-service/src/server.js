@@ -114,6 +114,30 @@ app.get("/wallet/help-raw-debug", async (_req, reply) => {
   }
 });
 
+// Temporary diagnostics -- see the comment on rawValueTransfersDebug in
+// cli.js. Read-only, same internal-token gate. Remove once answered.
+app.get("/wallet/value-transfers-raw-debug", async (_req, reply) => {
+  if (!ready) return reply.code(503).send({ error: "wallet not ready yet", detail: readyError });
+  try {
+    const raw = await cli.rawValueTransfersDebug();
+    return reply.send(raw);
+  } catch (err) {
+    app.log.error(err);
+    return reply.code(500).send({ error: String(err.message ?? err) });
+  }
+});
+
+app.get("/wallet/addresses-raw-debug", async (_req, reply) => {
+  if (!ready) return reply.code(503).send({ error: "wallet not ready yet", detail: readyError });
+  try {
+    const raw = await cli.rawAddressesDebug();
+    return reply.send(raw);
+  } catch (err) {
+    app.log.error(err);
+    return reply.code(500).send({ error: String(err.message ?? err) });
+  }
+});
+
 app.post("/wallet/send", async (req, reply) => {
   if (!ready) return reply.code(503).send({ error: "wallet not ready yet", detail: readyError });
   const { address, zatoshis, memo } = req.body ?? {};
