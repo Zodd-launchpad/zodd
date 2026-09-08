@@ -369,7 +369,16 @@ tr:hover td { background: #151517; cursor: pointer; }
 .board-empty { color: var(--text-dim); font-size: 13px; text-align: center; padding: 22px 0; }
 .board-grid {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  /* minmax(0, 1fr), not plain 1fr: a 1fr track's automatic minimum is its
+     content's min-content size, so when the featured (2-column-span) card
+     needs more room than one column alone provides, the grid was inflating
+     the first column it touches to make up the difference -- and every
+     *normal* card sharing that column (ZOOKO, column 1) got stretched
+     along with it. minmax(0, 1fr) pins all columns to a strict equal
+     share regardless of content, so only the explicitly 2-col-span
+     featured card is ever bigger (Brai, 2026-09-08: "descubre porque el
+     token ZOOKO esta mas grande que el resto"). */
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 12px;
 }
 .board-card {
@@ -447,10 +456,10 @@ tr:hover td { background: #151517; cursor: pointer; }
 .board-viewall:hover { color: var(--text); }
 
 @media (max-width: 900px) {
-  .board-grid { grid-template-columns: repeat(3, 1fr); }
+  .board-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 @media (max-width: 560px) {
-  .board-grid { grid-template-columns: repeat(2, 1fr); }
+  .board-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 /* Section header used by sub-sections (Launchpad, etc.) */
