@@ -70,6 +70,17 @@ export function createFeeZecFor(walletId: string): number {
 }
 
 /**
+ * Brai, 2026-09-08: "deja 0.1 de first buy maximo" -- product-level ceiling
+ * on the optional bundled first buy at token creation (see PendingTokenCreation
+ * in schema.prisma and the /api/tokens route in server.ts). Separate from
+ * MAX_PAYOUT_ZEC (zcashReal.ts's per-payment safety cap): that one is a
+ * "defense in depth" backstop against a bug, this one is the actual product
+ * decision, so it gets its own clear error message rather than borrowing
+ * the safety cap's.
+ */
+export const MAX_FIRST_BUY_ZEC = Number(process.env.ZODD_MAX_FIRST_BUY_ZEC ?? 0.1);
+
+/**
  * Brai, 2026-09-07: "si el minimo a enviar no supera el fee no te deje
  * vender" -- then, clarifying: "yo no quiero perder, asi que el fee lo
  * tiene que pagar el vendedor... de ahi saco mi 1% y el otro 1% para el

@@ -4,7 +4,7 @@ import * as store from "./lib/store.js";
 import { generateTwelveWords } from "./lib/wordlist.js";
 import { quoteBuy, quoteSell, currentPrice, marketCapZec, isGraduated } from "./lib/bondingCurve.js";
 import { simulatedInscriptionFor } from "./lib/simulatedChain.js";
-import { splitFee, TRADE_FEE_BPS, CREATOR_FEE_BPS, TOKEN_CREATE_FEE_ZEC, createFeeZecFor, computeSellerPayout, NETWORK_FEE_ZEC } from "./lib/fees.js";
+import { splitFee, TRADE_FEE_BPS, CREATOR_FEE_BPS, TOKEN_CREATE_FEE_ZEC, createFeeZecFor, computeSellerPayout, NETWORK_FEE_ZEC, MAX_FIRST_BUY_ZEC } from "./lib/fees.js";
 import { startFeeDistributor, runFeeDistributionOnce } from "./lib/feeDistributor.js";
 import { startZecPricePolling, getZecUsdPrice } from "./lib/zecPrice.js";
 import { withTokenLock } from "./lib/mutex.js";
@@ -183,6 +183,15 @@ app.post("/api/tokens", async (req, reply) => {
   // fast with a clear message instead of letting generateOrderAddress throw
   // a confusing 502 below.
   const firstBuyZec = body.firstBuyZec ?? 0;
+  // Brai, 2026-09-08: "deja 0.1 de first buy maximo" -- the actual product
+  // ceiling on the buy portion itself, independent of the platform-wide
+  // per-payment safety cap checked right below.
+  if (firstBuyZec > MAX_FIRST_BUY_ZEC) {
+    return reply.code(400).send({
+      error: `first buy too large: max is ${MAX_FIRST_BUY_ZEC} ZEC`,
+      maxFirstBuyZec: MAX_FIRST_BUY_ZEC,
+    });
+  }
   const totalZec = createFeeZec + firstBuyZec;
   if (totalZec > MAX_PAYOUT_ZEC) {
     return reply.code(400).send({

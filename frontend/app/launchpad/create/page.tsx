@@ -328,6 +328,7 @@ export default function CreatePage() {
           <input
             type="number"
             min={0}
+            max={0.1}
             step="0.001"
             value={firstBuyZecInput}
             onChange={(e) => setFirstBuyZecInput(e.target.value)}

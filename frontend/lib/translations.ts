@@ -98,8 +98,8 @@ export const translations = {
   // optional creator buy into the same payment as the create fee.
   "create.firstBuyLabel": { en: "Your first buy (optional)", zh: "你的首次买入（可选）" },
   "create.firstBuyHelp": {
-    en: "Buy your own token the moment it launches, in the same payment as the create fee.",
-    zh: "在代币上线的同时买入，与创建费一起在同一笔付款中完成。",
+    en: "Buy your own token the moment it launches, in the same payment as the create fee. Max 0.1 ZEC.",
+    zh: "在代币上线的同时买入，与创建费一起在同一笔付款中完成。最多 0.1 ZEC。",
   },
   "create.breakdown.launchFee": { en: "Launch fee", zh: "创建费" },
   "create.breakdown.firstBuy": { en: "First buy", zh: "首次买入" },
