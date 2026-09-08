@@ -4,7 +4,7 @@ import * as store from "./lib/store.js";
 import { generateTwelveWords } from "./lib/wordlist.js";
 import { quoteBuy, quoteSell, currentPrice, marketCapZec, isGraduated } from "./lib/bondingCurve.js";
 import { simulatedInscriptionFor } from "./lib/simulatedChain.js";
-import { splitFee, TRADE_FEE_BPS, CREATOR_FEE_BPS, TOKEN_CREATE_FEE_ZEC, computeSellerPayout, NETWORK_FEE_ZEC } from "./lib/fees.js";
+import { splitFee, TRADE_FEE_BPS, CREATOR_FEE_BPS, TOKEN_CREATE_FEE_ZEC, createFeeZecFor, computeSellerPayout, NETWORK_FEE_ZEC } from "./lib/fees.js";
 import { startFeeDistributor, runFeeDistributionOnce } from "./lib/feeDistributor.js";
 import { startZecPricePolling, getZecUsdPrice } from "./lib/zecPrice.js";
 import { withTokenLock } from "./lib/mutex.js";
@@ -162,9 +162,13 @@ app.post("/api/tokens", async (req, reply) => {
   if (await store.isSymbolReserved(symbol)) {
     return reply.code(409).send({ error: "symbol is already reserved, waiting on someone else's payment" });
   }
-  if (!(await store.getWallet(body.creatorWalletId))) {
+  const creatorWallet = await store.getWallet(body.creatorWalletId);
+  if (!creatorWallet) {
     return reply.code(400).send({ error: "invalid creatorWalletId" });
   }
+  // Brai, 2026-09-08: discounted create fee for his own wallet only -- see
+  // createFeeZecFor in fees.ts. Everyone else keeps paying TOKEN_CREATE_FEE_ZEC.
+  const createFeeZec = createFeeZecFor(creatorWallet.id);
 
   const pending = await store.createPendingTokenCreation({
     symbol,
@@ -176,7 +180,7 @@ app.post("/api/tokens", async (req, reply) => {
     description: body.description,
     twitterUrl: normalizeTwitter(body.twitterUrl),
     websiteUrl: normalizeWebsite(body.websiteUrl),
-    expectedZecAmount: TOKEN_CREATE_FEE_ZEC,
+    expectedZecAmount: createFeeZec,
   });
 
   let zecAddress: string;
@@ -184,7 +188,7 @@ app.post("/api/tokens", async (req, reply) => {
   let saplingDiversifierHex: string | null = null;
   let orchardDiversifierHex: string | null = null;
   try {
-    const res = await generateOrderAddress(pending.id, TOKEN_CREATE_FEE_ZEC);
+    const res = await generateOrderAddress(pending.id, createFeeZec);
     zecAddress = res.address;
     zecAmount = res.expectedZecAmount;
     saplingDiversifierHex = (res as { saplingDiversifierHex?: string | null }).saplingDiversifierHex ?? null;

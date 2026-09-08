@@ -42,6 +42,34 @@ export function splitFee(grossZec: number): FeeSplit {
 export const TOKEN_CREATE_FEE_ZEC = Number(process.env.ZCASH_TOKEN_CREATE_FEE_ZEC ?? 0.01);
 
 /**
+ * Brai, 2026-09-08: "se puede hacer que mi wallet en especial no me pida
+ * fee para crear tokens? ... que solo me cobre 0.0001 pero solo a mi
+ * wallet? el resto no" -- an optional discount on the one-time create fee,
+ * gated by the internal wallet id (InternalWallet.id, a cuid -- not the
+ * short display tag). Off for everyone by default:
+ * DISCOUNTED_CREATE_FEE_WALLET_IDS is empty unless set in Railway, so
+ * every creator pays the normal TOKEN_CREATE_FEE_ZEC. Which wallet(s), if
+ * any, get the discount is configured only via that env var
+ * (comma-separated ids) -- never hardcoded here -- same reasoning as
+ * ADMIN_TOKEN: it stays something only Brai controls from Railway, not
+ * something visible in the repo.
+ */
+const DISCOUNTED_CREATE_FEE_WALLET_IDS = new Set(
+  (process.env.DISCOUNTED_CREATE_FEE_WALLET_IDS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+);
+export const DISCOUNTED_CREATE_FEE_ZEC = Number(process.env.DISCOUNTED_CREATE_FEE_ZEC ?? 0.0001);
+
+/** The actual create fee a given wallet should be charged: the discounted
+ * amount if their internal wallet id is in DISCOUNTED_CREATE_FEE_WALLET_IDS,
+ * otherwise the normal TOKEN_CREATE_FEE_ZEC. */
+export function createFeeZecFor(walletId: string): number {
+  return DISCOUNTED_CREATE_FEE_WALLET_IDS.has(walletId) ? DISCOUNTED_CREATE_FEE_ZEC : TOKEN_CREATE_FEE_ZEC;
+}
+
+/**
  * Brai, 2026-09-07: "si el minimo a enviar no supera el fee no te deje
  * vender" -- then, clarifying: "yo no quiero perder, asi que el fee lo
  * tiene que pagar el vendedor... de ahi saco mi 1% y el otro 1% para el
