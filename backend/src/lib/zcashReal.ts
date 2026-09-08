@@ -498,6 +498,10 @@ export async function rawAddressesDebug(): Promise<unknown> {
   return call(`/wallet/addresses-raw-debug`);
 }
 
+export async function rawBinaryInfoDebug(): Promise<unknown> {
+  return call(`/wallet/binary-info-debug`);
+}
+
 export async function rawValueToAddressDebug(address: string): Promise<unknown> {
   return call(`/wallet/value-to-address-raw-debug?address=${encodeURIComponent(address)}`);
 }
