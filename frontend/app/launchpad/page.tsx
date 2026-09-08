@@ -4,6 +4,7 @@ import Link from "next/link";
 import { api, TokenSummary, formatUsd } from "@/lib/api";
 import { useLanguage } from "@/lib/i18n";
 import { useZecUsdPrice } from "@/lib/zecPrice";
+import { isOfficialToken, OfficialCheckmark } from "../OfficialBadge";
 
 function fmt(n: number, digits = 4) {
   if (n === 0) return "0";
@@ -221,7 +222,10 @@ export default function MarketPage() {
                         <div style={{ width: 28, height: 28, borderRadius: 6, background: "var(--border)", flexShrink: 0 }} />
                       )}
                       <div>
-                        <strong>{t2.symbol}</strong>
+                        <strong style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                          {t2.symbol}
+                          {isOfficialToken(t2.symbol) && <OfficialCheckmark />}
+                        </strong>
                         <div className="muted">{t2.name}</div>
                         <TokenLinks twitterUrl={t2.twitterUrl} websiteUrl={t2.websiteUrl} />
                       </div>

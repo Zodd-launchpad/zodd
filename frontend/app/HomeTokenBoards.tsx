@@ -4,6 +4,7 @@ import Link from "next/link";
 import { api, TokenSummary, formatUsd } from "@/lib/api";
 import { useLanguage } from "@/lib/i18n";
 import { useZecUsdPrice } from "@/lib/zecPrice";
+import { isOfficialToken, OfficialCheckmark } from "./OfficialBadge";
 
 const BOARD_SIZE = 10;
 
@@ -56,7 +57,10 @@ function TokenCard({
       ) : (
         <div className="board-card-fallback" />
       )}
-      <div className="sym">{token.symbol}</div>
+      <div className="sym" style={{ display: "flex", alignItems: "center", gap: 4 }}>
+        {token.symbol}
+        {isOfficialToken(token.symbol) && <OfficialCheckmark />}
+      </div>
       <div className="name">{token.name}</div>
       <div className="mc">
         {fmtMcap(token.marketCapZec)} ZEC{mcUsd && <span className="muted"> · {mcUsd}</span>}

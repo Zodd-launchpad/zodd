@@ -10,6 +10,7 @@ import SellModal from "./SellModal";
 import Chart from "./Chart";
 import TradesList from "./TradesList";
 import Hourglass from "./Hourglass";
+import { isOfficialToken, OfficialCheckmark, OfficialPill } from "@/app/OfficialBadge";
 
 // Same subscript-leading-zeros trick as fmtPrice in the Launchpad list page
 // (see its comment there): a tiny ZEC amount like a 1% creator fee on a
@@ -89,7 +90,15 @@ export default function TokenPage() {
             <img src={token.logoDataUrl} alt="" width={48} height={48} style={{ borderRadius: 10, objectFit: "cover" }} />
           )}
           <div>
-            <h1 style={{ marginBottom: 0 }}>{token.symbol}</h1>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <h1 style={{ marginBottom: 0 }}>{token.symbol}</h1>
+              {isOfficialToken(token.symbol) && (
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  <OfficialCheckmark size={18} />
+                  <OfficialPill />
+                </span>
+              )}
+            </div>
             <p className="muted" style={{ margin: 0 }}>{token.name}</p>
           </div>
         </div>
