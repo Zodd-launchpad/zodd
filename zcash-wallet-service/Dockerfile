@@ -24,27 +24,39 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /build
 
-# Pin an exact tagged release so a rebuild never silently pulls in
-# untested upstream changes to the code that moves real money.
+# Pin an exact commit so a rebuild never silently pulls in untested
+# upstream changes to the code that moves real money.
 #
-# TEMPORARY DEVIATION (2026-09-06): zingolib_v5.0.0 (June 10 2026) predates
-# the NU6.3 "Ironwood" mainnet upgrade (activated ~July 28 2026, block
-# 3,428,143 -- see ZIP-258). Our real chain is now past that height, so
-# zingo-cli built from v5.0.0 cannot parse the newer version-6 transactions
-# it encounters while syncing and errors out with "server returned invalid
-# transaction. Unknown transaction format" -- this is why the wallet's
-# balance/height never reflected the real funded state even after the
-# --waitsync fix. zingolib has not cut a new tagged release since v5.0.0
-# (confirmed by checking github.com/zingolabs/zingolib/releases), but the
-# zingo-mobile app *does* ship Ironwood/NU6.3 support, so that work exists
-# upstream on the dev branch even though it hasn't been tagged yet.
-# Building from `dev` is a deliberate, temporary exception to the
-# pin-an-exact-tag rule above -- swap this back to a specific commit SHA
-# (read it from the Railway build log once this succeeds) as soon as
-# zingolib cuts a real tagged release with Ironwood support, so future
-# rebuilds go back to being fully reproducible.
-ARG ZINGOLIB_REF=dev
-RUN git clone --depth 1 --branch ${ZINGOLIB_REF} https://github.com/zingolabs/zingolib.git .
+# HISTORY: zingolib_v5.0.0 (June 10 2026) predates the NU6.3 "Ironwood"
+# mainnet upgrade (activated ~July 28 2026, block 3,428,143 -- see
+# ZIP-258); zingo-cli built from that tag can't parse the newer version-6
+# transactions our real chain now produces. zingolib has not cut a new
+# tagged release since v5.0.0 (confirmed by checking
+# github.com/zingolabs/zingolib/releases), but Ironwood/NU6.3 support
+# exists on the dev branch. This used to float ZINGOLIB_REF=dev directly
+# to pick that up -- fully reproducible builds require pinning a specific
+# commit instead of a moving branch name, so as of 2026-09-08 this is
+# pinned to the exact dev commit the diversifier patch below (see
+# zingolib-patches/) was built and tested against. Update deliberately:
+# clone at the new commit, `git apply --check` the patch, re-run its
+# validation (see zingolib-patches/README.md), THEN move this pin forward.
+ARG ZINGOLIB_REF=81dc431c512df5e627ad7a11e3f8398930da2142
+# No --depth here (unlike the old floating-branch clone): a shallow clone
+# can't check out an arbitrary older commit once the branch tip moves past
+# it, and GitHub doesn't reliably allow fetching an arbitrary SHA directly.
+RUN git clone https://github.com/zingolabs/zingolib.git . && git checkout ${ZINGOLIB_REF}
+
+# ZODD (2026-09-08): zingo-cli has never exposed which of a wallet's many
+# diversified addresses a given incoming note landed on, only account/scope
+# -- so real payment matching (backend/src/lib/zcashReal.ts) has had to
+# fall back to a decrypted memo / matching by amount instead of the address
+# itself, even though the address IS the order. This patch surfaces that
+# diversifier (ZIP 32 `d`), which is already present in the note's own
+# decrypted plaintext by protocol construction -- no wallet.dat format
+# change, no new dependency. Full explanation, validation results, and how
+# to move ZINGOLIB_REF forward safely: zingolib-patches/README.md.
+COPY zingolib-patches/0001-per-address-payment-diversifier.patch /tmp/
+RUN git apply /tmp/0001-per-address-payment-diversifier.patch
 
 # As of this dev snapshot, zingo-cli's default build makes the Nym mixnet
 # transport mandatory for any online session (ADR 0024/0026) -- without a

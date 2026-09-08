@@ -45,6 +45,17 @@ export interface PendingPayment {
   orderId: string;
   address: string;
   expectedZecAmount: number;
+  // ZODD (2026-09-08): this address's own diversifier, one per shielded
+  // pool it advertises -- from a patched zingo-cli (see
+  // zcash-wallet-service/zingolib-patches/), returned in the very same
+  // call that minted `address`. Null/undefined for an order whose address
+  // was generated before this existed, or against an unpatched build --
+  // those fall back to the memo/amount passes in the poll loop below,
+  // unchanged. This is the real fix Brai asked for: it identifies the
+  // note's true recipient address directly, so it needs no memo and
+  // doesn't care whether the amount is unique among currently-open orders.
+  saplingDiversifierHex?: string | null;
+  orchardDiversifierHex?: string | null;
   createdAt: number;
   /** True wall-clock creation time, never reset by a resume. See
    * HARD_MAX_LIFETIME_MS below -- this is what stops an abandoned order
@@ -185,6 +196,46 @@ function startPolling() {
       const available = (notes ?? []).filter(
         (n: any) => typeof n.status === "string" && n.status.toLowerCase().includes("confirmed") && !consumedTxids.has(n.txid)
       );
+
+      // Pass 0, diversifier match -- ZODD (2026-09-08), the real fix Brai
+      // asked for ("TIENE QUE SER SI O SI UN SISTEMA QUE NO SE PUEDAN
+      // CRUZAR NUNCA" / "la direccion ES la orden"). Requires a patched
+      // zingo-cli (see zcash-wallet-service/zingolib-patches/): each
+      // order's address carries its own diversifier bytes, and every
+      // incoming note reports the diversifier of whichever address
+      // actually received it -- both facts encoded directly in the Zcash
+      // protocol's own note plaintext, nothing zingo-cli has to infer or
+      // guess. A note whose diversifier equals a watcher's own diversifier
+      // (matched per shielded pool -- a sapling diversifier is only ever
+      // compared against saplingDiversifierHex, same for orchard) belongs
+      // to that order and ONLY that order, unconditionally: no memo
+      // required, and the amount is irrelevant -- underpay, overpay, or a
+      // repeat send are all just credited for whatever the note is
+      // actually worth, exactly like the memo pass below already does.
+      // Runs first so a diversifier-matched note is never instead consumed
+      // by the memo or amount passes.
+      for (const pending of [...watchers.values()]) {
+        if (!pending.saplingDiversifierHex && !pending.orchardDiversifierHex) continue; // no patched-CLI data for this order, fall through to older passes
+        const idx = available.findIndex(
+          (n: any) =>
+            typeof n.diversifier === "string" &&
+            ((n.pool === "sapling" && n.diversifier === pending.saplingDiversifierHex) ||
+              ((n.pool === "orchard" || n.pool === "ironwood") && n.diversifier === pending.orchardDiversifierHex))
+        );
+        if (idx === -1) continue;
+        const note = available[idx];
+        available.splice(idx, 1);
+        consumedTxids.add(note.txid);
+        const paidZec = Number(note.valueZatoshis) / ZATOSHIS_PER_ZEC;
+        const isRepeat = pending.firstMatchedAt != null;
+        if (isRepeat) {
+          console.log(`[zcashReal] order ${pending.orderId} matched AGAIN by address diversifier (${note.pool}): note worth ${paidZec} ZEC (txid ${note.txid}) -- crediting as an additional buy`);
+        } else {
+          pending.firstMatchedAt = Date.now();
+          console.log(`[zcashReal] order ${pending.orderId} matched by address diversifier (${note.pool}): note worth ${paidZec} ZEC (txid ${note.txid})`);
+        }
+        onPayment?.(pending.orderId, paidZec, note.txid, { isRepeat });
+      }
 
       // Pass 1, memo match: collision-proof, see the big comment on
       // buildPaymentMemo below. Every watcher's orderId is a unique cuid, so
@@ -350,8 +401,17 @@ function pickAndReserveAmount(orderId: string, expectedZecAmount: number): numbe
  * service. Returns the address AND the actual expectedZecAmount to charge
  * -- may be a hair above what was requested, see pickAndReserveAmount --
  * which the caller must persist and show to the payer instead of the
- * original request. */
-export async function generateOrderAddress(orderId: string, expectedZecAmount: number): Promise<{ address: string; expectedZecAmount: number }> {
+ * original request. Also returns the address's own diversifier (per
+ * shielded pool, from a patched zingo-cli -- see the ZODD comment on
+ * PendingPayment above) so the caller can persist it on the order; that's
+ * what lets the poll loop's Pass 0 match this order's payment with zero
+ * memo and zero amount-uniqueness requirement. Null on both fields against
+ * an unpatched zingo-cli -- the order still works, just via the older
+ * memo/amount passes. */
+export async function generateOrderAddress(
+  orderId: string,
+  expectedZecAmount: number
+): Promise<{ address: string; expectedZecAmount: number; saplingDiversifierHex: string | null; orchardDiversifierHex: string | null }> {
   if (expectedZecAmount > MAX_ZEC_PER_ORDER) {
     throw new Error(
       `order of ${expectedZecAmount} ZEC exceeds the current safety cap of ${MAX_ZEC_PER_ORDER} ZEC per order`
@@ -361,15 +421,22 @@ export async function generateOrderAddress(orderId: string, expectedZecAmount: n
   // comment on pickAndReserveAmount for why that ordering matters.
   const uniqueAmount = pickAndReserveAmount(orderId, expectedZecAmount);
   let address: string;
+  let saplingDiversifierHex: string | null = null;
+  let orchardDiversifierHex: string | null = null;
   try {
-    ({ address } = await call("/wallet/address", { method: "POST" }));
+    ({ address, saplingDiversifierHex = null, orchardDiversifierHex = null } = await call("/wallet/address", { method: "POST" }));
   } catch (err) {
     watchers.delete(orderId); // don't leave a dangling reservation with no address
     throw err;
   }
   const pending = watchers.get(orderId);
-  if (pending) pending.address = address; // fill in the address on the already-reserved watcher
-  return { address, expectedZecAmount: uniqueAmount };
+  if (pending) {
+    // fill in the address (and its diversifier) on the already-reserved watcher
+    pending.address = address;
+    pending.saplingDiversifierHex = saplingDiversifierHex;
+    pending.orchardDiversifierHex = orchardDiversifierHex;
+  }
+  return { address, expectedZecAmount: uniqueAmount, saplingDiversifierHex, orchardDiversifierHex };
 }
 
 // Found 2026-09-07: a payer who sends the same order's exact amount more
@@ -461,14 +528,29 @@ export async function rawValueToAddressHelpDebug(): Promise<unknown> {
  * inheriting a clock that may already be expired. `createdAtMs` is kept in
  * the signature (still useful to callers/logs) but no longer used for the
  * expiry clock. */
-export function resumeWatching(orderId: string, address: string, expectedZecAmount: number, createdAtMs: number) {
+export function resumeWatching(
+  orderId: string,
+  address: string,
+  expectedZecAmount: number,
+  createdAtMs: number,
+  saplingDiversifierHex?: string | null,
+  orchardDiversifierHex?: string | null
+) {
   if (watchers.has(orderId)) return; // already registered this process lifetime
   const ageMs = Date.now() - createdAtMs;
   if (ageMs > HARD_MAX_LIFETIME_MS) {
     console.warn(`[zcashReal] NOT resuming ${orderId} -- originally created ${Math.round(ageMs / 60_000)}min ago, past the ${HARD_MAX_LIFETIME_MS / 60_000}min hard cap (address ${address})`);
     return;
   }
-  watchers.set(orderId, { orderId, address, expectedZecAmount, createdAt: Date.now(), originalCreatedAt: createdAtMs });
+  watchers.set(orderId, {
+    orderId,
+    address,
+    expectedZecAmount,
+    createdAt: Date.now(),
+    originalCreatedAt: createdAtMs,
+    saplingDiversifierHex: saplingDiversifierHex ?? null,
+    orchardDiversifierHex: orchardDiversifierHex ?? null,
+  });
   console.log(`[zcashReal] resumed watching ${orderId} (originally created ${Math.round(ageMs / 60_000)}min ago) with a fresh ${ORDER_EXPIRY_MS / 60_000}min window`);
   startPolling();
 }

@@ -186,10 +186,14 @@ app.post("/api/tokens", async (req, reply) => {
 
   let zecAddress: string;
   let zecAmount: number;
+  let saplingDiversifierHex: string | null = null;
+  let orchardDiversifierHex: string | null = null;
   try {
     const res = await generateOrderAddress(pending.id, TOKEN_CREATE_FEE_ZEC);
     zecAddress = res.address;
     zecAmount = res.expectedZecAmount;
+    saplingDiversifierHex = (res as { saplingDiversifierHex?: string | null }).saplingDiversifierHex ?? null;
+    orchardDiversifierHex = (res as { orchardDiversifierHex?: string | null }).orchardDiversifierHex ?? null;
   } catch (err) {
     app.log.error(err, `couldn't generate a create-fee address for pending token creation ${pending.id}`);
     await store.failPendingTokenCreation(pending.id).catch(() => {});
@@ -197,8 +201,10 @@ app.post("/api/tokens", async (req, reply) => {
   }
   // zecAmount may be a hair above TOKEN_CREATE_FEE_ZEC -- see
   // pickUniqueAmount in zcashReal.ts -- so persist and return the real
-  // adjusted amount, not the base fee.
-  await store.setPendingTokenCreationAddress(pending.id, zecAddress, zecAmount);
+  // adjusted amount, not the base fee. Also persists zecAddress's own
+  // diversifier (see the ZODD comment on PendingPayment in zcashReal.ts) so
+  // a restart can still resume-watch this by address, not just memo/amount.
+  await store.setPendingTokenCreationAddress(pending.id, zecAddress, zecAmount, saplingDiversifierHex, orchardDiversifierHex);
 
   return reply.send({
     creationId: pending.id,
@@ -335,10 +341,14 @@ app.post("/api/orders/buy", async (req, reply) => {
   // the price of the block it confirms in (see zcashMock.ts / zcashReal.ts).
   let zecAddress: string;
   let zecAmount: number;
+  let saplingDiversifierHex: string | null = null;
+  let orchardDiversifierHex: string | null = null;
   try {
     const res = await generateOrderAddress(order.id, body.zecAmount);
     zecAddress = res.address;
     zecAmount = res.expectedZecAmount;
+    saplingDiversifierHex = (res as { saplingDiversifierHex?: string | null }).saplingDiversifierHex ?? null;
+    orchardDiversifierHex = (res as { orchardDiversifierHex?: string | null }).orchardDiversifierHex ?? null;
   } catch (err) {
     app.log.error(err, `couldn't generate an order address for ${order.id}`);
     await store.failOrder(order.id).catch(() => {});
@@ -346,8 +356,9 @@ app.post("/api/orders/buy", async (req, reply) => {
   }
   // zecAmount may be a hair above what was requested -- see
   // pickUniqueAmount in zcashReal.ts -- so persist and return the real
-  // amount the payer must actually send.
-  await store.setOrderAddress(order.id, zecAddress, zecAmount);
+  // amount the payer must actually send. Also persists zecAddress's own
+  // diversifier -- see the ZODD comment on PendingPayment in zcashReal.ts.
+  await store.setOrderAddress(order.id, zecAddress, zecAmount, saplingDiversifierHex, orchardDiversifierHex);
 
   return reply.send({
     orderId: order.id,
@@ -484,10 +495,12 @@ onPaymentDetected(async (orderId: string, confirmedZecAmount: number, txid: stri
       store.getPendingTokenCreationsAwaitingPayment(),
     ]);
     for (const o of orders) {
-      if (o.zecAddress && o.zecAmount) resumable(o.id, o.zecAddress, o.zecAmount, new Date(o.createdAt).getTime());
+      if (o.zecAddress && o.zecAmount)
+        resumable(o.id, o.zecAddress, o.zecAmount, new Date(o.createdAt).getTime(), o.zecSaplingDiversifierHex, o.zecOrchardDiversifierHex);
     }
     for (const c of creations) {
-      if (c.zecAddress) resumable(c.id, c.zecAddress, c.expectedZecAmount, new Date(c.createdAt).getTime());
+      if (c.zecAddress)
+        resumable(c.id, c.zecAddress, c.expectedZecAmount, new Date(c.createdAt).getTime(), c.zecSaplingDiversifierHex, c.zecOrchardDiversifierHex);
     }
     if (orders.length || creations.length) {
       app.log.info(`resumed watching ${orders.length} pending order(s) and ${creations.length} pending token-creation(s) from before this restart`);

@@ -31,8 +31,8 @@ app.get("/health", async (_req, reply) => {
 app.post("/wallet/address", async (_req, reply) => {
   if (!ready) return reply.code(503).send({ error: "wallet not ready yet", detail: readyError });
   try {
-    const address = await cli.newAddress();
-    return reply.send({ address });
+    const { address, saplingDiversifierHex, orchardDiversifierHex } = await cli.newAddress();
+    return reply.send({ address, saplingDiversifierHex, orchardDiversifierHex });
   } catch (err) {
     app.log.error(err);
     return reply.code(500).send({ error: String(err.message ?? err) });

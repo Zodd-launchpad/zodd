@@ -171,6 +171,19 @@ model PendingTokenCreation {
   twitterUrl           String?
   websiteUrl           String?
   zecAddress           String?
+  // ZODD (2026-09-08): the diversifier (ZIP 32 `d`) of zecAddress itself,
+  // one per shielded pool it advertises. This is the real per-order match
+  // key -- a patched zingo-cli now returns it in the same call that mints
+  // zecAddress, and reports it back on every incoming note, so a payment
+  // can be attributed to this exact address with zero memo and zero
+  // amount-uniqueness requirement (see zcash-wallet-service's
+  // zingolib-patches/ and the long comment on the poll loop in
+  // backend/src/lib/zcashReal.ts). Nullable: an in-flight order created
+  // before this column existed, or created against an unpatched
+  // zingo-cli, simply has none -- the poll loop falls back to the older
+  // memo/amount matching passes for those, unchanged.
+  zecSaplingDiversifierHex String?
+  zecOrchardDiversifierHex String?
   expectedZecAmount    Decimal             @db.Decimal(20, 8)
   status               TokenCreationStatus @default(PENDING)
   resultTokenId        String?
@@ -203,6 +216,10 @@ model Order {
   status            OrderStatus @default(PENDING)
 
   zecAddress        String?     // dirección diversificada generada para esta orden (BUY)
+  // Diversifier (ZIP 32 `d`) de zecAddress, uno por pool shielded -- ver el
+  // comentario largo en el mismo campo de PendingTokenCreation más arriba.
+  zecSaplingDiversifierHex String?
+  zecOrchardDiversifierHex String?
   refundAddress     String?     // dirección del usuario para el payout (SELL, o refund de sobrepago)
   zecAmount         Decimal?    @db.Decimal(20, 8) // monto pagado/pagado-de-vuelta, confirmado on-chain
   tokenAmount       BigInt?     // tokens acreditados/debitados, calculado a precio de ejecución

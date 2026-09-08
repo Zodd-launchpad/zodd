@@ -1,0 +1,658 @@
+diff --git a/pepper-sync/src/wallet.rs b/pepper-sync/src/wallet.rs
+index 6949e6d..a639559 100644
+--- a/pepper-sync/src/wallet.rs
++++ b/pepper-sync/src/wallet.rs
+@@ -1015,6 +1015,17 @@ pub trait NoteInterface: OutputInterface {
+     /// scanned, meaning the nullifiers were discarded due to memory constraints and will be re-fetched later in the
+     /// sync process.
+     fn refetch_nullifier_ranges(&self) -> &[Range<BlockHeight>];
++
++    /// Raw diversifier bytes (ZIP 32 `d`) of the address that received this note.
++    ///
++    /// This is the protocol-level recipient encoded directly in the note plaintext
++    /// itself (see `note()`'s docs) -- independent of `key_id()`, which only tracks
++    /// account/scope and not which of the account's diversified addresses a given
++    /// note landed on. Exposed so a caller with several diversified addresses under
++    /// one account (e.g. one per customer order) can tell which specific address
++    /// received a given deposit, by comparing against the same bytes exposed for
++    /// each address (see `LightWallet::unified_addresses_json`).
++    fn diversifier_bytes(&self) -> [u8; 11];
+ }
+ 
+ ///  Transparent coin (output) with metadata relevant to the wallet.
+@@ -1294,6 +1305,10 @@ impl NoteInterface for SaplingNote {
+     fn refetch_nullifier_ranges(&self) -> &[Range<BlockHeight>] {
+         &self.refetch_nullifier_ranges
+     }
++
++    fn diversifier_bytes(&self) -> [u8; 11] {
++        self.note.recipient().diversifier().0
++    }
+ }
+ 
+ /// Orchard note.
+@@ -1363,6 +1378,10 @@ impl NoteInterface for OrchardNote {
+     fn refetch_nullifier_ranges(&self) -> &[Range<BlockHeight>] {
+         &self.refetch_nullifier_ranges
+     }
++
++    fn diversifier_bytes(&self) -> [u8; 11] {
++        *self.note.recipient().diversifier().as_array()
++    }
+ }
+ 
+ /// Ironwood note. Shares Orchard's note and nullifier types (version V3) but
+@@ -1433,6 +1452,10 @@ impl NoteInterface for IronwoodNote {
+     fn refetch_nullifier_ranges(&self) -> &[Range<BlockHeight>] {
+         &self.refetch_nullifier_ranges
+     }
++
++    fn diversifier_bytes(&self) -> [u8; 11] {
++        *self.note.recipient().diversifier().as_array()
++    }
+ }
+ 
+ /// Provides a common API for all outgoing note types.
+diff --git a/zingo-cli/src/commands.rs b/zingo-cli/src/commands.rs
+index c5a4938..30f4208 100644
+--- a/zingo-cli/src/commands.rs
++++ b/zingo-cli/src/commands.rs
+@@ -470,6 +470,16 @@ async fn new_address(
+             "has_sapling" => unified_address.has_sapling(),
+             "has_transparent" => unified_address.has_transparent(),
+             "encoded_address" => unified_address.encode(&chain_type),
++            // ZODD (2026-09-08): returned inline so a caller creating a
++            // fresh per-order address gets its own diversifier back in the
++            // SAME call, with no follow-up `addresses` lookup (and no
++            // dependency on that command's array-position-vs-address_index
++            // mismatch). Matches the fields `addresses` reports via
++            // `unified_addresses_json` -- see the doc comment there for why
++            // this identifies the note's true recipient with zero memo and
++            // zero amount-uniqueness requirement.
++            "sapling_diversifier_hex" => unified_address.sapling().map(|a| hex::encode(a.diversifier().0)),
++            "orchard_diversifier_hex" => unified_address.orchard().map(|a| hex::encode(a.diversifier().as_array())),
+         }
+         .pretty(JSON_INDENT)),
+         Err(e) => Err(not_yet_typed(e)),
+diff --git a/zingo-cli/src/commands/tests.rs b/zingo-cli/src/commands/tests.rs
+index 741d8d1..0d23cc2 100644
+--- a/zingo-cli/src/commands/tests.rs
++++ b/zingo-cli/src/commands/tests.rs
+@@ -1168,6 +1168,77 @@ mod offline_contract {
+         fn new_address() {
+             let output = assert_works_offline(&mut offline_client(), "new_address", &["oz"]);
+             assert!(output.contains("encoded_address"), "{output}");
++            // ZODD (2026-09-08): `new_address` is the exact call ZODD's
++            // backend makes to mint each order's one-time address, and it
++            // needs the new address's own diversifier back in that SAME
++            // response -- see the long comment on this JSON object in
++            // commands.rs. Both pools were requested ("oz"), so both must
++            // be present and non-null.
++            let parsed = json::parse(&output).expect("new_address returns JSON");
++            assert!(
++                parsed["sapling_diversifier_hex"].as_str().is_some(),
++                "{output}"
++            );
++            assert!(
++                parsed["orchard_diversifier_hex"].as_str().is_some(),
++                "{output}"
++            );
++        }
++
++        /// Two calls to `new_address` must mint two addresses with two
++        /// different diversifiers, and each one must match what `addresses`
++        /// separately reports for the same address_index -- the two code
++        /// paths (the inline JSON in `new_address` vs. `unified_addresses_json`
++        /// behind `addresses`) must never disagree.
++        #[test]
++        fn new_address_diversifier_matches_addresses_listing_and_differs_per_call() {
++            let mut client = offline_client();
++
++            let first = json::parse(&assert_works_offline(&mut client, "new_address", &["oz"]))
++                .expect("new_address returns JSON");
++            let second = json::parse(&assert_works_offline(&mut client, "new_address", &["oz"]))
++                .expect("new_address returns JSON");
++
++            let first_sapling = first["sapling_diversifier_hex"]
++                .as_str()
++                .expect("first sapling diversifier present")
++                .to_string();
++            let second_sapling = second["sapling_diversifier_hex"]
++                .as_str()
++                .expect("second sapling diversifier present")
++                .to_string();
++            assert_ne!(
++                first_sapling, second_sapling,
++                "two freshly minted order addresses must never share a diversifier"
++            );
++
++            let listing = json::parse(&assert_works_offline(&mut client, "addresses", &[]))
++                .expect("addresses returns JSON");
++            let by_index = |index: u32| -> String {
++                listing
++                    .members()
++                    .find(|entry| entry["address_index"].as_u32() == Some(index))
++                    .unwrap_or_else(|| panic!("no addresses entry for address_index {index}"))["sapling_diversifier_hex"]
++                    .as_str()
++                    .expect("sapling diversifier present in addresses listing")
++                    .to_string()
++            };
++            let first_index = first["address_index"]
++                .as_u32()
++                .expect("first address_index is a number");
++            let second_index = second["address_index"]
++                .as_u32()
++                .expect("second address_index is a number");
++            assert_eq!(
++                by_index(first_index),
++                first_sapling,
++                "`addresses` must report the same diversifier `new_address` already returned"
++            );
++            assert_eq!(
++                by_index(second_index),
++                second_sapling,
++                "`addresses` must report the same diversifier `new_address` already returned"
++            );
+         }
+ 
+         /// Funded, because the address-gap rule (a new transparent address
+diff --git a/zingolib/src/wallet.rs b/zingolib/src/wallet.rs
+index 9b55542..2cf7453 100644
+--- a/zingolib/src/wallet.rs
++++ b/zingolib/src/wallet.rs
+@@ -310,6 +310,14 @@ impl LightWallet {
+                         "has_sapling" => unified_address.has_sapling(),
+                         "has_transparent" => unified_address.has_transparent(),
+                         "encoded_address" => unified_address.encode(&self.chain_type),
++                        // Raw ZIP 32 diversifier (`d`) of each pool's receiver, hex-encoded --
++                        // matches NoteSummary::diversifier_hex (see wallet/summary.rs) so a
++                        // caller can tell exactly which of the wallet's diversified addresses
++                        // received a given incoming note, without any memo or exact-amount
++                        // matching. `None` (Sapling/Orchard absent from this UA) encodes as
++                        // JSON null.
++                        "sapling_diversifier_hex" => unified_address.sapling().map(|a| hex::encode(a.diversifier().0)),
++                        "orchard_diversifier_hex" => unified_address.orchard().map(|a| hex::encode(a.diversifier().as_array())),
+                     }
+                 })
+                 .collect::<Vec<_>>(),
+diff --git a/zingolib/src/wallet/summary.rs b/zingolib/src/wallet/summary.rs
+index bd431b3..5225bf7 100644
+--- a/zingolib/src/wallet/summary.rs
++++ b/zingolib/src/wallet/summary.rs
+@@ -321,6 +321,7 @@ impl LightWallet {
+                     output_index: note.output_id().output_index(),
+                     account_id: note.key_id().account_id,
+                     scope: note.key_id().scope.into(),
++                    diversifier_hex: hex::encode(note.diversifier_bytes()),
+                 }
+             })
+             .collect();
+@@ -725,6 +726,424 @@ mod tests {
+             );
+         }
+     }
++
++    /// ZODD validation (2026-09-07): proves the fix for per-order shielded
++    /// payment attribution. zingo-cli's `notes` command has never exposed
++    /// which of a wallet's many diversified addresses received a given
++    /// note -- only account/scope (see the long comment history in
++    /// zcash-wallet-service/src/cli.js in the zodd repo). But
++    /// `NoteInterface::note()` returns "Decrypted note with recipient and
++    /// value" -- the diversifier is embedded in the note plaintext itself
++    /// by protocol construction (ZIP 32 / Sapling & Orchard note format),
++    /// independent of anything zingolib's KeyId bookkeeping tracks.
++    ///
++    /// This test builds two REAL sapling_crypto::Note and orchard::Note
++    /// objects (via the same mocks the rest of this file's tests use),
++    /// each addressed to a different diversified receiver generated from
++    /// the same wallet/account, inserts them as confirmed incoming notes,
++    /// and asserts that `note_summaries` (which now calls the new
++    /// `NoteInterface::diversifier_bytes` added alongside it) tells them
++    /// apart correctly -- not just "different", but each matching its own
++    /// true recipient and nobody else's. That per-address match is exactly
++    /// what a payment backend needs to treat "this address" as "this
++    /// order", with zero memo and zero amount-uniqueness requirement.
++    #[test]
++    fn note_diversifier_identifies_which_address_received_it() {
++        use pepper_sync::wallet::SaplingNote;
++
++        use crate::mocks::SaplingCryptoNoteBuilder;
++        use crate::wallet::keys::unified::ReceiverSelection;
++
++        let mut wallet = regtest_wallet(seeds::HOSPITAL_MUSEUM_SEED);
++
++        // Two distinct orders would each get their own freshly generated
++        // address in production (see generateOrderAddress in zcashReal.ts).
++        let (_, order_a_ua) = wallet
++            .generate_unified_address(ReceiverSelection::sapling_only(), zip32::AccountId::ZERO)
++            .unwrap();
++        let order_a_address = *order_a_ua.sapling().unwrap();
++
++        let (_, order_b_ua) = wallet
++            .generate_unified_address(ReceiverSelection::sapling_only(), zip32::AccountId::ZERO)
++            .unwrap();
++        let order_b_address = *order_b_ua.sapling().unwrap();
++
++        assert_ne!(
++            order_a_address.diversifier().0,
++            order_b_address.diversifier().0,
++            "test setup bug: the two generated addresses must actually differ"
++        );
++
++        let mut note_for_a = SaplingCryptoNoteBuilder::default();
++        note_for_a.recipient(order_a_address);
++        note_for_a.value(sapling_crypto::value::NoteValue::from_raw(150_000));
++        let txid_a = TxId::from_bytes([0xA; 32]);
++        let wallet_note_for_a = SaplingNote::new_for_test(
++            OutputId::new(txid_a, 0),
++            zip32::AccountId::ZERO,
++            zip32::Scope::External,
++            note_for_a.build(),
++            Memo::Empty,
++            Some(incrementalmerkletree::Position::from(0)),
++        );
++        wallet.wallet_transactions.insert(
++            txid_a,
++            WalletTransaction::new_for_test(txid_a, ConfirmationStatus::Confirmed(10.into()))
++                .with_sapling_notes_for_test(vec![wallet_note_for_a]),
++        );
++
++        let mut note_for_b = SaplingCryptoNoteBuilder::default();
++        note_for_b.recipient(order_b_address);
++        note_for_b.value(sapling_crypto::value::NoteValue::from_raw(150_000)); // same amount on purpose: proves this doesn't rely on amount uniqueness
++        let txid_b = TxId::from_bytes([0xB; 32]);
++        let wallet_note_for_b = SaplingNote::new_for_test(
++            OutputId::new(txid_b, 0),
++            zip32::AccountId::ZERO,
++            zip32::Scope::External,
++            note_for_b.build(),
++            Memo::Empty,
++            Some(incrementalmerkletree::Position::from(1)),
++        );
++        wallet.wallet_transactions.insert(
++            txid_b,
++            WalletTransaction::new_for_test(txid_b, ConfirmationStatus::Confirmed(10.into()))
++                .with_sapling_notes_for_test(vec![wallet_note_for_b]),
++        );
++
++        let expected_hex_a = hex::encode(order_a_address.diversifier().0);
++        let expected_hex_b = hex::encode(order_b_address.diversifier().0);
++
++        let summaries = wallet.note_summaries::<SaplingNote>(true);
++        let summary_for_txid = |txid: TxId| {
++            summaries
++                .iter()
++                .find(|s| s.txid == txid)
++                .unwrap_or_else(|| panic!("no note summary for {txid}"))
++        };
++
++        let found_a = summary_for_txid(txid_a);
++        let found_b = summary_for_txid(txid_b);
++
++        assert_eq!(
++            found_a.diversifier_hex, expected_hex_a,
++            "note paid to order A's address must report order A's own diversifier"
++        );
++        assert_eq!(
++            found_b.diversifier_hex, expected_hex_b,
++            "note paid to order B's address must report order B's own diversifier"
++        );
++        assert_ne!(
++            found_a.diversifier_hex, found_b.diversifier_hex,
++            "two notes paid to two different orders' addresses must never look identical"
++        );
++        // The failure mode this whole fix replaces: silently attributing
++        // B's payment to A (or vice versa) because only amount/memo were
++        // compared. Confirm explicitly that swapping is not what happened.
++        assert_ne!(found_a.diversifier_hex, expected_hex_b);
++        assert_ne!(found_b.diversifier_hex, expected_hex_a);
++    }
++
++    /// Orchard counterpart of
++    /// [`note_diversifier_identifies_which_address_received_it`]. Same
++    /// proof, other shielded pool: ZODD generates orchard-capable unified
++    /// addresses too, so the fix must hold there as well, not just for
++    /// sapling.
++    #[test]
++    fn orchard_note_diversifier_identifies_which_address_received_it() {
++        use pepper_sync::wallet::OrchardNote;
++
++        use crate::mocks::orchard_note::OrchardCryptoNoteBuilder;
++        use crate::wallet::keys::unified::ReceiverSelection;
++
++        let mut wallet = regtest_wallet(seeds::HOSPITAL_MUSEUM_SEED);
++
++        let (_, order_a_ua) = wallet
++            .generate_unified_address(ReceiverSelection::orchard_only(), zip32::AccountId::ZERO)
++            .unwrap();
++        let order_a_address = *order_a_ua.orchard().unwrap();
++
++        let (_, order_b_ua) = wallet
++            .generate_unified_address(ReceiverSelection::orchard_only(), zip32::AccountId::ZERO)
++            .unwrap();
++        let order_b_address = *order_b_ua.orchard().unwrap();
++
++        assert_ne!(
++            order_a_address.diversifier().as_array(),
++            order_b_address.diversifier().as_array(),
++            "test setup bug: the two generated orchard addresses must actually differ"
++        );
++
++        let mut note_for_a = OrchardCryptoNoteBuilder::default();
++        note_for_a
++            .recipient(order_a_address)
++            .randomize_rho_and_rseed();
++        let txid_a = TxId::from_bytes([0xC; 32]);
++        let wallet_note_for_a = OrchardNote::new_for_test(
++            OutputId::new(txid_a, 0),
++            zip32::AccountId::ZERO,
++            zip32::Scope::External,
++            note_for_a.build(),
++            Memo::Empty,
++            Some(incrementalmerkletree::Position::from(0)),
++        );
++
++        let mut note_for_b = OrchardCryptoNoteBuilder::default();
++        note_for_b
++            .recipient(order_b_address)
++            .randomize_rho_and_rseed(); // same default value (800_000) on both notes on purpose
++        let txid_b = TxId::from_bytes([0xD; 32]);
++        let wallet_note_for_b = OrchardNote::new_for_test(
++            OutputId::new(txid_b, 0),
++            zip32::AccountId::ZERO,
++            zip32::Scope::External,
++            note_for_b.build(),
++            Memo::Empty,
++            Some(incrementalmerkletree::Position::from(1)),
++        );
++
++        wallet.wallet_transactions.insert(
++            txid_a,
++            pepper_sync::wallet::WalletTransaction::new_for_test_with_orchard_notes(
++                txid_a,
++                ConfirmationStatus::Confirmed(10.into()),
++                vec![wallet_note_for_a],
++                vec![],
++            ),
++        );
++        wallet.wallet_transactions.insert(
++            txid_b,
++            pepper_sync::wallet::WalletTransaction::new_for_test_with_orchard_notes(
++                txid_b,
++                ConfirmationStatus::Confirmed(10.into()),
++                vec![wallet_note_for_b],
++                vec![],
++            ),
++        );
++
++        let expected_hex_a = hex::encode(order_a_address.diversifier().as_array());
++        let expected_hex_b = hex::encode(order_b_address.diversifier().as_array());
++
++        let summaries = wallet.note_summaries::<OrchardNote>(true);
++        let summary_for_txid = |txid: TxId| {
++            summaries
++                .iter()
++                .find(|s| s.txid == txid)
++                .unwrap_or_else(|| panic!("no note summary for {txid}"))
++        };
++
++        let found_a = summary_for_txid(txid_a);
++        let found_b = summary_for_txid(txid_b);
++
++        assert_eq!(found_a.diversifier_hex, expected_hex_a);
++        assert_eq!(found_b.diversifier_hex, expected_hex_b);
++        assert_ne!(found_a.diversifier_hex, found_b.diversifier_hex);
++        assert_ne!(found_a.diversifier_hex, expected_hex_b);
++        assert_ne!(found_b.diversifier_hex, expected_hex_a);
++    }
++
++    /// Scale test: not just two addresses but five, all generated from the
++    /// same account, all sapling (the common case: many orders, one
++    /// wallet). Guards against an off-by-one or a comparison that only
++    /// happens to work for a pair. Every note carries the identical
++    /// amount, so amount can play no role in the assertions below --
++    /// diversifier is the only signal doing the attribution.
++    #[test]
++    fn note_diversifier_scales_to_many_addresses() {
++        use pepper_sync::wallet::SaplingNote;
++
++        use crate::mocks::SaplingCryptoNoteBuilder;
++        use crate::wallet::keys::unified::ReceiverSelection;
++
++        let mut wallet = regtest_wallet(seeds::HOSPITAL_MUSEUM_SEED);
++
++        const ORDER_COUNT: u8 = 5;
++        let mut addresses = Vec::new();
++        for _ in 0..ORDER_COUNT {
++            let (_, ua) = wallet
++                .generate_unified_address(ReceiverSelection::sapling_only(), zip32::AccountId::ZERO)
++                .unwrap();
++            addresses.push(*ua.sapling().unwrap());
++        }
++
++        // Every generated address must be pairwise distinct, or the whole
++        // premise of address-per-order breaks before notes even enter it.
++        for i in 0..addresses.len() {
++            for j in (i + 1)..addresses.len() {
++                assert_ne!(
++                    addresses[i].diversifier().0,
++                    addresses[j].diversifier().0,
++                    "orders {i} and {j} were generated with colliding diversifiers"
++                );
++            }
++        }
++
++        let mut txids = Vec::new();
++        for (i, address) in addresses.iter().enumerate() {
++            let mut note = SaplingCryptoNoteBuilder::default();
++            note.recipient(*address);
++            note.value(sapling_crypto::value::NoteValue::from_raw(75_000)); // identical for every order, on purpose
++            let txid = TxId::from_bytes([0x10 + i as u8; 32]);
++            let wallet_note = SaplingNote::new_for_test(
++                OutputId::new(txid, 0),
++                zip32::AccountId::ZERO,
++                zip32::Scope::External,
++                note.build(),
++                Memo::Empty,
++                Some(incrementalmerkletree::Position::from(i as u64)),
++            );
++            wallet.wallet_transactions.insert(
++                txid,
++                WalletTransaction::new_for_test(txid, ConfirmationStatus::Confirmed(10.into()))
++                    .with_sapling_notes_for_test(vec![wallet_note]),
++            );
++            txids.push(txid);
++        }
++
++        let summaries = wallet.note_summaries::<SaplingNote>(true);
++        let found_diversifiers: Vec<String> = txids
++            .iter()
++            .map(|txid| {
++                summaries
++                    .iter()
++                    .find(|s| s.txid == *txid)
++                    .unwrap_or_else(|| panic!("no note summary for {txid}"))
++                    .diversifier_hex
++                    .clone()
++            })
++            .collect();
++
++        let expected_diversifiers: Vec<String> = addresses
++            .iter()
++            .map(|address| hex::encode(address.diversifier().0))
++            .collect();
++
++        assert_eq!(
++            found_diversifiers, expected_diversifiers,
++            "each of the {ORDER_COUNT} notes must attribute to its own order's address, in order, with none swapped"
++        );
++
++        // Every reported diversifier must be unique -- no two orders
++        // sharing an attribution, which would be indistinguishable from a
++        // crossed payment in production.
++        let mut sorted = found_diversifiers.clone();
++        sorted.sort();
++        sorted.dedup();
++        assert_eq!(
++            sorted.len(),
++            ORDER_COUNT as usize,
++            "all {ORDER_COUNT} attributed diversifiers must be pairwise distinct"
++        );
++    }
++
++    /// A single order address can legitimately receive more than one
++    /// payment (e.g. the customer sends in two transactions). Both notes
++    /// must report the SAME diversifier -- proving the mechanism identifies
++    /// "which address" rather than accidentally behaving like a per-note
++    /// nonce -- while a note paid to a different order's address must still
++    /// report a different one.
++    #[test]
++    fn note_diversifier_is_stable_across_repeat_payments_to_the_same_address() {
++        use pepper_sync::wallet::SaplingNote;
++
++        use crate::mocks::SaplingCryptoNoteBuilder;
++        use crate::wallet::keys::unified::ReceiverSelection;
++
++        let mut wallet = regtest_wallet(seeds::HOSPITAL_MUSEUM_SEED);
++
++        let (_, order_a_ua) = wallet
++            .generate_unified_address(ReceiverSelection::sapling_only(), zip32::AccountId::ZERO)
++            .unwrap();
++        let order_a_address = *order_a_ua.sapling().unwrap();
++
++        let (_, order_b_ua) = wallet
++            .generate_unified_address(ReceiverSelection::sapling_only(), zip32::AccountId::ZERO)
++            .unwrap();
++        let order_b_address = *order_b_ua.sapling().unwrap();
++
++        // Two separate payments to order A's address (different amounts,
++        // different transactions -- e.g. an underpay followed by a
++        // top-up), plus one payment to order B's address.
++        let mut note_a1 = SaplingCryptoNoteBuilder::default();
++        note_a1.recipient(order_a_address);
++        note_a1.value(sapling_crypto::value::NoteValue::from_raw(40_000));
++        let txid_a1 = TxId::from_bytes([0x21; 32]);
++        let wallet_note_a1 = SaplingNote::new_for_test(
++            OutputId::new(txid_a1, 0),
++            zip32::AccountId::ZERO,
++            zip32::Scope::External,
++            note_a1.build(),
++            Memo::Empty,
++            Some(incrementalmerkletree::Position::from(0)),
++        );
++        wallet.wallet_transactions.insert(
++            txid_a1,
++            WalletTransaction::new_for_test(txid_a1, ConfirmationStatus::Confirmed(10.into()))
++                .with_sapling_notes_for_test(vec![wallet_note_a1]),
++        );
++
++        let mut note_a2 = SaplingCryptoNoteBuilder::default();
++        note_a2.recipient(order_a_address);
++        note_a2.value(sapling_crypto::value::NoteValue::from_raw(60_000));
++        let txid_a2 = TxId::from_bytes([0x22; 32]);
++        let wallet_note_a2 = SaplingNote::new_for_test(
++            OutputId::new(txid_a2, 0),
++            zip32::AccountId::ZERO,
++            zip32::Scope::External,
++            note_a2.build(),
++            Memo::Empty,
++            Some(incrementalmerkletree::Position::from(1)),
++        );
++        wallet.wallet_transactions.insert(
++            txid_a2,
++            WalletTransaction::new_for_test(txid_a2, ConfirmationStatus::Confirmed(11.into()))
++                .with_sapling_notes_for_test(vec![wallet_note_a2]),
++        );
++
++        let mut note_b = SaplingCryptoNoteBuilder::default();
++        note_b.recipient(order_b_address);
++        note_b.value(sapling_crypto::value::NoteValue::from_raw(100_000)); // sums equal to A's total on purpose: proves amount can't be the signal
++        let txid_b = TxId::from_bytes([0x23; 32]);
++        let wallet_note_b = SaplingNote::new_for_test(
++            OutputId::new(txid_b, 0),
++            zip32::AccountId::ZERO,
++            zip32::Scope::External,
++            note_b.build(),
++            Memo::Empty,
++            Some(incrementalmerkletree::Position::from(2)),
++        );
++        wallet.wallet_transactions.insert(
++            txid_b,
++            WalletTransaction::new_for_test(txid_b, ConfirmationStatus::Confirmed(12.into()))
++                .with_sapling_notes_for_test(vec![wallet_note_b]),
++        );
++
++        let expected_hex_a = hex::encode(order_a_address.diversifier().0);
++        let expected_hex_b = hex::encode(order_b_address.diversifier().0);
++        assert_ne!(expected_hex_a, expected_hex_b);
++
++        let summaries = wallet.note_summaries::<SaplingNote>(true);
++        let summary_for_txid = |txid: TxId| {
++            summaries
++                .iter()
++                .find(|s| s.txid == txid)
++                .unwrap_or_else(|| panic!("no note summary for {txid}"))
++        };
++
++        assert_eq!(summary_for_txid(txid_a1).diversifier_hex, expected_hex_a);
++        assert_eq!(summary_for_txid(txid_a2).diversifier_hex, expected_hex_a);
++        assert_eq!(
++            summary_for_txid(txid_a1).diversifier_hex,
++            summary_for_txid(txid_a2).diversifier_hex,
++            "two separate payments to the same order address must report the identical diversifier"
++        );
++        assert_eq!(summary_for_txid(txid_b).diversifier_hex, expected_hex_b);
++        assert_ne!(
++            summary_for_txid(txid_b).diversifier_hex,
++            summary_for_txid(txid_a1).diversifier_hex,
++            "a payment to a different order must not share A's diversifier, even with matching combined totals"
++        );
++    }
++
+     /// Migrated from libtonode `slow::send_funds_to_all_pools`: per-pool
+     /// balance aggregation over one confirmed note in each pool. The
+     /// original asserted this balance check plus txid uniqueness across
+diff --git a/zingolib/src/wallet/summary/data.rs b/zingolib/src/wallet/summary/data.rs
+index bb5790e..ed514de 100644
+--- a/zingolib/src/wallet/summary/data.rs
++++ b/zingolib/src/wallet/summary/data.rs
+@@ -345,6 +345,13 @@ pub struct NoteSummary {
+     pub output_index: u32,
+     pub account_id: zip32::AccountId,
+     pub scope: Scope,
++    /// Hex-encoded raw ZIP 32 diversifier (`d`) of the address that received
++    /// this note -- see `NoteInterface::diversifier_bytes`. Lets a caller
++    /// with multiple diversified addresses under one account (e.g. one per
++    /// customer order) tell which specific address a deposit landed on, by
++    /// comparing against the same hex exposed per-address in the wallet's
++    /// unified-addresses listing.
++    pub diversifier_hex: String,
+ }
+ 
+ impl std::fmt::Display for NoteSummary {
+@@ -368,6 +375,7 @@ impl std::fmt::Display for NoteSummary {
+                 output index: {}
+                 account id: {}
+                 scope: {}
++                diversifier: {}
+             }}",
+             self.value,
+             self.status,
+@@ -378,7 +386,8 @@ impl std::fmt::Display for NoteSummary {
+             self.txid,
+             self.output_index,
+             u32::from(self.account_id),
+-            self.scope
++            self.scope,
++            self.diversifier_hex
+         )
+     }
+ }
+@@ -395,6 +404,7 @@ impl From<NoteSummary> for json::JsonValue {
+             "output_index" => note.output_index,
+             "account_id" => u32::from(note.account_id),
+             "scope" => note.scope.to_string(),
++            "diversifier" => note.diversifier_hex,
+         }
+     }
+ }

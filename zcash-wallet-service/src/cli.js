@@ -113,6 +113,13 @@ export async function ensureWalletReady() {
   console.log("[zcash-wallet-service] wallet restored and synced for the first time");
 }
 
+// ZODD (2026-09-08): now returns the new address's OWN diversifier
+// alongside it -- the real per-order match key. This is only present on a
+// zingo-cli built from zingolib-patches/0001-per-address-payment-diversifier.patch
+// (see that patch and the Dockerfile); an unpatched build simply omits
+// these two fields, which callers must treat as optional (see
+// generateOrderAddress in backend/src/lib/zcashReal.ts -- it falls back to
+// memo/amount matching for any order that doesn't have them).
 export async function newAddress() {
   const out = await runCli(["new_address", "oz"], { timeout: 30_000 });
   const { json, raw } = parseMaybeJson(out);
@@ -127,7 +134,12 @@ export async function newAddress() {
   if (!address || !address.startsWith("u1")) {
     throw new Error(`unexpected new_address output, needs a look: ${raw}`);
   }
-  return address;
+  const obj = Array.isArray(json) ? null : json;
+  return {
+    address,
+    saplingDiversifierHex: typeof obj?.sapling_diversifier_hex === "string" ? obj.sapling_diversifier_hex : null,
+    orchardDiversifierHex: typeof obj?.orchard_diversifier_hex === "string" ? obj.orchard_diversifier_hex : null,
+  };
 }
 
 export async function spendableBalanceZatoshis() {
@@ -257,9 +269,21 @@ export async function unspentNotes() {
   }
   // Notes live in one of three pools depending on which shielded protocol
   // received them (ironwood/orchard/sapling) -- a payment could in principle
-  // land in any of the three, so all get flattened together here.
-  const pools = [json.ironwood_notes, json.orchard_notes, json.sapling_notes];
-  const notes = pools.flatMap((pool) => (Array.isArray(pool?.note_summaries) ? pool.note_summaries : []));
+  // land in any of the three, so all get flattened together here. Each
+  // note's own pool is kept on it (see `pool` below) because a diversifier
+  // is only meaningful compared against an order's SAME pool -- ZODD
+  // (2026-09-08): a patched zingo-cli now stamps every note's own
+  // `diversifier` field (see zingolib-patches/), which is the real,
+  // collision-proof per-order match key. See the ZODD comment on
+  // pickAndReserveAmount / the poll loop in backend/src/lib/zcashReal.ts.
+  const pools = [
+    { pool: "ironwood", summaries: json.ironwood_notes },
+    { pool: "orchard", summaries: json.orchard_notes },
+    { pool: "sapling", summaries: json.sapling_notes },
+  ];
+  const notes = pools.flatMap(({ pool, summaries }) =>
+    (Array.isArray(summaries?.note_summaries) ? summaries.note_summaries : []).map((n) => ({ ...n, pool }))
+  );
   return notes
     .filter((n) => n.spend_status === "unspent")
     .map((n) => ({
@@ -267,6 +291,12 @@ export async function unspentNotes() {
       txid: n.txid,
       time: Number(n.time ?? 0),
       status: n.status,
+      pool: n.pool,
+      // Present only from a patched zingo-cli (see the comment above) --
+      // null on an unpatched build, which callers must treat as "no
+      // diversifier-based match possible for this note" and fall back to
+      // memo/amount matching instead.
+      diversifier: typeof n.diversifier === "string" ? n.diversifier : null,
       // Brai, 2026-09-07: "esto tiene que ir por frase semilla" -- amount-only
       // matching can't scale (two buyers who both type a round number like
       // 0.05 or 0.2 ZEC collide, see the incident this same day). zingo-cli

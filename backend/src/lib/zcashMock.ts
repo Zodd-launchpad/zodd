@@ -45,8 +45,15 @@ export function onPaymentDetected(cb: PaymentCallback) {
 /** Generates a one-time address for a buy order and simulates the payment.
  * Returns the (unchanged, mock mode has no amount-collision risk -- each
  * order resolves on its own orderId-keyed timer) expectedZecAmount too, to
- * match zcashReal.ts's shape (see its pickUniqueAmount). */
-export function generateOrderAddress(orderId: string, expectedZecAmount: number): { address: string; expectedZecAmount: number } {
+ * match zcashReal.ts's shape (see its pickUniqueAmount). Also returns
+ * saplingDiversifierHex/orchardDiversifierHex as null, purely to match
+ * zcashReal.ts's shape (see the ZODD comment there) -- mock addresses
+ * aren't real diversified addresses, and mock mode has no need for this
+ * kind of matching in the first place. */
+export function generateOrderAddress(
+  orderId: string,
+  expectedZecAmount: number
+): { address: string; expectedZecAmount: number; saplingDiversifierHex: string | null; orchardDiversifierHex: string | null } {
   const address = fakeShieldedAddress();
   watchers.set(orderId, { orderId, address, expectedZecAmount });
 
@@ -61,7 +68,7 @@ export function generateOrderAddress(orderId: string, expectedZecAmount: number)
     onPayment?.(orderId, pending.expectedZecAmount, fakeTxid);
   }, delayMs);
 
-  return { address, expectedZecAmount };
+  return { address, expectedZecAmount, saplingDiversifierHex: null, orchardDiversifierHex: null };
 }
 
 /** No-op in mock mode: a simulated payment always confirms within a few
@@ -69,7 +76,14 @@ export function generateOrderAddress(orderId: string, expectedZecAmount: number)
  * restart to resume. Exists only so server.ts can call this the same way
  * regardless of ZCASH_MODE (see zcashReal.ts's real implementation, which
  * this mirrors for restart recovery). */
-export function resumeWatching(_orderId: string, _address: string, _expectedZecAmount: number, _createdAtMs: number) {}
+export function resumeWatching(
+  _orderId: string,
+  _address: string,
+  _expectedZecAmount: number,
+  _createdAtMs: number,
+  _saplingDiversifierHex?: string | null,
+  _orchardDiversifierHex?: string | null
+) {}
 
 /** No-op in mock mode: mirrors zcashReal.ts's seedConsumedTxids so
  * server.ts can call it generically regardless of ZCASH_MODE (the mock

@@ -536,6 +536,8 @@ export interface OrderView {
   side: OrderSide;
   status: OrderStatus;
   zecAddress?: string | null;
+  zecSaplingDiversifierHex?: string | null;
+  zecOrchardDiversifierHex?: string | null;
   refundAddress?: string | null;
   zecAmount?: number | null;
   tokenAmount?: number | null;
@@ -551,6 +553,8 @@ function toOrderView(o: {
   side: string;
   status: string;
   zecAddress: string | null;
+  zecSaplingDiversifierHex?: string | null;
+  zecOrchardDiversifierHex?: string | null;
   refundAddress: string | null;
   zecAmount: unknown;
   tokenAmount: bigint | null;
@@ -565,6 +569,8 @@ function toOrderView(o: {
     side: o.side as OrderSide,
     status: o.status as OrderStatus,
     zecAddress: o.zecAddress,
+    zecSaplingDiversifierHex: o.zecSaplingDiversifierHex ?? null,
+    zecOrchardDiversifierHex: o.zecOrchardDiversifierHex ?? null,
     refundAddress: o.refundAddress,
     zecAmount: o.zecAmount === null ? null : num(o.zecAmount),
     tokenAmount: o.tokenAmount === null ? null : num(o.tokenAmount),
@@ -621,11 +627,28 @@ export async function createSellOrder(input: {
  * return an amount that was bumped by a few thousand zatoshis to keep it
  * unique among currently-watched orders (see pickUniqueAmount there) -- when
  * given, this persists that adjusted, real amount so the DB matches what
- * the payer is actually shown/charged. */
-export async function setOrderAddress(orderId: string, zecAddress: string, zecAmount?: number) {
+ * the payer is actually shown/charged.
+ *
+ * ZODD (2026-09-08): also persists zecAddress's own diversifier (per
+ * shielded pool), when generateOrderAddress returned one -- see the ZODD
+ * comment on PendingPayment in zcashReal.ts. This is what lets a resumed
+ * watcher (after a restart) still match by address instead of falling
+ * back to memo/amount. Both null on an unpatched zingo-cli build. */
+export async function setOrderAddress(
+  orderId: string,
+  zecAddress: string,
+  zecAmount?: number,
+  zecSaplingDiversifierHex?: string | null,
+  zecOrchardDiversifierHex?: string | null
+) {
   const o = await prisma.order.update({
     where: { id: orderId },
-    data: { zecAddress, ...(zecAmount !== undefined ? { zecAmount } : {}) },
+    data: {
+      zecAddress,
+      ...(zecAmount !== undefined ? { zecAmount } : {}),
+      zecSaplingDiversifierHex: zecSaplingDiversifierHex ?? null,
+      zecOrchardDiversifierHex: zecOrchardDiversifierHex ?? null,
+    },
   });
   return toOrderView(o);
 }
@@ -776,6 +799,8 @@ export interface PendingTokenCreationView {
   name: string;
   status: "PENDING" | "CREATED" | "EXPIRED" | "FAILED";
   zecAddress: string | null;
+  zecSaplingDiversifierHex?: string | null;
+  zecOrchardDiversifierHex?: string | null;
   expectedZecAmount: number;
   resultTokenId: string | null;
   createdAt: string;
@@ -787,6 +812,8 @@ function toPendingTokenCreationView(p: {
   name: string;
   status: string;
   zecAddress: string | null;
+  zecSaplingDiversifierHex?: string | null;
+  zecOrchardDiversifierHex?: string | null;
   expectedZecAmount: unknown;
   resultTokenId: string | null;
   createdAt: Date;
@@ -797,6 +824,8 @@ function toPendingTokenCreationView(p: {
     name: p.name,
     status: p.status as PendingTokenCreationView["status"],
     zecAddress: p.zecAddress,
+    zecSaplingDiversifierHex: p.zecSaplingDiversifierHex ?? null,
+    zecOrchardDiversifierHex: p.zecOrchardDiversifierHex ?? null,
     expectedZecAmount: num(p.expectedZecAmount),
     resultTokenId: p.resultTokenId,
     createdAt: p.createdAt.toISOString(),
@@ -833,11 +862,24 @@ export async function createPendingTokenCreation(input: {
 }
 
 /** expectedZecAmount is optional for the same reason as setOrderAddress's
- * zecAmount param -- see its comment. */
-export async function setPendingTokenCreationAddress(id: string, zecAddress: string, expectedZecAmount?: number) {
+ * zecAmount param -- see its comment. Also persists zecAddress's own
+ * diversifier the same way setOrderAddress does -- see the ZODD comment
+ * there. */
+export async function setPendingTokenCreationAddress(
+  id: string,
+  zecAddress: string,
+  expectedZecAmount?: number,
+  zecSaplingDiversifierHex?: string | null,
+  zecOrchardDiversifierHex?: string | null
+) {
   const p = await prisma.pendingTokenCreation.update({
     where: { id },
-    data: { zecAddress, ...(expectedZecAmount !== undefined ? { expectedZecAmount } : {}) },
+    data: {
+      zecAddress,
+      ...(expectedZecAmount !== undefined ? { expectedZecAmount } : {}),
+      zecSaplingDiversifierHex: zecSaplingDiversifierHex ?? null,
+      zecOrchardDiversifierHex: zecOrchardDiversifierHex ?? null,
+    },
   });
   return toPendingTokenCreationView(p);
 }
