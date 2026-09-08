@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { existsSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
 import { promisify } from "node:util";
 
 const execFileP = promisify(execFile);
@@ -258,6 +258,37 @@ export async function rawValueToAddressHelpDebug() {
 
 export async function rawAddressesDebug() {
   return listAddresses();
+}
+
+// ZODD (2026-09-08): the deployed `addresses`/`notes` output was NOT
+// showing the new diversifier fields even after a Railway build/deploy
+// whose logs showed the patch step (git apply) and the cargo build both
+// completing cleanly, from the patched source, with no errors -- and a
+// from-scratch local build using the EXACT same pinned commit, the EXACT
+// same patch file, and the EXACT same `--no-default-features --features
+// clearnet-test-mode` flags DOES produce the new fields. So either this
+// container's /usr/local/bin/zingo-cli genuinely isn't the binary this
+// build log describes, or something else is happening under it. This
+// route settles that unambiguously: the binary's own mtime/size (does it
+// look freshly written by THIS deploy's build?) plus its own --version
+// output, no interpretation needed. Temporary diagnostic only, remove
+// together with the rest of this diagnostic batch once answered.
+export async function rawBinaryInfoDebug() {
+  const stat = statSync(BIN);
+  let version = null;
+  try {
+    const { stdout, stderr } = await execFileP(BIN, ["--version"], { timeout: 10_000 });
+    version = (stdout || stderr || "").trim();
+  } catch (err) {
+    version = `error running --version: ${String(err.message ?? err)}`;
+  }
+  return {
+    path: BIN,
+    sizeBytes: stat.size,
+    mtimeMs: stat.mtimeMs,
+    mtimeIso: new Date(stat.mtimeMs).toISOString(),
+    version,
+  };
 }
 
 export async function unspentNotes() {

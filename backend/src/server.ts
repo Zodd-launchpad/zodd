@@ -914,6 +914,28 @@ app.get("/api/admin/addresses-raw-debug", async (req, reply) => {
   }
 });
 
+// ZODD (2026-09-08): the deployed zingo-cli's `addresses`/`notes` output is
+// missing the new diversifier fields even though the Railway build log for
+// that exact deploy shows the patch applying and cargo build finishing with
+// no errors -- and a from-scratch local build of the identical pinned
+// commit + identical patch + identical build flags DOES produce them. This
+// reports the actual running binary's mtime/size (does it look freshly
+// written by that build?) and its own --version output, to settle whether
+// this is really the built binary or something is serving a stale one.
+// Temporary, remove together with the rest of this diagnostic batch.
+app.get("/api/admin/binary-info-debug", async (req, reply) => {
+  if (ZCASH_MODE !== "real") return reply.code(404).send({ error: "not in real mode" });
+  if (!DEBUG_NOTES_TOKEN) return reply.code(503).send({ error: "DEBUG_NOTES_TOKEN is not configured" });
+  const suppliedToken = req.headers["x-debug-token"] ?? (req.query as any)?.token;
+  if (suppliedToken !== DEBUG_NOTES_TOKEN) return reply.code(401).send({ error: "unauthorized" });
+  try {
+    const raw = await (zcashService as typeof import("./lib/zcashReal.js")).rawBinaryInfoDebug();
+    return reply.send(raw);
+  } catch (err) {
+    return reply.code(502).send({ error: String((err as Error).message ?? err) });
+  }
+});
+
 app.get("/api/admin/value-to-address-raw-debug", async (req, reply) => {
   if (ZCASH_MODE !== "real") return reply.code(404).send({ error: "not in real mode" });
   if (!DEBUG_NOTES_TOKEN) return reply.code(503).send({ error: "DEBUG_NOTES_TOKEN is not configured" });

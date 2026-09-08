@@ -161,6 +161,19 @@ app.get("/wallet/addresses-raw-debug", async (_req, reply) => {
   }
 });
 
+// ZODD (2026-09-08): does NOT require `ready` -- stat()/--version work
+// even mid-sync, and this is specifically for diagnosing why a deploy
+// whose build logs look correct isn't producing the expected CLI output.
+app.get("/wallet/binary-info-debug", async (_req, reply) => {
+  try {
+    const info = await cli.rawBinaryInfoDebug();
+    return reply.send(info);
+  } catch (err) {
+    app.log.error(err);
+    return reply.code(500).send({ error: String(err.message ?? err) });
+  }
+});
+
 app.post("/wallet/send", async (req, reply) => {
   if (!ready) return reply.code(503).send({ error: "wallet not ready yet", detail: readyError });
   const { address, zatoshis, memo } = req.body ?? {};
