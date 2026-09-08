@@ -158,8 +158,20 @@ export const api = {
     description?: string;
     twitterUrl?: string;
     websiteUrl?: string;
-  }): Promise<{ creationId: string; zecAddress: string; zecAmount: number; memo: string; status: "PENDING" }> =>
-    req("/api/tokens", { method: "POST", body: JSON.stringify(data) }),
+    // Brai, 2026-09-08: "que puedas hacer una first buy" -- optional creator
+    // buy bundled into the same payment as the create fee. See the cap
+    // check in backend/src/server.ts's POST /api/tokens for why this can't
+    // always be as large as requested.
+    firstBuyZec?: number;
+  }): Promise<{
+    creationId: string;
+    zecAddress: string;
+    zecAmount: number;
+    createFeeZec: number;
+    firstBuyZec: number;
+    memo: string;
+    status: "PENDING";
+  }> => req("/api/tokens", { method: "POST", body: JSON.stringify(data) }),
   getTokenCreation: (
     id: string
   ): Promise<{ status: "PENDING" | "CREATED" | "EXPIRED" | "FAILED"; resultSymbol?: string; zecAddress: string | null; expectedZecAmount: number }> =>

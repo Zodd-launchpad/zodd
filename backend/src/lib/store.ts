@@ -846,10 +846,15 @@ export interface PendingTokenCreationView {
   symbol: string;
   name: string;
   status: "PENDING" | "CREATED" | "EXPIRED" | "FAILED";
+  creatorWalletId: string;
   zecAddress: string | null;
   zecSaplingDiversifierHex?: string | null;
   zecOrchardDiversifierHex?: string | null;
   expectedZecAmount: number;
+  /** Portion of expectedZecAmount that's a bundled first buy, not the
+   * create fee -- see the schema comment on PendingTokenCreation. 0 when
+   * this creation has no bundled buy. */
+  firstBuyZec: number;
   resultTokenId: string | null;
   createdAt: string;
 }
@@ -859,10 +864,12 @@ function toPendingTokenCreationView(p: {
   symbol: string;
   name: string;
   status: string;
+  creatorWalletId: string;
   zecAddress: string | null;
   zecSaplingDiversifierHex?: string | null;
   zecOrchardDiversifierHex?: string | null;
   expectedZecAmount: unknown;
+  firstBuyZec: unknown;
   resultTokenId: string | null;
   createdAt: Date;
 }): PendingTokenCreationView {
@@ -871,10 +878,12 @@ function toPendingTokenCreationView(p: {
     symbol: p.symbol,
     name: p.name,
     status: p.status as PendingTokenCreationView["status"],
+    creatorWalletId: p.creatorWalletId,
     zecAddress: p.zecAddress,
     zecSaplingDiversifierHex: p.zecSaplingDiversifierHex ?? null,
     zecOrchardDiversifierHex: p.zecOrchardDiversifierHex ?? null,
     expectedZecAmount: num(p.expectedZecAmount),
+    firstBuyZec: num(p.firstBuyZec),
     resultTokenId: p.resultTokenId,
     createdAt: p.createdAt.toISOString(),
   };
@@ -891,6 +900,9 @@ export async function createPendingTokenCreation(input: {
   twitterUrl?: string;
   websiteUrl?: string;
   expectedZecAmount: number;
+  /** Bundled first-buy portion of expectedZecAmount -- see the schema
+   * comment on PendingTokenCreation. Defaults to 0 (no bundled buy). */
+  firstBuyZec?: number;
 }) {
   const p = await prisma.pendingTokenCreation.create({
     data: {
@@ -904,6 +916,7 @@ export async function createPendingTokenCreation(input: {
       twitterUrl: input.twitterUrl ?? null,
       websiteUrl: input.websiteUrl ?? null,
       expectedZecAmount: input.expectedZecAmount,
+      firstBuyZec: input.firstBuyZec ?? 0,
     },
   });
   return toPendingTokenCreationView(p);

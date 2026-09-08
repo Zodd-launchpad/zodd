@@ -94,6 +94,16 @@ export const translations = {
     en: "Trading fee: 2% per trade. 1% goes straight to you, the creator — paid out automatically every 24h. 1% goes to the platform.",
     zh: "交易费：每笔交易 2%。其中 1% 直接归你（创建者）所有——每 24 小时自动发放一次。1% 归平台所有。",
   },
+  // Brai, 2026-09-08: "que puedas hacer una first buy" -- bundle an
+  // optional creator buy into the same payment as the create fee.
+  "create.firstBuyLabel": { en: "Your first buy (optional)", zh: "你的首次买入（可选）" },
+  "create.firstBuyHelp": {
+    en: "Buy your own token the moment it launches, in the same payment as the create fee.",
+    zh: "在代币上线的同时买入，与创建费一起在同一笔付款中完成。",
+  },
+  "create.breakdown.launchFee": { en: "Launch fee", zh: "创建费" },
+  "create.breakdown.firstBuy": { en: "First buy", zh: "首次买入" },
+  "create.breakdown.send": { en: "Send", zh: "共计发送" },
   "create.creatorPayoutLabel": { en: "Your Zcash payout address (optional)", zh: "你的 Zcash 收款地址（可选）" },
   "create.creatorPayoutPlaceholder": { en: "u1... or zs1... (leave blank to skip)", zh: "u1... 或 zs1...（留空则跳过）" },
   "create.creatorPayoutHelp": {

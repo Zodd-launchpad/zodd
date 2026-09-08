@@ -21,6 +21,11 @@ export default function CreatePage() {
   const [websiteUrl, setWebsiteUrl] = useState("");
   const [logoDataUrl, setLogoDataUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Brai, 2026-09-08: "que puedas hacer una first buy" -- optional creator
+  // buy bundled into the same payment as the create fee. Kept as a string
+  // so the input can be blank instead of forcing a "0".
+  const [firstBuyZecInput, setFirstBuyZecInput] = useState("");
+  const firstBuyZec = Number(firstBuyZecInput) || 0;
 
   const [phase, setPhase] = useState<Phase>("form");
   const [creationId, setCreationId] = useState<string | null>(null);
@@ -29,6 +34,10 @@ export default function CreatePage() {
   const [qr, setQr] = useState<string | null>(null);
   const [isRealMode, setIsRealMode] = useState(false);
   const [createFeeZec, setCreateFeeZec] = useState<number | null>(null);
+  // Breakdown of the pending payment, as confirmed by the backend (may
+  // differ slightly from the form's own numbers -- e.g. a discounted
+  // create fee for a gated wallet) -- shown on the waiting screen.
+  const [paymentBreakdown, setPaymentBreakdown] = useState<{ createFeeZec: number; firstBuyZec: number } | null>(null);
   const [copied, setCopied] = useState(false);
   // paymentUri still feeds the QR (see submit() below) -- kept for wallets
   // that scan it and auto-fill amount+memo. The copy button copies the
@@ -87,10 +96,12 @@ export default function CreatePage() {
         description: description.trim() || undefined,
         twitterUrl: twitterUrl.trim() || undefined,
         websiteUrl: websiteUrl.trim() || undefined,
+        firstBuyZec: firstBuyZec > 0 ? firstBuyZec : undefined,
       });
       setCreationId(res.creationId);
       setZecAddress(res.zecAddress);
       setZecAmount(res.zecAmount);
+      setPaymentBreakdown({ createFeeZec: res.createFeeZec, firstBuyZec: res.firstBuyZec });
       // Brai, 2026-09-07: "esto tiene que ir por frase semilla" -- every
       // token creation pays the exact same fixed fee, so amount collisions
       // here are actually the MOST likely of all (see the matching comment
@@ -135,6 +146,7 @@ export default function CreatePage() {
     setPaymentUri(null);
     setQr(null);
     setError(null);
+    setPaymentBreakdown(null);
   }
 
   // Brai, 2026-09-07 (later): used to copy the full paymentUri instead of
@@ -168,6 +180,22 @@ export default function CreatePage() {
           <p className="muted" style={{ textAlign: "center" }}>
             {t("create.waiting.sendExactly", { amount: zecAmount != null ? formatZec(zecAmount) : "", symbol })}
           </p>
+          {paymentBreakdown && paymentBreakdown.firstBuyZec > 0 && (
+            <div style={{ fontSize: 12, border: "1px solid var(--border)", borderRadius: 4, padding: "8px 10px", margin: "8px 0" }}>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span className="muted">{t("create.breakdown.launchFee")}</span>
+                <span>{formatZec(paymentBreakdown.createFeeZec)} ZEC</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span className="muted">{t("create.breakdown.firstBuy")}</span>
+                <span>{formatZec(paymentBreakdown.firstBuyZec)} ZEC</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", borderTop: "1px solid var(--border)", marginTop: 4, paddingTop: 4, fontWeight: 600 }}>
+                <span>{t("create.breakdown.send")}</span>
+                <span>{zecAmount != null ? formatZec(zecAmount) : ""} ZEC</span>
+              </div>
+            </div>
+          )}
           {qr && (
             <div style={{ background: "#fff", padding: 12, borderRadius: 6, display: "flex", justifyContent: "center", margin: "12px 0" }}>
               <img src={qr} alt="qr" />
@@ -295,6 +323,36 @@ export default function CreatePage() {
           <label>{t("create.websiteLabel")}</label>
           <input value={websiteUrl} onChange={(e) => setWebsiteUrl(e.target.value)} placeholder={t("create.websitePlaceholder")} maxLength={200} />
         </div>
+        <div className="field">
+          <label>{t("create.firstBuyLabel")}</label>
+          <input
+            type="number"
+            min={0}
+            step="0.001"
+            value={firstBuyZecInput}
+            onChange={(e) => setFirstBuyZecInput(e.target.value)}
+            placeholder="0.00"
+          />
+          <p className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+            {t("create.firstBuyHelp")}
+          </p>
+        </div>
+        {firstBuyZec > 0 && createFeeZec != null && (
+          <div style={{ fontSize: 12, border: "1px solid var(--border)", borderRadius: 4, padding: "8px 10px", marginBottom: 16 }}>
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <span className="muted">{t("create.breakdown.launchFee")}</span>
+              <span>{formatZec(createFeeZec)} ZEC</span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <span className="muted">{t("create.breakdown.firstBuy")}</span>
+              <span>{formatZec(firstBuyZec)} ZEC</span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", borderTop: "1px solid var(--border)", marginTop: 4, paddingTop: 4, fontWeight: 600 }}>
+              <span>{t("create.breakdown.send")}</span>
+              <span>{formatZec(createFeeZec + firstBuyZec)} ZEC</span>
+            </div>
+          </div>
+        )}
         <div className="field">
           <label>{t("create.creatorPayoutLabel")}</label>
           <input

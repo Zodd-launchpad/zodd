@@ -123,6 +123,11 @@ const createTokenSchema = z.object({
   description: z.string().max(500).optional(),
   twitterUrl: z.string().max(200).optional(),
   websiteUrl: z.string().max(200).optional(),
+  // Brai, 2026-09-08: "que puedas hacer una first buy" -- optional creator
+  // buy bundled into the SAME payment as the create fee. 0/omitted means
+  // no bundled buy, exactly today's behavior. See the cap check in the
+  // route below for why this can't be as large as the reference launchpad's.
+  firstBuyZec: z.number().min(0).optional(),
 });
 
 /** Accepts "@handle", "handle", or a full URL and normalizes to a full
@@ -170,6 +175,22 @@ app.post("/api/tokens", async (req, reply) => {
   // createFeeZecFor in fees.ts. Everyone else keeps paying TOKEN_CREATE_FEE_ZEC.
   const createFeeZec = createFeeZecFor(creatorWallet.id);
 
+  // Brai, 2026-09-08: "que puedas hacer una first buy" -- bundle an optional
+  // creator buy into the same single payment as the create fee. The real,
+  // hard ceiling here isn't the bonding curve -- it's the platform's
+  // per-payment safety cap (MAX_PAYOUT_ZEC, see zcashReal.ts's comment:
+  // "Defense in depth against a bug turning into an unbounded loss"). Fail
+  // fast with a clear message instead of letting generateOrderAddress throw
+  // a confusing 502 below.
+  const firstBuyZec = body.firstBuyZec ?? 0;
+  const totalZec = createFeeZec + firstBuyZec;
+  if (totalZec > MAX_PAYOUT_ZEC) {
+    return reply.code(400).send({
+      error: `first buy too large: launch fee (${createFeeZec} ZEC) + first buy (${firstBuyZec} ZEC) = ${totalZec} ZEC, which exceeds the current per-payment safety cap of ${MAX_PAYOUT_ZEC} ZEC`,
+      maxFirstBuyZec: Math.max(0, MAX_PAYOUT_ZEC - createFeeZec),
+    });
+  }
+
   const pending = await store.createPendingTokenCreation({
     symbol,
     name: body.name,
@@ -180,7 +201,8 @@ app.post("/api/tokens", async (req, reply) => {
     description: body.description,
     twitterUrl: normalizeTwitter(body.twitterUrl),
     websiteUrl: normalizeWebsite(body.websiteUrl),
-    expectedZecAmount: createFeeZec,
+    expectedZecAmount: totalZec,
+    firstBuyZec,
   });
 
   let zecAddress: string;
@@ -188,7 +210,7 @@ app.post("/api/tokens", async (req, reply) => {
   let saplingDiversifierHex: string | null = null;
   let orchardDiversifierHex: string | null = null;
   try {
-    const res = await generateOrderAddress(pending.id, createFeeZec);
+    const res = await generateOrderAddress(pending.id, totalZec);
     zecAddress = res.address;
     zecAmount = res.expectedZecAmount;
     saplingDiversifierHex = (res as { saplingDiversifierHex?: string | null }).saplingDiversifierHex ?? null;
@@ -209,6 +231,10 @@ app.post("/api/tokens", async (req, reply) => {
     creationId: pending.id,
     zecAddress,
     zecAmount,
+    // Breakdown so the frontend can show "Launch fee / First buy / Send"
+    // like the reference screenshot, instead of just the combined total.
+    createFeeZec,
+    firstBuyZec,
     // Brai, 2026-09-07: "esto tiene que ir por frase semilla" -- base64
     // memo for the payment URI (see buildPaymentMemoBase64 in
     // zcashReal.ts). The frontend drops this into the zcash: URI/QR as
@@ -425,6 +451,43 @@ onPaymentDetected(async (orderId: string, confirmedZecAmount: number, txid: stri
           await store
             .setDefaultRefundAddress(token.creatorWalletId, token.creatorPayoutAddress)
             .catch((err) => app.log.error(err, "failed to remember creator payout address"));
+        }
+
+        // Brai, 2026-09-08: "que puedas hacer una first buy" -- the creator's
+        // payment covered the create fee AND a bundled buy in one send.
+        // pendingCreation.expectedZecAmount is the TOTAL that was expected
+        // (fee + firstBuyZec); whatever the creator actually sent above the
+        // fee portion is the real buy amount, same "confirmed amount may run
+        // a hair over the base ask" logic as any normal order (see
+        // pickUniqueAmount in zcashReal.ts). Kept in its own try/catch so a
+        // problem here never undoes the token creation that already
+        // succeeded above.
+        if (pendingCreation.firstBuyZec > 0) {
+          try {
+            const feePortion = pendingCreation.expectedZecAmount - pendingCreation.firstBuyZec;
+            const actualFirstBuyZec = confirmedZecAmount - feePortion;
+            if (actualFirstBuyZec > 0) {
+              await withTokenLock(token.id, async () => {
+                const { net, creatorFee, platformFee } = splitFee(actualFirstBuyZec);
+                const { tokensOut, newState } = quoteBuy(token.curve, net);
+                await store.updateTokenCurve(token.id, newState);
+                await store.recordPricePoint(token.id, newState, token.totalSupply);
+                await store.creditBalance(token.creatorWalletId, token.id, tokensOut);
+                await store.accrueFees(token.id, creatorFee, platformFee);
+                await store.createRepeatBuyOrder({
+                  internalWalletId: token.creatorWalletId,
+                  tokenId: token.id,
+                  zecAddress: pendingCreation.zecAddress ?? null,
+                  zecAmount: actualFirstBuyZec,
+                  tokenAmount: tokensOut,
+                  executionTxid: txid,
+                });
+              });
+              app.log.info(`token ${token.symbol}: bundled first buy of ${actualFirstBuyZec} ZEC -> credited to creator wallet ${token.creatorWalletId} (txid ${txid})`);
+            }
+          } catch (err) {
+            app.log.error(err, `token ${token.symbol} created ok, but its bundled first buy failed to execute`);
+          }
         }
       }
     } catch (err) {

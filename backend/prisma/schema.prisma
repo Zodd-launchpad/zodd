@@ -185,6 +185,14 @@ model PendingTokenCreation {
   zecSaplingDiversifierHex String?
   zecOrchardDiversifierHex String?
   expectedZecAmount    Decimal             @db.Decimal(20, 8)
+  // Brai, 2026-09-08: "que puedas hacer una first buy" -- an optional
+  // creator buy bundled into the SAME payment as the create fee (one send
+  // covers both). expectedZecAmount above is the TOTAL of the two;
+  // firstBuyZec is just the buy portion, kept separately so the payment
+  // handler in server.ts knows how much of the confirmed payment to run
+  // through the bonding curve once the token exists. 0 (the default) means
+  // no bundled buy -- exactly today's behavior.
+  firstBuyZec          Decimal             @default(0) @db.Decimal(20, 8)
   status               TokenCreationStatus @default(PENDING)
   resultTokenId        String?
   createdAt            DateTime            @default(now())
