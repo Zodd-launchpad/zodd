@@ -475,45 +475,6 @@ export async function listUnclaimedNotes(
     }));
 }
 
-// Temporary diagnostic -- see the comment on rawNotesDebug in
-// zcash-wallet-service's cli.js and DEBUG_NOTES_TOKEN in server.ts. Remove
-// once answered.
-export async function rawNotesDebug(): Promise<unknown> {
-  return call(`/wallet/notes-raw-debug`);
-}
-
-// Temporary diagnostic -- see the comment on rawHelpDebug in
-// zcash-wallet-service's cli.js. Remove once answered.
-export async function rawHelpDebug(): Promise<unknown> {
-  return call(`/wallet/help-raw-debug`);
-}
-
-// Temporary diagnostics -- see the comment on rawValueTransfersDebug in
-// zcash-wallet-service's cli.js. Remove once answered.
-export async function rawValueTransfersDebug(): Promise<unknown> {
-  return call(`/wallet/value-transfers-raw-debug`);
-}
-
-export async function rawAddressesDebug(): Promise<unknown> {
-  return call(`/wallet/addresses-raw-debug`);
-}
-
-export async function rawBinaryInfoDebug(): Promise<unknown> {
-  return call(`/wallet/binary-info-debug`);
-}
-
-export async function rawNewAddressDebug(): Promise<unknown> {
-  return call(`/wallet/new-address-raw-debug`);
-}
-
-export async function rawValueToAddressDebug(address: string): Promise<unknown> {
-  return call(`/wallet/value-to-address-raw-debug?address=${encodeURIComponent(address)}`);
-}
-
-export async function rawValueToAddressHelpDebug(): Promise<unknown> {
-  return call(`/wallet/value-to-address-help-raw-debug`);
-}
-
 /** Re-registers a watcher for an address that was already generated in a
  * previous process lifetime (see server.ts's startup call to
  * store.getPendingOrdersAwaitingPayment / getPendingTokenCreationsAwaitingPayment).
