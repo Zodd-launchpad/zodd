@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { api, TokenSummary, PricePoint, Trade, formatUsd } from "@/lib/api";
+import { api, TokenSummary, PricePoint, Trade, formatUsd, formatCompactUsd } from "@/lib/api";
 import { useWallet } from "@/lib/wallet";
 import { useLanguage } from "@/lib/i18n";
 import { useZecUsdPrice } from "@/lib/zecPrice";
@@ -145,12 +145,12 @@ export default function TokenPage() {
           <div>
             <div className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>{t("token.stat.volume24h")}</div>
             <div style={{ fontWeight: 700 }}>{fmt(volume24h)} ZEC</div>
-            {formatUsd(volume24h, usdRate) && <div className="muted" style={{ fontSize: 11 }}>{formatUsd(volume24h, usdRate)}</div>}
+            {formatCompactUsd(volume24h, usdRate) && <div className="muted" style={{ fontSize: 11 }}>{formatCompactUsd(volume24h, usdRate)}</div>}
           </div>
           <div>
             <div className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>{t("token.stat.marketCap")}</div>
             <div style={{ fontWeight: 700 }}>{fmt(token.marketCapZec)} ZEC</div>
-            {formatUsd(token.marketCapZec, usdRate) && <div className="muted" style={{ fontSize: 11 }}>{formatUsd(token.marketCapZec, usdRate)}</div>}
+            {formatCompactUsd(token.marketCapZec, usdRate) && <div className="muted" style={{ fontSize: 11 }}>{formatCompactUsd(token.marketCapZec, usdRate)}</div>}
           </div>
           <div>
             <div className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>{t("token.stat.realReserve")}</div>

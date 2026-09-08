@@ -82,6 +82,27 @@ export function formatUsd(zecAmount: number, usdRate: number | null): string | n
   return usd.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: usd < 1 ? 4 : 2 });
 }
 
+/** Same input as formatUsd, but abbreviated ($3.2K, $1.4M, $2.1B) instead of
+ * spelling out every digit -- Brai, 2026-09-08: "quiero que sea algo asi
+ * como 1,3 1,5 5 10... pero no asi 0.000000000000049292 porque esta
+ * complejo de entender". A per-token price is unavoidably a tiny fraction
+ * once a token has a billion-token supply (that's just what the number
+ * is), so this is used for the numbers that ARE meant to read as normal
+ * human-scale figures -- market cap, volume -- rather than for the raw
+ * per-token price itself. Below $1000 this reads identically to formatUsd
+ * (still "<$0.01" for genuine dust, so nothing here hides that a token is
+ * this early). */
+export function formatCompactUsd(zecAmount: number, usdRate: number | null): string | null {
+  if (usdRate === null || !Number.isFinite(zecAmount)) return null;
+  const usd = zecAmount * usdRate;
+  if (usd > 0 && usd < 0.01) return "<$0.01";
+  const abs = Math.abs(usd);
+  if (abs >= 1_000_000_000) return `$${(usd / 1_000_000_000).toFixed(2)}B`;
+  if (abs >= 1_000_000) return `$${(usd / 1_000_000).toFixed(2)}M`;
+  if (abs >= 1_000) return `$${(usd / 1_000).toFixed(2)}K`;
+  return usd.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: usd < 1 ? 4 : 2 });
+}
+
 /** Brai, 2026-09-07: the backend's disambiguation bump (pickAndReserveAmount
  * in zcashReal.ts) nudges an order's zecAmount by 1 zatoshi at a time to
  * keep it unique -- invisible on its own, but raw JS float math (e.g.

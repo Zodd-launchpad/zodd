@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { api, TokenSummary, formatUsd } from "@/lib/api";
+import { api, TokenSummary, formatCompactUsd } from "@/lib/api";
 import { useLanguage } from "@/lib/i18n";
 import { useZecUsdPrice } from "@/lib/zecPrice";
 import { isOfficialToken, OfficialCheckmark } from "./OfficialBadge";
@@ -47,7 +47,7 @@ function TokenCard({
   featured?: boolean;
   featuredLabel?: string;
 }) {
-  const mcUsd = formatUsd(token.marketCapZec, usdRate);
+  const mcUsd = formatCompactUsd(token.marketCapZec, usdRate);
   return (
     <Link href={`/launchpad/token/${token.symbol}`} className={featured ? "board-card board-card-featured" : "board-card"}>
       {graduatedTag && <div className="board-card-pill">GRAD</div>}

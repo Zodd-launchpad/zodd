@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { api, TokenSummary, formatUsd } from "@/lib/api";
+import { api, TokenSummary, formatCompactUsd } from "@/lib/api";
 import { useLanguage } from "@/lib/i18n";
 import { useZecUsdPrice } from "@/lib/zecPrice";
 import { isOfficialToken, OfficialCheckmark } from "../OfficialBadge";
@@ -211,7 +211,16 @@ export default function MarketPage() {
           <tbody>
             {visibleTokens.map((t2) => {
               const gradPct = Math.min(100, (t2.realZecReserves / t2.graduationThresholdZec) * 100);
-              const change = t2.priceChange24hPct;
+              // Brai, 2026-09-08: "el panel de 24 horas ahi no funciona" /
+              // "si durante 24 horas no hubo actividad deja la actividad
+              // de las ultimas 24 horas" -- priceChange24hPct is null for
+              // any token under 24h old (which, as of 2026-09-08, is every
+              // token here -- the platform launched yesterday), so this
+              // column was permanently "—". Same fallback as the top
+              // ticker: use the real 24h figure once a token has one,
+              // otherwise fall back to its since-launch change instead of
+              // sitting blank.
+              const change = t2.priceChange24hPct ?? t2.priceChangeSinceLaunchPct;
               return (
                 <tr key={t2.symbol} onClick={() => (location.href = `/launchpad/token/${t2.symbol}`)}>
                   <td>
@@ -233,11 +242,12 @@ export default function MarketPage() {
                   </td>
                   <td className="mono">
                     {fmtPrice(t2.priceZec)} ZEC
-                    {formatUsd(t2.priceZec, usdRate) && <div className="muted" style={{ fontSize: 11 }}>{formatUsd(t2.priceZec, usdRate)}</div>}
                   </td>
                   <td className="mono">
                     {fmt(t2.marketCapZec)} ZEC
-                    {formatUsd(t2.marketCapZec, usdRate) && <div className="muted" style={{ fontSize: 11 }}>{formatUsd(t2.marketCapZec, usdRate)}</div>}
+                    {formatCompactUsd(t2.marketCapZec, usdRate) && (
+                      <div className="muted" style={{ fontSize: 11 }}>{formatCompactUsd(t2.marketCapZec, usdRate)}</div>
+                    )}
                   </td>
                   <td className="mono" style={{ color: change == null ? undefined : change > 0 ? "var(--green)" : change < 0 ? "var(--red)" : undefined }}>
                     {change == null ? "—" : `${change > 0 ? "+" : ""}${change.toFixed(2)}%`}
