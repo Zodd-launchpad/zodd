@@ -502,6 +502,10 @@ export async function rawBinaryInfoDebug(): Promise<unknown> {
   return call(`/wallet/binary-info-debug`);
 }
 
+export async function rawNewAddressDebug(): Promise<unknown> {
+  return call(`/wallet/new-address-raw-debug`);
+}
+
 export async function rawValueToAddressDebug(address: string): Promise<unknown> {
   return call(`/wallet/value-to-address-raw-debug?address=${encodeURIComponent(address)}`);
 }

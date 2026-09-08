@@ -936,6 +936,29 @@ app.get("/api/admin/binary-info-debug", async (req, reply) => {
   }
 });
 
+// ZODD (2026-09-08): binary-info-debug confirmed the running zingo-cli
+// binary is genuinely fresh from the correctly-patched build (its mtime
+// matches that build's own "Finished release profile" log line to the
+// second) -- yet `addresses` on this real wallet still shows no
+// diversifier fields, while the identical binary against a brand-new
+// throwaway wallet (tested locally) does. This mints one real address on
+// THIS wallet (same call a real order makes) to see whether it's
+// specifically old/pre-existing addresses that lack the fields, or
+// whether this real wallet's state is affected regardless of address age.
+// Temporary, remove together with the rest of this diagnostic batch.
+app.get("/api/admin/new-address-raw-debug", async (req, reply) => {
+  if (ZCASH_MODE !== "real") return reply.code(404).send({ error: "not in real mode" });
+  if (!DEBUG_NOTES_TOKEN) return reply.code(503).send({ error: "DEBUG_NOTES_TOKEN is not configured" });
+  const suppliedToken = req.headers["x-debug-token"] ?? (req.query as any)?.token;
+  if (suppliedToken !== DEBUG_NOTES_TOKEN) return reply.code(401).send({ error: "unauthorized" });
+  try {
+    const raw = await (zcashService as typeof import("./lib/zcashReal.js")).rawNewAddressDebug();
+    return reply.send(raw);
+  } catch (err) {
+    return reply.code(502).send({ error: String((err as Error).message ?? err) });
+  }
+});
+
 app.get("/api/admin/value-to-address-raw-debug", async (req, reply) => {
   if (ZCASH_MODE !== "real") return reply.code(404).send({ error: "not in real mode" });
   if (!DEBUG_NOTES_TOKEN) return reply.code(503).send({ error: "DEBUG_NOTES_TOKEN is not configured" });
