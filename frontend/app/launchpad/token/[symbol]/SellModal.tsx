@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { api, formatUsd, formatZec } from "@/lib/api";
 import { useLanguage } from "@/lib/i18n";
+import { useZecUsdPrice } from "@/lib/zecPrice";
 
 // Chops off float noise (e.g. balance/2 landing on 175199.50000000001) so
 // the Max/Half buttons drop a clean value into the input instead of
@@ -24,16 +25,36 @@ function isShieldedAddress(addr: string): boolean {
 
 export default function SellModal({ symbol, walletId, onClose }: { symbol: string; walletId: string; onClose: () => void }) {
   const { t } = useLanguage();
+  const usdRate = useZecUsdPrice();
   const [tokenAmount, setTokenAmount] = useState("");
   const [refundAddress, setRefundAddress] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{ zecAmount: number } | null>(null);
   const [balance, setBalance] = useState<number | null>(null);
   const [isRealMode, setIsRealMode] = useState(false);
+  // Brai, 2026-09-08: "no olvides hacer que aparezca aqui los zec que te
+  // tiene que dar" -- spot-price estimate (amount * current priceZec), same
+  // approximation BuyModal already uses for its own ZEC/USD preview. Real
+  // proceeds can differ slightly once the order actually executes against
+  // the live bonding curve; that's why this is always shown with "≈".
+  const [priceZec, setPriceZec] = useState<number | null>(null);
 
   useEffect(() => {
     api.getMode().then((m) => setIsRealMode(m.zcashMode === "real")).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    let stop = false;
+    api
+      .getToken(symbol)
+      .then((tok) => {
+        if (!stop) setPriceZec(tok.priceZec);
+      })
+      .catch(() => {});
+    return () => {
+      stop = true;
+    };
+  }, [symbol]);
 
   useEffect(() => {
     let stop = false;
@@ -81,6 +102,18 @@ export default function SellModal({ symbol, walletId, onClose }: { symbol: strin
             <div className="field">
               <label>{t("sell.amountLabel", { symbol })}</label>
               <input value={tokenAmount} onChange={(e) => setTokenAmount(e.target.value)} />
+              {priceZec != null &&
+                (() => {
+                  const amt = parseFloat(tokenAmount) || 0;
+                  if (amt <= 0) return null;
+                  const estZec = amt * priceZec;
+                  const usd = formatUsd(estZec, usdRate);
+                  return (
+                    <span className="muted" style={{ fontSize: 11, marginTop: 4, display: "block" }}>
+                      ≈ {formatZec(estZec)} ZEC{usd && ` (≈ ${usd})`}
+                    </span>
+                  );
+                })()}
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 6 }}>
                 <span className="muted" style={{ fontSize: 12 }}>
                   {balance !== null ? t("sell.balance", { amount: fmtBalance(balance), symbol }) : "…"}
