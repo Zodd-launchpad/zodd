@@ -125,9 +125,12 @@ export default function HomeTokenBoards() {
   const graduated = (tokens ?? [])
     .filter((t) => t.graduated)
     .sort((a, b) => b.marketCapZec - a.marketCapZec);
+  // Brai, 2026-09-08: "ordename adelante los que mas market cap tengan" --
+  // was newest-first; now highest market cap first, same ordering as the
+  // Graduated board above.
   const exploring = (tokens ?? [])
     .filter((t) => !t.graduated)
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    .sort((a, b) => b.marketCapZec - a.marketCapZec);
 
   // Brai, 2026-09-08: "me gusto eso de que aparezca mas grande pero que
   // aparezca solo uno mas grande, el que este mas cercano a graduarse" --

@@ -34,7 +34,7 @@ export const translations = {
   "home.board.graduated.title": { en: "Graduated", zh: "已毕业" },
   "home.board.graduated.sub": { en: "Tokens that cleared the graduation threshold.", zh: "已达到毕业门槛的代币。" },
   "home.board.explore.title": { en: "Explore", zh: "探索" },
-  "home.board.explore.sub": { en: "Tokens still climbing toward graduation, newest first.", zh: "仍在向毕业迈进的代币，按最新排列。" },
+  "home.board.explore.sub": { en: "Tokens still climbing toward graduation, highest market cap first.", zh: "仍在向毕业迈进的代币，按市值从高到低排列。" },
   "home.board.empty.graduated": { en: "No tokens have graduated yet.", zh: "还没有代币毕业。" },
   "home.board.empty.explore": { en: "No tokens yet -- be the first to launch one.", zh: "还没有代币——快来发行第一个吧。" },
   "home.board.viewAll": { en: "View all in the Launchpad →", zh: "在发射台查看全部 →" },
