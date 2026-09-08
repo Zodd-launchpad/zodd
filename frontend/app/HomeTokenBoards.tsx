@@ -33,11 +33,24 @@ function WebsiteIcon() {
   );
 }
 
-function TokenCard({ token, graduatedTag, usdRate }: { token: TokenSummary; graduatedTag?: boolean; usdRate: number | null }) {
+function TokenCard({
+  token,
+  graduatedTag,
+  usdRate,
+  featured,
+  featuredLabel,
+}: {
+  token: TokenSummary;
+  graduatedTag?: boolean;
+  usdRate: number | null;
+  featured?: boolean;
+  featuredLabel?: string;
+}) {
   const mcUsd = formatUsd(token.marketCapZec, usdRate);
   return (
-    <Link href={`/launchpad/token/${token.symbol}`} className="board-card">
+    <Link href={`/launchpad/token/${token.symbol}`} className={featured ? "board-card board-card-featured" : "board-card"}>
       {graduatedTag && <div className="board-card-pill">GRAD</div>}
+      {featured && <div className="board-card-pill board-card-pill-featured">{featuredLabel}</div>}
       {token.logoDataUrl ? (
         <img src={token.logoDataUrl} alt="" />
       ) : (
@@ -112,6 +125,19 @@ export default function HomeTokenBoards() {
     .filter((t) => !t.graduated)
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
+  // Brai, 2026-09-08: "me gusto eso de que aparezca mas grande pero que
+  // aparezca solo uno mas grande, el que este mas cercano a graduarse" --
+  // show one enlarged "hero" card in the Explore board for whichever token
+  // has made the most progress toward its graduation threshold, regardless
+  // of where it falls in the newest-first ordering above.
+  const closestToGraduating = exploring.reduce<TokenSummary | null>((best, tk) => {
+    if (tk.graduationThresholdZec <= 0) return best;
+    const progress = tk.marketCapZec / tk.graduationThresholdZec;
+    if (!best) return tk;
+    const bestProgress = best.marketCapZec / best.graduationThresholdZec;
+    return progress > bestProgress ? tk : best;
+  }, null);
+
   return (
     <div style={{ padding: "0 24px 12px" }}>
       <div className="board-frame">
@@ -146,7 +172,13 @@ export default function HomeTokenBoards() {
         ) : (
           <div className="board-grid">
             {exploring.slice(0, BOARD_SIZE).map((tk) => (
-              <TokenCard key={tk.symbol} token={tk} usdRate={usdRate} />
+              <TokenCard
+                key={tk.symbol}
+                token={tk}
+                usdRate={usdRate}
+                featured={tk.symbol === closestToGraduating?.symbol}
+                featuredLabel={t("home.board.explore.closest")}
+              />
             ))}
           </div>
         )}

@@ -418,6 +418,25 @@ tr:hover td { background: #151517; cursor: pointer; }
   padding: 2px 5px;
   z-index: 1;
 }
+/* Brai, 2026-09-08: one enlarged "hero" card in the Explore board for the
+   token closest to its graduation threshold -- spans a 2x2 area of the
+   5-column grid so it reads as bigger without breaking the grid on smaller
+   breakpoints (still <= column count at 3-col/2-col). */
+.board-card-featured {
+  grid-column: span 2;
+  grid-row: span 2;
+}
+.board-card-featured .sym { font-size: 22px; }
+.board-card-featured .name { font-size: 15px; margin-bottom: 8px; }
+.board-card-featured .mc { font-size: 16px; }
+.board-card-pill-featured {
+  top: auto;
+  left: auto;
+  right: 6px;
+  bottom: 6px;
+  color: var(--bronze);
+  border-color: var(--bronze-dim);
+}
 .board-viewall {
   display: block;
   text-align: center;

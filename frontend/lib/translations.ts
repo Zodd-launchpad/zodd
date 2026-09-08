@@ -38,6 +38,7 @@ export const translations = {
   "home.board.empty.graduated": { en: "No tokens have graduated yet.", zh: "还没有代币毕业。" },
   "home.board.empty.explore": { en: "No tokens yet -- be the first to launch one.", zh: "还没有代币——快来发行第一个吧。" },
   "home.board.viewAll": { en: "View all in the Launchpad →", zh: "在发射台查看全部 →" },
+  "home.board.explore.closest": { en: "Closest to graduating", zh: "最接近毕业" },
   "home.launchpad.tag": { en: "Meme markets", zh: "表情包市场" },
   "home.launchpad.title": { en: "Launchpad", zh: "发射台" },
   "home.launchpad.desc": { en: "Launch and trade shielded meme tokens on Zcash.", zh: "在 Zcash 上发行和交易屏蔽式表情包代币。" },
