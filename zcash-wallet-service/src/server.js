@@ -174,6 +174,22 @@ app.get("/wallet/binary-info-debug", async (_req, reply) => {
   }
 });
 
+// ZODD (2026-09-08): mints one real address on this wallet, same as a real
+// order would -- to test whether NEW addresses on this real wallet show
+// the diversifier fields, isolating whether it's an old-address-only
+// issue or affects this real wallet's state entirely. Temporary, remove
+// together with the rest of this diagnostic batch.
+app.get("/wallet/new-address-raw-debug", async (_req, reply) => {
+  if (!ready) return reply.code(503).send({ error: "wallet not ready yet", detail: readyError });
+  try {
+    const raw = await cli.rawNewAddressDebug();
+    return reply.send(raw);
+  } catch (err) {
+    app.log.error(err);
+    return reply.code(500).send({ error: String(err.message ?? err) });
+  }
+});
+
 app.post("/wallet/send", async (req, reply) => {
   if (!ready) return reply.code(503).send({ error: "wallet not ready yet", detail: readyError });
   const { address, zatoshis, memo } = req.body ?? {};

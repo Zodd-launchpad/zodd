@@ -260,6 +260,24 @@ export async function rawAddressesDebug() {
   return listAddresses();
 }
 
+// ZODD (2026-09-08): binary-info-debug confirmed the running zingo-cli
+// binary's mtime matches, to the second, this exact build's own "Finished
+// release profile" log line -- so it genuinely IS the freshly compiled,
+// correctly patched binary, not a stale one. Yet `addresses` on THIS
+// wallet's real, already-populated wallet.dat still shows no diversifier
+// fields, while the identical patched binary run against a brand-new
+// throwaway offline wallet (tested locally) shows them correctly. This
+// calls the exact same `new_address` codepath production uses to mint a
+// real order address (same function as /wallet/address), against THIS
+// real wallet.dat, to see whether it's old vs. new addresses that differ,
+// or whether the real wallet's own loaded state differs regardless of
+// address age. Mutates the wallet (adds one more address, exactly like a
+// real order would) -- safe, that's normal operation. Temporary, remove
+// together with the rest of this diagnostic batch.
+export async function rawNewAddressDebug() {
+  return newAddress();
+}
+
 // ZODD (2026-09-08): the deployed `addresses`/`notes` output was NOT
 // showing the new diversifier fields even after a Railway build/deploy
 // whose logs showed the patch step (git apply) and the cargo build both
