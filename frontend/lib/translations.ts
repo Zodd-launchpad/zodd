@@ -405,6 +405,7 @@ export const translations = {
   "trades.ago.minutes": { en: "{n}m ago", zh: "{n}分钟前" },
   "trades.ago.hours": { en: "{n}h ago", zh: "{n}小时前" },
   "trades.ago.days": { en: "{n}d ago", zh: "{n}天前" },
+  "activity.heading": { en: "LIVE ACTIVITY", zh: "实时动态" },
 } as const satisfies Record<string, Record<Lang, string>>;
 
 export type TranslationKey = keyof typeof translations;

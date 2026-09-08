@@ -17,6 +17,7 @@ export interface TokenSummary {
   priceZec: number;
   /** % change vs. ~24h ago; null when the token isn't old enough yet to have one. */
   priceChange24hPct: number | null;
+  priceChangeSinceLaunchPct: number | null;
   marketCapZec: number;
   realZecReserves: number;
   tokensSold: number;
@@ -61,6 +62,10 @@ export interface Trade {
   tokenAmount: number;
   zecAmount: number;
   createdAt: string;
+}
+
+export interface GlobalTrade extends Trade {
+  symbol: string;
 }
 
 let modePromise: Promise<{ zcashMode: "real" | "mock"; tokenCreateFeeZec: number }> | null = null;
@@ -118,6 +123,7 @@ export const api = {
   getToken: (symbol: string): Promise<TokenSummary> => req(`/api/tokens/${symbol}`),
   getHistory: (symbol: string): Promise<PricePoint[]> => req(`/api/tokens/${symbol}/history`),
   getTrades: (symbol: string): Promise<Trade[]> => req(`/api/tokens/${symbol}/trades`),
+  getRecentTradesGlobal: (): Promise<GlobalTrade[]> => req(`/api/trades`),
   // Reserves the symbol/name/profile and returns a one-time address for the
   // creator to pay the create fee from their own wallet -- the token itself
   // only actually exists once that payment is detected (poll getTokenCreation).

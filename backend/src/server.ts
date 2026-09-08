@@ -257,6 +257,14 @@ app.get("/api/tokens/:symbol/trades", async (req, reply) => {
   return reply.send(await store.getRecentTrades(token.id, 100));
 });
 
+// Site-wide trade feed across every token, for the small always-on
+// activity panel (Brai, 2026-09-08). Public/no-auth, same as the
+// per-token version above -- it's just recent FILLED orders, no
+// wallet-identifying info.
+app.get("/api/trades", async (req, reply) => {
+  return reply.send(await store.getRecentTradesGlobal(30));
+});
+
 async function serializeToken(t: store.TokenWithCurve) {
   const priceZec = currentPrice(t.curve);
   return {
@@ -265,6 +273,7 @@ async function serializeToken(t: store.TokenWithCurve) {
     totalSupply: t.totalSupply,
     priceZec,
     priceChange24hPct: await store.getPriceChange24hPct(t.id, priceZec),
+    priceChangeSinceLaunchPct: await store.getPriceChangeSinceLaunchPct(t.id, priceZec),
     marketCapZec: marketCapZec(t.curve, t.totalSupply),
     realZecReserves: t.curve.realZecReserves,
     tokensSold: t.curve.tokensSold,

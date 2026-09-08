@@ -42,7 +42,15 @@ export default function TickerBar() {
   const row = (dupKey: string) => (
     <div className="ticker-row" aria-hidden={dupKey === "dup" || undefined}>
       {tokens.map((tok) => {
-        const pct = tok.priceChange24hPct;
+        // Brai, 2026-09-08: "esa barra tiene que decir cuanto subio o bajo
+        // la moneda" -- priceChange24hPct is null for every token here
+        // (none is 24h old yet, the platform only launched yesterday), so
+        // the ticker fell back to showing "NEW" forever with no real
+        // number. Use the true 24h figure once a token has one; until
+        // then, fall back to the since-launch figure (a real, non-fabricated
+        // number, just not a strict 24h window -- see
+        // getPriceChangeSinceLaunchPct in store.ts).
+        const pct = tok.priceChange24hPct ?? tok.priceChangeSinceLaunchPct;
         const isNew = pct === null;
         const isUp = !isNew && pct >= 0;
         return (

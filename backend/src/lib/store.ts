@@ -475,6 +475,29 @@ export async function getPriceChange24hPct(tokenId: string, currentPriceZec: num
   return ((currentPriceZec - oldPrice) / oldPrice) * 100;
 }
 
+/** % change vs. the very first recorded price point for this token (set at
+ * creation, see recordPricePoint in createToken) -- used only by the
+ * scrolling top ticker, NOT the "24h" column on the market list table.
+ * getPriceChange24hPct above returns null for any token under 24h old
+ * (every token on this platform, as of 2026-09-08 -- it launched
+ * yesterday), which the ticker was showing as a permanent "NEW" tag with
+ * zero information. Brai, 2026-09-08: "esa barra tiene que decir cuanto
+ * subio o bajo la moneda". This is a real, non-fabricated number -- just a
+ * "since launch" window instead of a strict 24h one -- which is why it's
+ * kept as a separate field instead of changing what getPriceChange24hPct
+ * means (that would make the market list's literal "24h" column header a
+ * lie for young tokens). */
+export async function getPriceChangeSinceLaunchPct(tokenId: string, currentPriceZec: number): Promise<number | null> {
+  const point = await prisma.pricePoint.findFirst({
+    where: { tokenId },
+    orderBy: { createdAt: "asc" },
+  });
+  if (!point) return null;
+  const oldPrice = num(point.priceZec);
+  if (oldPrice <= 0) return null;
+  return ((currentPriceZec - oldPrice) / oldPrice) * 100;
+}
+
 // ---------- Recent trades (for the trade feed) ----------
 
 export interface TradeView {
@@ -504,6 +527,31 @@ export async function getRecentTrades(tokenId: string, limit = 50): Promise<Trad
     side: o.side as OrderSide,
     tokenAmount: num(o.tokenAmount),
     zecAmount: num(o.zecAmount),
+    createdAt: (o.filledAt ?? o.createdAt).toISOString(),
+  }));
+}
+
+export interface GlobalTradeView extends TradeView {
+  symbol: string;
+}
+
+// Brai, 2026-09-08: "necsito movimiento en la pagina sino parece que nadie
+// esta comprando y vendiendo" -- a site-wide feed (not per-token) for a
+// small always-on activity panel. Same FILLED/filledAt sorting rationale
+// as getRecentTrades above; joins in the token symbol since this spans
+// every token instead of one.
+export async function getRecentTradesGlobal(limit = 30): Promise<GlobalTradeView[]> {
+  const orders = await prisma.order.findMany({
+    where: { status: "FILLED" },
+    orderBy: { filledAt: "desc" },
+    take: limit,
+    include: { token: { select: { symbol: true } } },
+  });
+  return orders.map((o) => ({
+    side: o.side as OrderSide,
+    tokenAmount: num(o.tokenAmount),
+    zecAmount: num(o.zecAmount),
+    symbol: o.token.symbol,
     createdAt: (o.filledAt ?? o.createdAt).toISOString(),
   }));
 }

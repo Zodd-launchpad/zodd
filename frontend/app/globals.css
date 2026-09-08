@@ -132,6 +132,61 @@ tr:hover td { background: #151517; cursor: pointer; }
 .pill.up { color: var(--green); }
 .pill.down { color: var(--red); }
 
+/* Brai, 2026-09-08: always-on real buy/sell feed, pinned to the left edge
+   so the page reads as active. Fixed + vertically centered rather than
+   pegged under the banners, so it never has to know their combined height.
+   Only shown on wide viewports: .container tops out at 1100px, so this
+   needs (viewport - 1100) / 2 >= ~200px of side margin to clear it --
+   hidden below 1500px width via the media query further down. */
+.activity-feed {
+  position: fixed;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 178px;
+  max-height: 66vh;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  padding: 10px 8px;
+  z-index: 20;
+}
+.activity-feed-heading {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  padding: 0 4px 8px;
+}
+.activity-feed-list { display: flex; flex-direction: column; gap: 2px; }
+.activity-row {
+  display: block;
+  padding: 6px 4px;
+  border-radius: 6px;
+  text-decoration: none;
+  color: inherit;
+  animation: activity-row-in 0.35s ease-out;
+}
+.activity-row:hover { background: rgba(255,255,255,0.04); }
+.activity-row-amount {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.35;
+  word-break: break-word;
+}
+.activity-row-amount.up { color: var(--green); }
+.activity-row-amount.down { color: var(--red); }
+.activity-row-arrow { opacity: 0.6; }
+.activity-row-time { display: block; font-size: 10px; margin-top: 1px; }
+@keyframes activity-row-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (max-width: 1499px) {
+  .activity-feed { display: none; }
+}
+
 .btn {
   padding: 10px 18px;
   border-radius: 6px;
