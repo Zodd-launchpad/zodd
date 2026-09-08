@@ -2,15 +2,11 @@
 import Link from "next/link";
 import { useLanguage } from "@/lib/i18n";
 import HomeTokenBoards from "./HomeTokenBoards";
-import ActivityFeed from "./ActivityFeed";
 
 export default function HomePage() {
   const { t } = useLanguage();
   return (
     <>
-      {/* Brai, 2026-09-08: "el panel tiene que estar en el home" -- home
-          page only, not site-wide. */}
-      <ActivityFeed />
       <div className="hero-banner">
         <img src="/zodd-hero.jpg" alt="ZODD, the unofficial Zodl mascot" />
         <div className="hero-banner-fade" />

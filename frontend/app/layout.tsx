@@ -6,6 +6,7 @@ import DemoBanner from "./DemoBanner";
 import TickerBar from "./TickerBar";
 import HeaderBar from "./HeaderBar";
 import DisclaimerBanner from "./DisclaimerBanner";
+import ActivityFeed from "./ActivityFeed";
 
 export const metadata = {
   title: "ZODD — Zodl community mascot (experimental demo)",
@@ -21,6 +22,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <DemoBanner />
               <TickerBar />
               <HeaderBar />
+              {/* Brai, 2026-09-08: "el live activity que este siempre
+                  presente, en todas las... [paginas]" / "cuando estas en
+                  un token que tambien este" -- site-wide now, not just the
+                  home page. */}
+              <ActivityFeed />
               {children}
               <DisclaimerBanner />
             </WalletProvider>
