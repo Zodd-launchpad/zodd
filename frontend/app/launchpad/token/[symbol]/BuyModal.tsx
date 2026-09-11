@@ -170,7 +170,7 @@ export default function BuyModal({
             <div className="field">
               <label>{t("buy.refundAddressLabel")}</label>
               <input value={refundAddress} onChange={(e) => setRefundAddress(e.target.value)} placeholder={currency === "YEC" ? "u1... / ys1..." : "u1... / zs1..."} />
-              <span className="muted" style={{ fontSize: 11, marginTop: 4, display: "block" }}>{t("buy.refundAddressHint")}</span>
+              <span className="muted" style={{ fontSize: 11, marginTop: 4, display: "block" }}>{t(currency === "YEC" ? "buy.refundAddressHintYec" : "buy.refundAddressHint")}</span>
             </div>
             {error && <p style={{ color: "var(--red)", fontSize: 13 }}>{error}</p>}
             <button className="btn btn-gold" style={{ width: "100%" }} onClick={submitBuy}>

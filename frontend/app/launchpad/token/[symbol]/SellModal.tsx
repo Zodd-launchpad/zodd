@@ -157,7 +157,7 @@ export default function SellModal({
             <div className="field">
               <label>{t("sell.addressLabel")}</label>
               <input value={refundAddress} onChange={(e) => setRefundAddress(e.target.value)} placeholder={currency === "YEC" ? "u1... / ys1..." : "u1... / zs1..."} />
-              <span className="muted" style={{ fontSize: 11, marginTop: 4, display: "block" }}>{t("sell.addressHint")}</span>
+              <span className="muted" style={{ fontSize: 11, marginTop: 4, display: "block" }}>{t(currency === "YEC" ? "sell.addressHintYec" : "sell.addressHint")}</span>
             </div>
             {error && <p style={{ color: "var(--red)", fontSize: 13 }}>{error}</p>}
             <button className="btn btn-red" style={{ width: "100%" }} onClick={submit}>

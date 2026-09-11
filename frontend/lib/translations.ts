@@ -360,6 +360,9 @@ export const translations = {
   "buy.error.invalidAmount": { en: "invalid amount", zh: "金额无效" },
   "buy.refundAddressLabel": { en: "Refund address (yours; kept on this device only)", zh: "退款地址（你的地址，仅保存在本设备）" },
   "buy.refundAddressHint": { en: "Must start with u1... or zs1... (transparent t1... addresses aren't accepted). If this order ever needs a manual refund, this is where it goes.", zh: "必须以 u1... 或 zs1... 开头（不接受透明的 t1... 地址）。如果这笔订单日后需要人工退款，会退到这个地址。" },
+  // Brai, 2026-09-11: same as above but for a YEC order -- Ycash's shielded
+  // addresses use the "ys1" prefix instead of "zs1".
+  "buy.refundAddressHintYec": { en: "Must start with u1... or ys1... (transparent t1... addresses aren't accepted). If this order ever needs a manual refund, this is where it goes.", zh: "必须以 u1... 或 ys1... 开头（不接受透明的 t1... 地址）。如果这笔订单日后需要人工退款，会退到这个地址。" },
   "buy.error.invalidAddress": { en: "enter a valid shielded refund address (u1... or zs1...)", zh: "请输入有效的屏蔽式退款地址（u1... 或 zs1...）" },
   "buy.addressCopied": { en: "Copied", zh: "已复制" },
 
@@ -371,6 +374,9 @@ export const translations = {
   "sell.max": { en: "Max", zh: "最大" },
   "sell.addressLabel": { en: "Your shielded Zcash address (payout)", zh: "你的屏蔽式 Zcash 地址（收款）" },
   "sell.addressHint": { en: "Must start with u1... or zs1... (transparent t1... addresses aren't accepted)", zh: "必须以 u1... 或 zs1... 开头（不接受透明的 t1... 地址）" },
+  // Brai, 2026-09-11: same as above but for a YEC sell -- see the matching
+  // buy.refundAddressHintYec.
+  "sell.addressHintYec": { en: "Must start with u1... or ys1... (transparent t1... addresses aren't accepted)", zh: "必须以 u1... 或 ys1... 开头（不接受透明的 t1... 地址）" },
   "sell.button": { en: "Sell", zh: "卖出" },
   "sell.payoutSent": { en: "Payout sent", zh: "打款已发送" },
   "sell.payoutBody.real": { en: "{amount} {currency} sent to your address.", zh: "{amount} {currency} 已发送到你的地址。" },
