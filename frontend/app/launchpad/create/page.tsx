@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import QRCode from "qrcode";
 import { useWallet } from "@/lib/wallet";
-import { api, formatUsd, formatZec } from "@/lib/api";
+import { api, formatUsd, formatZec, type Currency } from "@/lib/api";
 import { useLanguage } from "@/lib/i18n";
 import { useZecUsdPrice } from "@/lib/zecPrice";
 import { fileToSquareDataUrl } from "@/lib/imageResize";
@@ -15,6 +15,10 @@ export default function CreatePage() {
   const usdRate = useZecUsdPrice();
   const [symbol, setSymbol] = useState("");
   const [name, setName] = useState("");
+  // Brai, 2026-09-11: "quiero que puedas trabajar con Ycash y Zcash" -- each
+  // token trades in exactly ONE currency for its whole life, picked here at
+  // creation. Defaults to ZEC so existing behavior/flows are unchanged.
+  const [currency, setCurrency] = useState<Currency>("ZEC");
   const [creatorPayoutAddress, setCreatorPayoutAddress] = useState("");
   const [description, setDescription] = useState("");
   const [twitterUrl, setTwitterUrl] = useState("");
@@ -32,8 +36,14 @@ export default function CreatePage() {
   const [zecAddress, setZecAddress] = useState<string | null>(null);
   const [zecAmount, setZecAmount] = useState<number | null>(null);
   const [qr, setQr] = useState<string | null>(null);
-  const [isRealMode, setIsRealMode] = useState(false);
-  const [createFeeZec, setCreateFeeZec] = useState<number | null>(null);
+  // Brai, 2026-09-11: per-currency mode/fee/first-buy-cap now, instead of a
+  // single flat value -- see /api/mode in server.ts. isRealMode/createFeeZec/
+  // maxFirstBuyZec below are all derived from this for whichever `currency`
+  // is currently selected.
+  const [currencies, setCurrencies] = useState<{ ZEC: { mode: "real" | "mock"; createFeeZec: number; maxFirstBuyZec: number }; YEC: { mode: "real" | "mock"; createFeeZec: number; maxFirstBuyZec: number } } | null>(null);
+  const isRealMode = currencies?.[currency]?.mode === "real";
+  const createFeeZec = currencies?.[currency]?.createFeeZec ?? null;
+  const maxFirstBuyZec = currencies?.[currency]?.maxFirstBuyZec ?? 0.1;
   // Breakdown of the pending payment, as confirmed by the backend (may
   // differ slightly from the form's own numbers -- e.g. a discounted
   // create fee for a gated wallet) -- shown on the waiting screen.
@@ -48,10 +58,7 @@ export default function CreatePage() {
   useEffect(() => {
     api
       .getMode()
-      .then((m) => {
-        setIsRealMode(m.zcashMode === "real");
-        setCreateFeeZec(m.tokenCreateFeeZec);
-      })
+      .then((m) => setCurrencies(m.currencies))
       .catch(() => {});
   }, []);
 
@@ -91,6 +98,7 @@ export default function CreatePage() {
         symbol,
         name,
         creatorWalletId: wallet.walletId,
+        currency,
         creatorPayoutAddress: creatorPayoutAddress.trim() || undefined,
         logoDataUrl: logoDataUrl ?? undefined,
         description: description.trim() || undefined,
@@ -109,7 +117,11 @@ export default function CreatePage() {
       // makes this creation's payment identifiable by its own unique id
       // regardless of how many other creators are paying the same fee at
       // the same time.
-      const uri = `zcash:${res.zecAddress}?amount=${res.zecAmount}${res.memo ? `&memo=${res.memo}` : ""}`;
+      // Brai, 2026-09-11: currency-aware payment URI scheme -- res.currency
+      // is whichever currency was actually confirmed by the backend (always
+      // matches the `currency` we just sent).
+      const scheme = res.currency === "YEC" ? "ycash" : "zcash";
+      const uri = `${scheme}:${res.zecAddress}?amount=${res.zecAmount}${res.memo ? `&memo=${res.memo}` : ""}`;
       setPaymentUri(uri);
       setQr(await QRCode.toDataURL(uri, { margin: 1, width: 220 }));
       setPhase("waiting");
@@ -173,26 +185,26 @@ export default function CreatePage() {
           <p className="muted" style={{ textAlign: "center", marginBottom: 4, textTransform: "uppercase", letterSpacing: 1, fontSize: 11 }}>
             {t("create.waiting.title")}
           </p>
-          <h2 style={{ marginTop: 0, textAlign: "center", fontSize: 40, lineHeight: 1.1 }}>{zecAmount != null ? formatZec(zecAmount) : zecAmount} ZEC</h2>
-          {formatUsd(zecAmount ?? 0, usdRate) && (
+          <h2 style={{ marginTop: 0, textAlign: "center", fontSize: 40, lineHeight: 1.1 }}>{zecAmount != null ? formatZec(zecAmount) : zecAmount} {currency}</h2>
+          {currency === "ZEC" && formatUsd(zecAmount ?? 0, usdRate) && (
             <p className="muted" style={{ textAlign: "center", marginTop: -8 }}>≈ {formatUsd(zecAmount ?? 0, usdRate)}</p>
           )}
           <p className="muted" style={{ textAlign: "center" }}>
-            {t("create.waiting.sendExactly", { amount: zecAmount != null ? formatZec(zecAmount) : "", symbol })}
+            {t("create.waiting.sendExactly", { amount: zecAmount != null ? formatZec(zecAmount) : "", symbol, currency })}
           </p>
           {paymentBreakdown && paymentBreakdown.firstBuyZec > 0 && (
             <div style={{ fontSize: 12, border: "1px solid var(--border)", borderRadius: 4, padding: "8px 10px", margin: "8px 0" }}>
               <div style={{ display: "flex", justifyContent: "space-between" }}>
                 <span className="muted">{t("create.breakdown.launchFee")}</span>
-                <span>{formatZec(paymentBreakdown.createFeeZec)} ZEC</span>
+                <span>{formatZec(paymentBreakdown.createFeeZec)} {currency}</span>
               </div>
               <div style={{ display: "flex", justifyContent: "space-between" }}>
                 <span className="muted">{t("create.breakdown.firstBuy")}</span>
-                <span>{formatZec(paymentBreakdown.firstBuyZec)} ZEC</span>
+                <span>{formatZec(paymentBreakdown.firstBuyZec)} {currency}</span>
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", borderTop: "1px solid var(--border)", marginTop: 4, paddingTop: 4, fontWeight: 600 }}>
                 <span>{t("create.breakdown.send")}</span>
-                <span>{zecAmount != null ? formatZec(zecAmount) : ""} ZEC</span>
+                <span>{zecAmount != null ? formatZec(zecAmount) : ""} {currency}</span>
               </div>
             </div>
           )}
@@ -264,13 +276,34 @@ export default function CreatePage() {
     <div className="container" style={{ maxWidth: 480 }}>
       <h1 style={{ fontSize: 18 }}>{t("create.title")}</h1>
       <p className="muted" style={{ marginBottom: 8 }}>
-        {t("create.feeNote", { amount: createFeeZec ?? "…" })}
-        {createFeeZec != null && formatUsd(createFeeZec, usdRate) && ` (≈ ${formatUsd(createFeeZec, usdRate)})`}
+        {t("create.feeNote", { amount: createFeeZec ?? "…", currency })}
+        {createFeeZec != null && currency === "ZEC" && formatUsd(createFeeZec, usdRate) && ` (≈ ${formatUsd(createFeeZec, usdRate)})`}
       </p>
       <p className="muted" style={{ marginBottom: 20 }}>
         {t("create.tradingFeeNote")}
       </p>
       <div className="card">
+        <div className="field">
+          <label>{t("create.currencyLabel")}</label>
+          <div style={{ display: "flex", gap: 8 }}>
+            {(["ZEC", "YEC"] as Currency[]).map((c) => (
+              <button
+                key={c}
+                type="button"
+                className={currency === c ? "btn btn-gold" : "btn btn-outline"}
+                style={{ flex: 1 }}
+                onClick={() => setCurrency(c)}
+              >
+                {c}
+              </button>
+            ))}
+          </div>
+          {currency === "YEC" && currencies && currencies.YEC.mode === "mock" && (
+            <p className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+              {t("create.currencyYecNote")}
+            </p>
+          )}
+        </div>
         <div className="field">
           <label>{t("create.logoLabel")}</label>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -328,29 +361,29 @@ export default function CreatePage() {
           <input
             type="number"
             min={0}
-            max={0.1}
+            max={maxFirstBuyZec}
             step="0.001"
             value={firstBuyZecInput}
             onChange={(e) => setFirstBuyZecInput(e.target.value)}
             placeholder="0.00"
           />
           <p className="muted" style={{ fontSize: 11, marginTop: 4 }}>
-            {t("create.firstBuyHelp")}
+            {t("create.firstBuyHelp", { amount: maxFirstBuyZec, currency })}
           </p>
         </div>
         {firstBuyZec > 0 && createFeeZec != null && (
           <div style={{ fontSize: 12, border: "1px solid var(--border)", borderRadius: 4, padding: "8px 10px", marginBottom: 16 }}>
             <div style={{ display: "flex", justifyContent: "space-between" }}>
               <span className="muted">{t("create.breakdown.launchFee")}</span>
-              <span>{formatZec(createFeeZec)} ZEC</span>
+              <span>{formatZec(createFeeZec)} {currency}</span>
             </div>
             <div style={{ display: "flex", justifyContent: "space-between" }}>
               <span className="muted">{t("create.breakdown.firstBuy")}</span>
-              <span>{formatZec(firstBuyZec)} ZEC</span>
+              <span>{formatZec(firstBuyZec)} {currency}</span>
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", borderTop: "1px solid var(--border)", marginTop: 4, paddingTop: 4, fontWeight: 600 }}>
               <span>{t("create.breakdown.send")}</span>
-              <span>{formatZec(createFeeZec + firstBuyZec)} ZEC</span>
+              <span>{formatZec(createFeeZec + firstBuyZec)} {currency}</span>
             </div>
           </div>
         )}
@@ -359,10 +392,10 @@ export default function CreatePage() {
           <input
             value={creatorPayoutAddress}
             onChange={(e) => setCreatorPayoutAddress(e.target.value)}
-            placeholder={t("create.creatorPayoutPlaceholder")}
+            placeholder={currency === "YEC" ? t("create.creatorPayoutPlaceholderYec") : t("create.creatorPayoutPlaceholder")}
           />
           <p className="muted" style={{ fontSize: 11, marginTop: 4 }}>
-            {t("create.creatorPayoutHelp")}
+            {currency === "YEC" ? t("create.creatorPayoutHelpYec") : t("create.creatorPayoutHelp")}
           </p>
         </div>
         {error && <p style={{ color: "var(--red)", fontSize: 13 }}>{error}</p>}

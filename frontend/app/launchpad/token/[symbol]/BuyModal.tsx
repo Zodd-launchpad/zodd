@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import QRCode from "qrcode";
-import { api, formatUsd, formatZec } from "@/lib/api";
+import { api, formatUsd, formatZec, type Currency } from "@/lib/api";
 import { useLanguage } from "@/lib/i18n";
 import { useZecUsdPrice } from "@/lib/zecPrice";
 
@@ -16,11 +16,28 @@ type Phase = "amount" | "waiting" | "filled" | "failed";
 // broke the ^(u1|zs1) prefix check even though the address itself was
 // fine. Trimmed here (and wherever this value is actually sent, see
 // submitBuy below) so pasted whitespace doesn't fail validation.
+//
+// Brai, 2026-09-11: also accepts "ys1" now (Ycash's shielded prefix) --
+// this stays currency-agnostic like the backend's own isShieldedAddress,
+// since the actual per-currency prefix check happens server-side.
 function isShieldedAddress(addr: string): boolean {
-  return /^(u1|zs1)/.test(addr.trim());
+  return /^(u1|zs1|ys1)/.test(addr.trim());
 }
 
-export default function BuyModal({ symbol, walletId, onClose }: { symbol: string; walletId: string; onClose: () => void }) {
+export default function BuyModal({
+  symbol,
+  walletId,
+  currency,
+  onClose,
+}: {
+  symbol: string;
+  walletId: string;
+  // Brai, 2026-09-11: the token's own currency (ZEC or YEC) -- this modal no
+  // longer assumes ZEC anywhere, it just labels/encodes whatever the token
+  // trades in.
+  currency: Currency;
+  onClose: () => void;
+}) {
   const { t } = useLanguage();
   const usdRate = useZecUsdPrice();
   const [zecAmount, setZecAmount] = useState("0.01");
@@ -75,8 +92,8 @@ export default function BuyModal({ symbol, walletId, onClose }: { symbol: string
   }
 
   useEffect(() => {
-    api.getMode().then((m) => setIsRealMode(m.zcashMode === "real")).catch(() => {});
-  }, []);
+    api.getMode().then((m) => setIsRealMode(m.currencies[currency].mode === "real")).catch(() => {});
+  }, [currency]);
 
   useEffect(() => {
     // Brai, 2026-09-07: "que la gente cuando vaya a comprar te deje la
@@ -109,7 +126,8 @@ export default function BuyModal({ symbol, walletId, onClose }: { symbol: string
       // scans this QR fills the memo in on its own; see the big comment on
       // buildPaymentMemoBase64 in zcashReal.ts for the full reasoning and
       // its one caveat (a manually-pasted address skips the memo).
-      const uri = `zcash:${order.zecAddress}?amount=${order.zecAmount}${order.memo ? `&memo=${order.memo}` : ""}`;
+      const scheme = order.currency === "YEC" ? "ycash" : "zcash";
+      const uri = `${scheme}:${order.zecAddress}?amount=${order.zecAmount}${order.memo ? `&memo=${order.memo}` : ""}`;
       setPaymentUri(uri);
       setQr(await QRCode.toDataURL(uri, { margin: 1, width: 220 }));
       setPhase("waiting");
@@ -141,9 +159,9 @@ export default function BuyModal({ symbol, walletId, onClose }: { symbol: string
           <>
             <h2 style={{ marginTop: 0 }}>{t("buy.title", { symbol })}</h2>
             <div className="field">
-              <label>{t("buy.youPay")}</label>
+              <label>{t("buy.youPay", { currency })}</label>
               <input value={zecAmount} onChange={(e) => setZecAmount(e.target.value)} />
-              {formatUsd(parseFloat(zecAmount) || 0, usdRate) && (
+              {currency === "ZEC" && formatUsd(parseFloat(zecAmount) || 0, usdRate) && (
                 <span className="muted" style={{ fontSize: 11, marginTop: 4, display: "block" }}>
                   ≈ {formatUsd(parseFloat(zecAmount) || 0, usdRate)}
                 </span>
@@ -151,7 +169,7 @@ export default function BuyModal({ symbol, walletId, onClose }: { symbol: string
             </div>
             <div className="field">
               <label>{t("buy.refundAddressLabel")}</label>
-              <input value={refundAddress} onChange={(e) => setRefundAddress(e.target.value)} placeholder="u1... / zs1..." />
+              <input value={refundAddress} onChange={(e) => setRefundAddress(e.target.value)} placeholder={currency === "YEC" ? "u1... / ys1..." : "u1... / zs1..."} />
               <span className="muted" style={{ fontSize: 11, marginTop: 4, display: "block" }}>{t("buy.refundAddressHint")}</span>
             </div>
             {error && <p style={{ color: "var(--red)", fontSize: 13 }}>{error}</p>}
@@ -164,15 +182,15 @@ export default function BuyModal({ symbol, walletId, onClose }: { symbol: string
         {phase === "waiting" && (
           <>
             <h2 style={{ marginTop: 0, textAlign: "center" }}>
-              {exactZecAmount != null ? formatZec(exactZecAmount) : zecAmount} ZEC
-              {formatUsd(exactZecAmount ?? (parseFloat(zecAmount) || 0), usdRate) && (
+              {exactZecAmount != null ? formatZec(exactZecAmount) : zecAmount} {currency}
+              {currency === "ZEC" && formatUsd(exactZecAmount ?? (parseFloat(zecAmount) || 0), usdRate) && (
                 <span className="muted" style={{ fontSize: 14, fontWeight: 400, marginLeft: 6 }}>
                   (≈ {formatUsd(exactZecAmount ?? (parseFloat(zecAmount) || 0), usdRate)})
                 </span>
               )}
             </h2>
             <p className="muted" style={{ textAlign: "center" }}>
-              {t("buy.sendAtLeast", { amount: exactZecAmount != null ? formatZec(exactZecAmount) : zecAmount })}
+              {t("buy.sendAtLeast", { amount: exactZecAmount != null ? formatZec(exactZecAmount) : zecAmount, currency })}
             </p>
             {qr && (
               <div style={{ background: "#fff", padding: 12, borderRadius: 6, display: "flex", justifyContent: "center", margin: "12px 0" }}>

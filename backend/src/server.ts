@@ -4,18 +4,38 @@ import * as store from "./lib/store.js";
 import { generateTwelveWords } from "./lib/wordlist.js";
 import { quoteBuy, quoteSell, currentPrice, marketCapZec, isGraduated } from "./lib/bondingCurve.js";
 import { simulatedInscriptionFor } from "./lib/simulatedChain.js";
-import { splitFee, TRADE_FEE_BPS, CREATOR_FEE_BPS, TOKEN_CREATE_FEE_ZEC, createFeeZecFor, computeSellerPayout, NETWORK_FEE_ZEC, MAX_FIRST_BUY_ZEC } from "./lib/fees.js";
+import { splitFee, TRADE_FEE_BPS, CREATOR_FEE_BPS, TOKEN_CREATE_FEE_ZEC, TOKEN_CREATE_FEE_YEC, createFeeFor, computeSellerPayout, NETWORK_FEE_ZEC, MAX_FIRST_BUY_ZEC } from "./lib/fees.js";
 import { startFeeDistributor, runFeeDistributionOnce } from "./lib/feeDistributor.js";
 import { startZecPricePolling, getZecUsdPrice } from "./lib/zecPrice.js";
 import { withTokenLock } from "./lib/mutex.js";
 import { checkOrderRateLimit } from "./lib/rateLimit.js";
 
-// ZCASH_MODE=real switches every payment/inscription in this service to
+// ZCASH_MODE=real switches every ZEC payment/inscription in this service to
 // actually move ZEC through zcash-wallet-service, instead of the mock.
 // This must be the ONLY place that decides which one is in effect.
 const ZCASH_MODE = process.env.ZCASH_MODE === "real" ? "real" : "mock";
-const zcashService = ZCASH_MODE === "real" ? await import("./lib/zcashReal.js") : await import("./lib/zcashMock.js");
-const { generateOrderAddress, onPaymentDetected, sendPayout, MAX_PAYOUT_ZEC, buildPaymentMemoBase64 } = zcashService;
+const zcashModule = ZCASH_MODE === "real" ? await import("./lib/zcashReal.js") : await import("./lib/zcashMock.js");
+// Brai, 2026-09-11: "quiero que puedas trabajar con Ycash y Zcash" -- YEC
+// has no real infra yet (see ycashMock.ts), so it's always mock for now.
+// When Brai stands up real Ycash infra, this becomes the same kind of
+// ZCASH_MODE-style switch, gated by its own env var.
+const ycashModule = await import("./lib/ycashMock.js");
+
+// Every token trades in exactly one currency for its whole life (see
+// Token.currency in schema.prisma) -- this is the one place that decides
+// which wallet service backs which currency. Every route below that used
+// to call generateOrderAddress/sendPayout/etc. directly on "the" service
+// now looks it up per-token via this instead.
+type WalletService = typeof zcashModule | typeof ycashModule;
+function walletServiceFor(currency: store.Currency): WalletService {
+  return currency === "YEC" ? ycashModule : zcashModule;
+}
+
+// Still used directly by every ZEC-only admin/real-mode route below (fee
+// distribution, platform withdrawal, wallet status...) that has no YEC
+// equivalent yet -- those stay ZEC-specific on purpose, see their own
+// comments further down.
+const { sendPayout, MAX_PAYOUT_ZEC } = zcashModule;
 
 // Guards /api/admin/run-fee-distribution (real ZEC payouts) -- unset by
 // default, so that route stays refused until Brai deliberately sets this in
@@ -31,7 +51,20 @@ app.register(import("@fastify/cors"), { origin: true });
 // zcash service, so it never shows a "simulated" note on a real payment (or
 // vice versa) -- see BuyModal.tsx and the create-token waiting screen. Also
 // exposes the current create fee so the form can show it before submission.
-app.get("/api/mode", async (_req, reply) => reply.send({ zcashMode: ZCASH_MODE, tokenCreateFeeZec: TOKEN_CREATE_FEE_ZEC }));
+// Brai, 2026-09-11: kept zcashMode/tokenCreateFeeZec at the top level for
+// backward compat (both are just ZEC's values), and added `currencies` --
+// per-currency mode + create fee + first-buy cap -- so the create-token
+// currency picker can show accurate numbers for whichever one is selected.
+app.get("/api/mode", async (_req, reply) =>
+  reply.send({
+    zcashMode: ZCASH_MODE,
+    tokenCreateFeeZec: TOKEN_CREATE_FEE_ZEC,
+    currencies: {
+      ZEC: { mode: ZCASH_MODE, createFeeZec: TOKEN_CREATE_FEE_ZEC, maxFirstBuyZec: MAX_FIRST_BUY_ZEC },
+      YEC: { mode: "mock", createFeeZec: TOKEN_CREATE_FEE_YEC, maxFirstBuyZec: MAX_FIRST_BUY_ZEC },
+    },
+  })
+);
 
 // Brai, 2026-09-07: "tiene que tener precio en dolares, todo" -- live ZEC/USD
 // rate for the frontend to convert every ZEC-denominated price it shows.
@@ -96,7 +129,19 @@ app.get("/api/wallets/:id/portfolio", async (req, reply) => {
 // also has `.trim()` so the stored value itself is clean too, not just
 // this check.
 function isShieldedAddress(addr: string): boolean {
-  return /^(u1|zs1)/.test(addr.trim());
+  return /^(u1|zs1|ys1)/.test(addr.trim());
+}
+
+// Brai, 2026-09-11: isShieldedAddress above is deliberately currency-agnostic
+// (it's used inside zod .refine() calls that only see the one field, not
+// the currency chosen elsewhere in the same request body) -- it just
+// rejects obviously-wrong input at the schema layer. This is the stricter,
+// currency-specific check, run after parsing wherever a request also
+// carries (or implies, via its token) a currency. Ycash's Sapling address
+// prefix is "ys1" (confirmed against ycash.xyz's own docs); Zcash's u1
+// (unified) or zs1 (sapling).
+function addressMatchesCurrency(addr: string, currency: store.Currency): boolean {
+  return currency === "YEC" ? /^ys1/.test(addr.trim()) : /^(u1|zs1)/.test(addr.trim());
 }
 
 const createTokenSchema = z.object({
@@ -104,13 +149,17 @@ const createTokenSchema = z.object({
   name: z.string().min(1).max(64),
   totalSupply: z.number().positive().default(1_000_000_000),
   creatorWalletId: z.string(),
+  // Brai, 2026-09-11: "quiero que puedas trabajar con Ycash y Zcash" -- the
+  // currency this token trades in for its whole life. Defaults ZEC so
+  // nothing about today's behavior changes for a caller that omits it.
+  currency: z.enum(["ZEC", "YEC"]).default("ZEC"),
   // Where this token's 1% creator trading-fee share gets paid out, every
   // 24h. Optional -- without it, the fee still accrues but nobody claims it.
   creatorPayoutAddress: z
     .string()
     .trim()
     .min(10)
-    .refine(isShieldedAddress, "creator payout address must be shielded (starts with u1 or zs1)")
+    .refine(isShieldedAddress, "creator payout address must be shielded (starts with u1 or zs1 for Zcash, ys1 for Ycash)")
     .optional(),
   // Token profile, all optional. The logo is resized/encoded to a small
   // square JPEG data URL client-side before it ever reaches here -- this
@@ -171,32 +220,42 @@ app.post("/api/tokens", async (req, reply) => {
   if (!creatorWallet) {
     return reply.code(400).send({ error: "invalid creatorWalletId" });
   }
-  // Brai, 2026-09-08: discounted create fee for his own wallet only -- see
-  // createFeeZecFor in fees.ts. Everyone else keeps paying TOKEN_CREATE_FEE_ZEC.
-  const createFeeZec = createFeeZecFor(creatorWallet.id);
+  const currency = body.currency;
+  // Brai, 2026-09-11: creatorPayoutAddress must actually belong to the
+  // currency this token is being created in -- the zod-level check above
+  // only rejects addresses that don't look like ANY supported currency.
+  if (body.creatorPayoutAddress && !addressMatchesCurrency(body.creatorPayoutAddress, currency)) {
+    return reply.code(400).send({ error: `creator payout address doesn't look like a ${currency} address` });
+  }
+  const wallet = walletServiceFor(currency);
+  // Brai, 2026-09-08: discounted create fee for his own wallet, ZEC only --
+  // see createFeeFor in fees.ts. Everyone else (and every YEC creation)
+  // pays the normal flat fee for that currency.
+  const createFeeZec = createFeeFor(currency, creatorWallet.id);
 
   // Brai, 2026-09-08: "que puedas hacer una first buy" -- bundle an optional
   // creator buy into the same single payment as the create fee. The real,
   // hard ceiling here isn't the bonding curve -- it's the platform's
-  // per-payment safety cap (MAX_PAYOUT_ZEC, see zcashReal.ts's comment:
-  // "Defense in depth against a bug turning into an unbounded loss"). Fail
-  // fast with a clear message instead of letting generateOrderAddress throw
-  // a confusing 502 below.
+  // per-payment safety cap (this currency's MAX_PAYOUT_ZEC, see
+  // zcashReal.ts's comment: "Defense in depth against a bug turning into an
+  // unbounded loss"). Fail fast with a clear message instead of letting
+  // generateOrderAddress throw a confusing 502 below.
   const firstBuyZec = body.firstBuyZec ?? 0;
   // Brai, 2026-09-08: "deja 0.1 de first buy maximo" -- the actual product
   // ceiling on the buy portion itself, independent of the platform-wide
-  // per-payment safety cap checked right below.
+  // per-payment safety cap checked right below. Same numeric cap for both
+  // currencies for now (no live YEC pricing to differentiate against).
   if (firstBuyZec > MAX_FIRST_BUY_ZEC) {
     return reply.code(400).send({
-      error: `first buy too large: max is ${MAX_FIRST_BUY_ZEC} ZEC`,
+      error: `first buy too large: max is ${MAX_FIRST_BUY_ZEC} ${currency}`,
       maxFirstBuyZec: MAX_FIRST_BUY_ZEC,
     });
   }
   const totalZec = createFeeZec + firstBuyZec;
-  if (totalZec > MAX_PAYOUT_ZEC) {
+  if (totalZec > wallet.MAX_PAYOUT_ZEC) {
     return reply.code(400).send({
-      error: `first buy too large: launch fee (${createFeeZec} ZEC) + first buy (${firstBuyZec} ZEC) = ${totalZec} ZEC, which exceeds the current per-payment safety cap of ${MAX_PAYOUT_ZEC} ZEC`,
-      maxFirstBuyZec: Math.max(0, MAX_PAYOUT_ZEC - createFeeZec),
+      error: `first buy too large: launch fee (${createFeeZec} ${currency}) + first buy (${firstBuyZec} ${currency}) = ${totalZec} ${currency}, which exceeds the current per-payment safety cap of ${wallet.MAX_PAYOUT_ZEC} ${currency}`,
+      maxFirstBuyZec: Math.max(0, wallet.MAX_PAYOUT_ZEC - createFeeZec),
     });
   }
 
@@ -205,6 +264,7 @@ app.post("/api/tokens", async (req, reply) => {
     name: body.name,
     totalSupply: body.totalSupply,
     creatorWalletId: body.creatorWalletId,
+    currency,
     creatorPayoutAddress: body.creatorPayoutAddress,
     logoDataUrl: body.logoDataUrl,
     description: body.description,
@@ -219,7 +279,7 @@ app.post("/api/tokens", async (req, reply) => {
   let saplingDiversifierHex: string | null = null;
   let orchardDiversifierHex: string | null = null;
   try {
-    const res = await generateOrderAddress(pending.id, totalZec);
+    const res = await wallet.generateOrderAddress(pending.id, totalZec);
     zecAddress = res.address;
     zecAmount = res.expectedZecAmount;
     saplingDiversifierHex = (res as { saplingDiversifierHex?: string | null }).saplingDiversifierHex ?? null;
@@ -238,6 +298,7 @@ app.post("/api/tokens", async (req, reply) => {
 
   return reply.send({
     creationId: pending.id,
+    currency,
     zecAddress,
     zecAmount,
     // Breakdown so the frontend can show "Launch fee / First buy / Send"
@@ -250,7 +311,7 @@ app.post("/api/tokens", async (req, reply) => {
     // memo=..., so a memo-aware wallet matches this creation by its unique
     // id instead of by amount -- immune to the same-fee-amount collision
     // every OTHER token creation is otherwise exposed to.
-    memo: buildPaymentMemoBase64(pending.id),
+    memo: wallet.buildPaymentMemoBase64(pending.id),
     status: "PENDING",
   });
 });
@@ -305,6 +366,7 @@ async function serializeToken(t: store.TokenWithCurve) {
     symbol: t.symbol,
     name: t.name,
     totalSupply: t.totalSupply,
+    currency: t.currency,
     priceZec,
     priceChange24hPct: await store.getPriceChange24hPct(t.id, priceZec),
     priceChangeSinceLaunchPct: await store.getPriceChangeSinceLaunchPct(t.id, priceZec),
@@ -331,7 +393,14 @@ async function serializeToken(t: store.TokenWithCurve) {
         ? {
             simulated: false as const,
             txid: t.genesisMemoTxid,
-            explorerUrl: `https://mainnet.zcashexplorer.app/transactions/${t.genesisMemoTxid}`,
+            // Brai, 2026-09-11: only ZEC can actually reach this branch today
+            // (genesisMemoTxid is only ever set in real mode, and YEC has no
+            // real mode yet -- see ycashMock.ts), but keep it currency-correct
+            // for whenever that changes.
+            explorerUrl:
+              t.currency === "YEC"
+                ? `https://explorer.ycash.xyz/tx/${t.genesisMemoTxid}`
+                : `https://mainnet.zcashexplorer.app/transactions/${t.genesisMemoTxid}`,
           }
         : simulatedInscriptionFor(t.id),
   };
@@ -356,7 +425,7 @@ const buySchema = z.object({
     .string()
     .trim()
     .min(10)
-    .refine(isShieldedAddress, "refund address must be shielded (starts with u1 or zs1)"),
+    .refine(isShieldedAddress, "refund address must be shielded (starts with u1 or zs1 for Zcash, ys1 for Ycash)"),
 });
 
 app.post("/api/orders/buy", async (req, reply) => {
@@ -369,10 +438,18 @@ app.post("/api/orders/buy", async (req, reply) => {
   const token = await store.getToken(body.symbol.toUpperCase());
   if (!wallet) return reply.code(400).send({ error: "invalid wallet" });
   if (!token) return reply.code(404).send({ error: "token not found" });
+  // Brai, 2026-09-11: the refund address has to actually belong to this
+  // token's currency -- the zod-level check only rejects addresses that
+  // don't look like ANY supported currency.
+  if (!addressMatchesCurrency(body.refundAddress, token.currency)) {
+    return reply.code(400).send({ error: `refund address doesn't look like a ${token.currency} address` });
+  }
+  const walletService = walletServiceFor(token.currency);
 
   const order = await store.createBuyOrder({
     internalWalletId: wallet.id,
     tokenId: token.id,
+    currency: token.currency,
     zecAmount: body.zecAmount,
     refundAddress: body.refundAddress,
   });
@@ -387,7 +464,7 @@ app.post("/api/orders/buy", async (req, reply) => {
   let saplingDiversifierHex: string | null = null;
   let orchardDiversifierHex: string | null = null;
   try {
-    const res = await generateOrderAddress(order.id, body.zecAmount);
+    const res = await walletService.generateOrderAddress(order.id, body.zecAmount);
     zecAddress = res.address;
     zecAmount = res.expectedZecAmount;
     saplingDiversifierHex = (res as { saplingDiversifierHex?: string | null }).saplingDiversifierHex ?? null;
@@ -405,12 +482,13 @@ app.post("/api/orders/buy", async (req, reply) => {
 
   return reply.send({
     orderId: order.id,
+    currency: token.currency,
     zecAddress,
     zecAmount,
     // Brai, 2026-09-07: "esto tiene que ir por frase semilla" -- see the
     // matching comment on the token-creation route above and the big one on
     // buildPaymentMemoBase64 in zcashReal.ts for the full reasoning.
-    memo: buildPaymentMemoBase64(order.id),
+    memo: walletService.buildPaymentMemoBase64(order.id),
     status: "PENDING",
   });
 });
@@ -424,9 +502,14 @@ app.get("/api/orders/:id", async (req, reply) => {
 
 // Both buy orders AND pending token creations reserve their one-time
 // address through the same generateOrderAddress(id, amount) call, so a
-// single global "a payment landed" callback has to figure out which kind
-// of thing this id refers to before it knows what to do about it.
-onPaymentDetected(async (orderId: string, confirmedZecAmount: number, txid: string, opts?: { isRepeat: boolean }) => {
+// single "a payment landed" callback has to figure out which kind of thing
+// this id refers to before it knows what to do about it. Brai, 2026-09-11:
+// now registered against EVERY currency's wallet service (see the two
+// onPaymentDetected calls after this function) -- the logic below was
+// already currency-agnostic (it works off whatever order/pendingCreation it
+// looks up, never assumed "the" one service), so this is the same handler
+// for both ZEC and YEC payments, just told apart by which service invoked it.
+async function handlePaymentDetected(orderId: string, confirmedZecAmount: number, txid: string, opts?: { isRepeat: boolean }) {
   const isRepeat = opts?.isRepeat ?? false;
   const pendingCreation = await store.getPendingTokenCreation(orderId).catch(() => null);
   if (pendingCreation) {
@@ -436,15 +519,17 @@ onPaymentDetected(async (orderId: string, confirmedZecAmount: number, txid: stri
       // credit it against, so it's left as an unclaimed note for admin
       // recovery (see listUnclaimedNotes in zcashReal.ts), same as any
       // other surplus payment.
-      if (isRepeat) app.log.warn(`repeat payment of ${confirmedZecAmount} ZEC landed on token-creation ${orderId} after it already ${pendingCreation.status} -- left unclaimed (txid ${txid})`);
+      if (isRepeat) app.log.warn(`repeat payment of ${confirmedZecAmount} ${pendingCreation.currency} landed on token-creation ${orderId} after it already ${pendingCreation.status} -- left unclaimed (txid ${txid})`);
       return;
     }
     try {
       // Real mode: this payment's own txid becomes the token's genesis
       // memo -- it's the creator's real fee payment, which is a more
       // honest "on-chain proof of creation" than the platform inscribing
-      // to itself. Mock mode: no txid is meaningful, same as before.
-      const genesisMemoTxid = ZCASH_MODE === "real" ? txid : undefined;
+      // to itself. Mock mode: no txid is meaningful, same as before. YEC
+      // has no real mode yet (see ycashMock.ts), so this is always ZEC-only
+      // in practice today.
+      const genesisMemoTxid = pendingCreation.currency === "ZEC" && ZCASH_MODE === "real" ? txid : undefined;
       const token = await store.completePendingTokenCreation(orderId, genesisMemoTxid);
       if (token) {
         app.log.info(`token ${token.symbol} created: creator paid ${confirmedZecAmount} ZEC create fee (txid ${txid})`);
@@ -486,13 +571,14 @@ onPaymentDetected(async (orderId: string, confirmedZecAmount: number, txid: stri
                 await store.createRepeatBuyOrder({
                   internalWalletId: token.creatorWalletId,
                   tokenId: token.id,
+                  currency: token.currency,
                   zecAddress: pendingCreation.zecAddress ?? null,
                   zecAmount: actualFirstBuyZec,
                   tokenAmount: tokensOut,
                   executionTxid: txid,
                 });
               });
-              app.log.info(`token ${token.symbol}: bundled first buy of ${actualFirstBuyZec} ZEC -> credited to creator wallet ${token.creatorWalletId} (txid ${txid})`);
+              app.log.info(`token ${token.symbol}: bundled first buy of ${actualFirstBuyZec} ${token.currency} -> credited to creator wallet ${token.creatorWalletId} (txid ${txid})`);
             }
           } catch (err) {
             app.log.error(err, `token ${token.symbol} created ok, but its bundled first buy failed to execute`);
@@ -543,22 +629,26 @@ onPaymentDetected(async (orderId: string, confirmedZecAmount: number, txid: stri
         await store.createRepeatBuyOrder({
           internalWalletId: order.internalWalletId,
           tokenId: token.id,
+          currency: token.currency,
           zecAddress: order.zecAddress ?? null,
           zecAmount: confirmedZecAmount,
           tokenAmount: tokensOut,
           executionTxid: txid,
         });
-        app.log.info(`order ${orderId} REPEAT payment: ${confirmedZecAmount} ZEC -> ${tokensOut.toFixed(0)} ${token.symbol} (new order cloned, same address paid again, txid ${txid})`);
+        app.log.info(`order ${orderId} REPEAT payment: ${confirmedZecAmount} ${token.currency} -> ${tokensOut.toFixed(0)} ${token.symbol} (new order cloned, same address paid again, txid ${txid})`);
       } else {
         await store.fillBuyOrder(order.id, tokensOut, txid);
-        app.log.info(`order ${orderId} filled: ${confirmedZecAmount} ZEC -> ${tokensOut.toFixed(0)} ${token.symbol} (fee ${(creatorFee + platformFee).toFixed(8)} ZEC)`);
+        app.log.info(`order ${orderId} filled: ${confirmedZecAmount} ${token.currency} -> ${tokensOut.toFixed(0)} ${token.symbol} (fee ${(creatorFee + platformFee).toFixed(8)} ${token.currency})`);
       }
     });
   } catch (err) {
     if (!isRepeat) await store.failOrder(orderId).catch(() => {});
     app.log.error(err, `order ${orderId} failed to execute${isRepeat ? " a repeat payment" : ""} against the curve`);
   }
-});
+}
+
+zcashModule.onPaymentDetected(handlePaymentDetected);
+ycashModule.onPaymentDetected(handlePaymentDetected);
 
 // The in-memory payment watcher (zcashReal.ts's `watchers` map) does not
 // survive a backend restart/redeploy -- without this, any payment sent
@@ -569,18 +659,20 @@ onPaymentDetected(async (orderId: string, confirmedZecAmount: number, txid: stri
 // and are still PENDING, and resume watching them.
 (async () => {
   try {
-    const resumable = (zcashService as { resumeWatching: typeof import("./lib/zcashReal.js").resumeWatching }).resumeWatching;
     const [orders, creations] = await Promise.all([
       store.getPendingOrdersAwaitingPayment(),
       store.getPendingTokenCreationsAwaitingPayment(),
     ]);
+    // Brai, 2026-09-11: each order/creation now resumes against ITS OWN
+    // currency's wallet service, not always the ZEC one -- see
+    // walletServiceFor above.
     for (const o of orders) {
       if (o.zecAddress && o.zecAmount)
-        resumable(o.id, o.zecAddress, o.zecAmount, new Date(o.createdAt).getTime(), o.zecSaplingDiversifierHex, o.zecOrchardDiversifierHex);
+        walletServiceFor(o.currency).resumeWatching(o.id, o.zecAddress, o.zecAmount, new Date(o.createdAt).getTime(), o.zecSaplingDiversifierHex, o.zecOrchardDiversifierHex);
     }
     for (const c of creations) {
       if (c.zecAddress)
-        resumable(c.id, c.zecAddress, c.expectedZecAmount, new Date(c.createdAt).getTime(), c.zecSaplingDiversifierHex, c.zecOrchardDiversifierHex);
+        walletServiceFor(c.currency).resumeWatching(c.id, c.zecAddress, c.expectedZecAmount, new Date(c.createdAt).getTime(), c.zecSaplingDiversifierHex, c.zecOrchardDiversifierHex);
     }
     if (orders.length || creations.length) {
       app.log.info(`resumed watching ${orders.length} pending order(s) and ${creations.length} pending token-creation(s) from before this restart`);
@@ -596,9 +688,10 @@ onPaymentDetected(async (orderId: string, confirmedZecAmount: number, txid: stri
   // "unspent" forever from zingo-cli's point of view, so without this a
   // restart could let it be matched a second time to a different pending
   // order for the same amount. Seed the in-memory de-dupe set from every
-  // txid already recorded in the DB as a completed payment.
+  // txid already recorded in the DB as a completed payment. ZEC-only --
+  // YEC has no real mode yet, and ycashMock's seedConsumedTxids is a no-op.
   try {
-    const seed = (zcashService as { seedConsumedTxids?: typeof import("./lib/zcashReal.js").seedConsumedTxids }).seedConsumedTxids;
+    const seed = (zcashModule as { seedConsumedTxids?: typeof import("./lib/zcashReal.js").seedConsumedTxids }).seedConsumedTxids;
     if (seed) {
       const known = await store.getAllKnownPaymentTxids();
       seed(known);
@@ -625,7 +718,7 @@ const sellSchema = z.object({
     .string()
     .trim()
     .min(10)
-    .refine(isShieldedAddress, "refund address must be shielded (starts with u1 or zs1)"),
+    .refine(isShieldedAddress, "refund address must be shielded (starts with u1 or zs1 for Zcash, ys1 for Ycash)"),
 });
 
 // Found 2026-09-07 (Brai, selling FLORKY): "Internal Server Error" from
@@ -648,6 +741,13 @@ app.post("/api/orders/sell", async (req, reply) => {
   const tokenCheck = await store.getToken(body.symbol.toUpperCase());
   if (!wallet) return reply.code(400).send({ error: "invalid wallet" });
   if (!tokenCheck) return reply.code(404).send({ error: "token not found" });
+  // Brai, 2026-09-11: the payout address has to actually belong to this
+  // token's currency -- the zod-level check only rejects addresses that
+  // don't look like ANY supported currency.
+  if (!addressMatchesCurrency(body.refundAddress, tokenCheck.currency)) {
+    return reply.code(400).send({ error: `refund address doesn't look like a ${tokenCheck.currency} address` });
+  }
+  const walletService = walletServiceFor(tokenCheck.currency);
 
   try {
     const order = await withTokenLock(tokenCheck.id, async () => {
@@ -678,13 +778,13 @@ app.post("/api/orders/sell", async (req, reply) => {
       if (blocked) {
         throw Object.assign(
           new Error(
-            `sell amount too small -- after the ~${NETWORK_FEE_ZEC} ZEC network fee there'd be nothing left to send you (net payout would be ${netPayout.toFixed(8)} ZEC). Sell a larger amount.`
+            `sell amount too small -- after the ~${NETWORK_FEE_ZEC} ${token.currency} network fee there'd be nothing left to send you (net payout would be ${netPayout.toFixed(8)} ${token.currency}). Sell a larger amount.`
           ),
           { httpStatus: 400 }
         );
       }
 
-      const { txid } = await sendPayout(body.refundAddress, sellerPayout);
+      const { txid } = await walletService.sendPayout(body.refundAddress, sellerPayout);
 
       await store.updateTokenCurve(token.id, newState);
       await store.recordPricePoint(token.id, newState, token.totalSupply);
@@ -699,6 +799,7 @@ app.post("/api/orders/sell", async (req, reply) => {
       return store.createSellOrder({
         internalWalletId: wallet.id,
         tokenId: token.id,
+        currency: token.currency,
         tokenAmount: body.tokenAmount,
         refundAddress: body.refundAddress,
         zecAmount: zecOut,
@@ -760,7 +861,11 @@ app.post("/api/admin/run-fee-distribution", async (req, reply) => {
   // address) instead of also requiring 24h since token creation/last
   // payout, which is a pacing rule that only makes sense for the automatic
   // cycle (see getTokensDueForFeePayout's comment).
-  const result = await runFeeDistributionOnce(sendPayout, MAX_PAYOUT_ZEC, app.log, true);
+  // Brai, 2026-09-11: explicit "ZEC" -- this route only ever moves real
+  // ZEC (no real YEC wallet exists yet), so a YEC token's accrued fee must
+  // never be swept into this payout by mistake. See the comment on
+  // getTokensDueForFeePayout in store.ts.
+  const result = await runFeeDistributionOnce(sendPayout, MAX_PAYOUT_ZEC, app.log, true, "ZEC");
   app.log.info(`[admin] manual fee distribution run: paid ${result.paid.length}, skipped ${result.skipped.length}`);
   return reply.send({ ok: true, ...result });
 });
@@ -872,7 +977,7 @@ app.get("/api/admin/financial-audit", async (req, reply) => {
   let shortfallZec: number | null = null;
   if (ZCASH_MODE === "real") {
     try {
-      const status = await (zcashService as typeof import("./lib/zcashReal.js")).getWalletStatus();
+      const status = await (zcashModule as typeof import("./lib/zcashReal.js")).getWalletStatus();
       realWalletZec = status.zec;
       shortfallZec = audit.totalOwed - status.zec;
     } catch {
@@ -902,7 +1007,7 @@ app.post("/api/admin/hide-tokens", async (req, reply) => {
 app.get("/api/admin/zcash-status", async (_req, reply) => {
   if (ZCASH_MODE !== "real") return reply.code(404).send({ error: "not in real mode" });
   try {
-    const status = await (zcashService as typeof import("./lib/zcashReal.js")).getWalletStatus();
+    const status = await (zcashModule as typeof import("./lib/zcashReal.js")).getWalletStatus();
     return reply.send(status);
   } catch (err) {
     return reply.code(502).send({ error: String((err as Error).message ?? err) });
@@ -915,7 +1020,7 @@ app.get("/api/admin/unclaimed-notes", async (req, reply) => {
   if (req.headers["x-admin-token"] !== ADMIN_TOKEN) return reply.code(401).send({ error: "unauthorized" });
   try {
     const known = await store.getAllKnownPaymentTxids();
-    const notes = await (zcashService as typeof import("./lib/zcashReal.js")).listUnclaimedNotes(known);
+    const notes = await (zcashModule as typeof import("./lib/zcashReal.js")).listUnclaimedNotes(known);
     return reply.send({ ok: true, count: notes.length, notes });
   } catch (err) {
     return reply.code(502).send({ error: String((err as Error).message ?? err) });

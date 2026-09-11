@@ -44,11 +44,16 @@ export async function runFeeDistributionOnce(
   // run (see the admin route in server.ts) -- see the big comment on
   // getTokensDueForFeePayout for why a manual trigger shouldn't be gated by
   // that same clock.
-  ignoreInterval = false
+  ignoreInterval = false,
+  // Brai, 2026-09-11: which currency's tokens to consider -- the admin
+  // route this feeds is still ZEC-only (no real YEC wallet to pay out of
+  // yet), so it always passes "ZEC" explicitly. Defaults to "ZEC" so this
+  // stays a no-op change for every existing call site.
+  currency: store.Currency = "ZEC"
 ) {
   let due: Awaited<ReturnType<typeof store.getTokensDueForFeePayout>>;
   try {
-    due = await store.getTokensDueForFeePayout(PAYOUT_INTERVAL_MS, ignoreInterval, MIN_CREATOR_PAYOUT_ZEC);
+    due = await store.getTokensDueForFeePayout(PAYOUT_INTERVAL_MS, ignoreInterval, MIN_CREATOR_PAYOUT_ZEC, currency);
   } catch (err) {
     log.error(err, "failed to query tokens due for creator fee payout");
     return { paid: [] as { symbol: string; amount: number; txid: string }[], skipped: [] as string[] };

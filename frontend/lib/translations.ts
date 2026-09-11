@@ -68,7 +68,9 @@ export const translations = {
   },
   "market.noTokens": { en: "No tokens created yet. Head to Create.", zh: "还没有创建任何代币。去“创建”页看看。" },
   "market.col.token": { en: "Token", zh: "代币" },
-  "market.col.price": { en: "Price (ZEC)", zh: "价格（ZEC）" },
+  // Brai, 2026-09-11: no longer always ZEC -- each row now shows its own
+  // token's currency next to the number (see launchpad/page.tsx).
+  "market.col.price": { en: "Price", zh: "价格" },
   "market.col.marketCap": { en: "Market cap", zh: "市值" },
   "market.col.change24h": { en: "24h", zh: "24小时" },
   "market.col.graduation": { en: "Graduation", zh: "毕业状态" },
@@ -81,8 +83,16 @@ export const translations = {
   // ---------- Create page ----------
   "create.title": { en: "Create a token", zh: "创建代币" },
   "create.feeNote": {
-    en: "Pay the one-time {amount} ZEC create fee from any Zcash wallet. No wallet connect needed to create.",
-    zh: "从任意 Zcash 钱包支付一次性 {amount} ZEC 创建费。创建无需连接钱包。",
+    en: "Pay the one-time {amount} {currency} create fee from any {currency} wallet. No wallet connect needed to create.",
+    zh: "从任意 {currency} 钱包支付一次性 {amount} {currency} 创建费。创建无需连接钱包。",
+  },
+  // Brai, 2026-09-11: "quiero que puedas trabajar con Ycash y Zcash" --
+  // currency picker on the create form, one market per currency for a
+  // token's whole life.
+  "create.currencyLabel": { en: "Currency", zh: "币种" },
+  "create.currencyYecNote": {
+    en: "Ycash support is simulated for now — no real payment needed to test it.",
+    zh: "Ycash 支持目前为模拟流程——测试无需真实付款。",
   },
   "create.symbolLabel": { en: "Symbol", zh: "代号" },
   "create.nameLabel": { en: "Name", zh: "名称" },
@@ -98,8 +108,8 @@ export const translations = {
   // optional creator buy into the same payment as the create fee.
   "create.firstBuyLabel": { en: "Your first buy (optional)", zh: "你的首次买入（可选）" },
   "create.firstBuyHelp": {
-    en: "Buy your own token the moment it launches, in the same payment as the create fee. Max 0.1 ZEC.",
-    zh: "在代币上线的同时买入，与创建费一起在同一笔付款中完成。最多 0.1 ZEC。",
+    en: "Buy your own token the moment it launches, in the same payment as the create fee. Max {amount} {currency}.",
+    zh: "在代币上线的同时买入，与创建费一起在同一笔付款中完成。最多 {amount} {currency}。",
   },
   "create.breakdown.launchFee": { en: "Launch fee", zh: "创建费" },
   "create.breakdown.firstBuy": { en: "First buy", zh: "首次买入" },
@@ -110,8 +120,15 @@ export const translations = {
     en: "Where your 1% creator fee share gets sent every 24h. Must be a shielded address (u1... or zs1...) — you can leave this blank, but then nobody can claim it.",
     zh: "你的 1% 创建者分成每 24 小时会发送到这个地址。必须是屏蔽地址（u1... 或 zs1...）——可以留空，但这样就没人能领取这部分费用。",
   },
+  // Brai, 2026-09-11: same as above but for a YEC token -- Ycash's shielded
+  // addresses use the "ys1" prefix instead of "zs1".
+  "create.creatorPayoutPlaceholderYec": { en: "u1... or ys1... (leave blank to skip)", zh: "u1... 或 ys1...（留空则跳过）" },
+  "create.creatorPayoutHelpYec": {
+    en: "Where your 1% creator fee share gets sent every 24h. Must be a shielded address (u1... or ys1...) — you can leave this blank, but then nobody can claim it.",
+    zh: "你的 1% 创建者分成每 24 小时会发送到这个地址。必须是屏蔽地址（u1... 或 ys1...）——可以留空，但这样就没人能领取这部分费用。",
+  },
   "create.waiting.title": { en: "Waiting for the create fee", zh: "等待创建费到账" },
-  "create.waiting.sendExactly": { en: "Send {amount} ZEC: this address is bound to {symbol}'s create fee", zh: "发送 {amount} ZEC：此地址与 {symbol} 的创建费绑定" },
+  "create.waiting.sendExactly": { en: "Send {amount} {currency}: this address is bound to {symbol}'s create fee", zh: "发送 {amount} {currency}：此地址与 {symbol} 的创建费绑定" },
   "create.waiting.simulatedNote": {
     en: "Simulated: in this demo the \"payment\" confirms on its own after a few seconds (no real payment needed).",
     zh: "模拟流程：本演示中“付款”会在几秒后自动确认（无需真实付款）。",
@@ -316,9 +333,9 @@ export const translations = {
 
   // ---------- Buy modal ----------
   "buy.title": { en: "Buy {symbol}", zh: "买入 {symbol}" },
-  "buy.youPay": { en: "You pay (ZEC)", zh: "你支付（ZEC）" },
+  "buy.youPay": { en: "You pay ({currency})", zh: "你支付（{currency}）" },
   "buy.button": { en: "Buy", zh: "买入" },
-  "buy.sendAtLeast": { en: "Send at least {amount} ZEC: the address is the order", zh: "至少发送 {amount} ZEC：这个地址就是订单本身" },
+  "buy.sendAtLeast": { en: "Send at least {amount} {currency}: the address is the order", zh: "至少发送 {amount} {currency}：这个地址就是订单本身" },
   "buy.simulatedNote": {
     en: "Simulated: in this demo the \"confirmation\" arrives on its own after a few seconds (no real payment needed).",
     zh: "模拟流程：本演示中“确认”会在几秒后自动到达（无需真实付款）。",
@@ -356,8 +373,8 @@ export const translations = {
   "sell.addressHint": { en: "Must start with u1... or zs1... (transparent t1... addresses aren't accepted)", zh: "必须以 u1... 或 zs1... 开头（不接受透明的 t1... 地址）" },
   "sell.button": { en: "Sell", zh: "卖出" },
   "sell.payoutSent": { en: "Payout sent", zh: "打款已发送" },
-  "sell.payoutBody.real": { en: "{amount} ZEC sent to your address.", zh: "{amount} ZEC 已发送到你的地址。" },
-  "sell.payoutBody.simulated": { en: "{amount} ZEC (simulated) to your address.", zh: "{amount} ZEC（模拟）已发送到你的地址。" },
+  "sell.payoutBody.real": { en: "{amount} {currency} sent to your address.", zh: "{amount} {currency} 已发送到你的地址。" },
+  "sell.payoutBody.simulated": { en: "{amount} {currency} (simulated) to your address.", zh: "{amount} {currency}（模拟）已发送到你的地址。" },
   "sell.error.invalidAmount": { en: "invalid amount", zh: "金额无效" },
   "sell.error.exceedsBalance": { en: "you don't have that many {symbol}", zh: "你没有那么多 {symbol}" },
   "sell.error.invalidAddress": { en: "enter a shielded Zcash address (starts with u1... or zs1...) to receive the payout", zh: "请输入屏蔽式 Zcash 地址（以 u1... 或 zs1... 开头）以接收打款" },

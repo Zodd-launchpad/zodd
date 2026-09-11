@@ -120,15 +120,15 @@ export default function TokenPage() {
           </div>
         )}
 
-        <Chart history={history} trades={trades} />
+        <Chart history={history} trades={trades} currency={token.currency} />
         <TradesList trades={trades} />
       </div>
 
       <div>
         <div className="card">
           <p style={{ marginTop: 0 }}>
-            {t("token.price")} <strong>{fmt(token.priceZec, 12)} ZEC</strong>
-            {formatUsd(token.priceZec, usdRate) && (
+            {t("token.price")} <strong>{fmt(token.priceZec, 12)} {token.currency}</strong>
+            {token.currency === "ZEC" && formatUsd(token.priceZec, usdRate) && (
               <span className="muted" style={{ marginLeft: 6 }}>({formatUsd(token.priceZec, usdRate)})</span>
             )}
           </p>
@@ -144,17 +144,17 @@ export default function TokenPage() {
         <div className="card" style={{ marginTop: 16, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
           <div>
             <div className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>{t("token.stat.volume24h")}</div>
-            <div style={{ fontWeight: 700 }}>{fmt(volume24h)} ZEC</div>
-            {formatCompactUsd(volume24h, usdRate) && <div className="muted" style={{ fontSize: 11 }}>{formatCompactUsd(volume24h, usdRate)}</div>}
+            <div style={{ fontWeight: 700 }}>{fmt(volume24h)} {token.currency}</div>
+            {token.currency === "ZEC" && formatCompactUsd(volume24h, usdRate) && <div className="muted" style={{ fontSize: 11 }}>{formatCompactUsd(volume24h, usdRate)}</div>}
           </div>
           <div>
             <div className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>{t("token.stat.marketCap")}</div>
-            <div style={{ fontWeight: 700 }}>{fmt(token.marketCapZec)} ZEC</div>
-            {formatCompactUsd(token.marketCapZec, usdRate) && <div className="muted" style={{ fontSize: 11 }}>{formatCompactUsd(token.marketCapZec, usdRate)}</div>}
+            <div style={{ fontWeight: 700 }}>{fmt(token.marketCapZec)} {token.currency}</div>
+            {token.currency === "ZEC" && formatCompactUsd(token.marketCapZec, usdRate) && <div className="muted" style={{ fontSize: 11 }}>{formatCompactUsd(token.marketCapZec, usdRate)}</div>}
           </div>
           <div>
             <div className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>{t("token.stat.realReserve")}</div>
-            <div style={{ fontWeight: 700 }}>{fmt(token.realZecReserves)} ZEC</div>
+            <div style={{ fontWeight: 700 }}>{fmt(token.realZecReserves)} {token.currency}</div>
           </div>
           <div>
             <div className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>{t("token.stat.tokensSold")}</div>
@@ -181,11 +181,11 @@ export default function TokenPage() {
           <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
             <div>
               <div className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>{t("token.fee.accrued")}</div>
-              <div style={{ fontWeight: 700 }}>{fmt(token.fee.creatorFeeAccruedZec, 8)} ZEC</div>
+              <div style={{ fontWeight: 700 }}>{fmt(token.fee.creatorFeeAccruedZec, 8)} {token.currency}</div>
             </div>
             <div>
               <div className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>{t("token.fee.paid")}</div>
-              <div style={{ fontWeight: 700 }}>{fmt(token.fee.creatorFeeTotalPaidZec, 8)} ZEC</div>
+              <div style={{ fontWeight: 700 }}>{fmt(token.fee.creatorFeeTotalPaidZec, 8)} {token.currency}</div>
             </div>
           </div>
           {token.fee.creatorPayoutAddress ? (
@@ -244,8 +244,8 @@ export default function TokenPage() {
         </div>
       </div>
 
-      {showBuy && wallet && <BuyModal symbol={token.symbol} walletId={wallet.walletId} onClose={() => setShowBuy(false)} />}
-      {showSell && wallet && <SellModal symbol={token.symbol} walletId={wallet.walletId} onClose={() => setShowSell(false)} />}
+      {showBuy && wallet && <BuyModal symbol={token.symbol} walletId={wallet.walletId} currency={token.currency} onClose={() => setShowBuy(false)} />}
+      {showSell && wallet && <SellModal symbol={token.symbol} walletId={wallet.walletId} currency={token.currency} onClose={() => setShowSell(false)} />}
     </div>
   );
 }

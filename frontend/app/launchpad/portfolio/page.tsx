@@ -38,15 +38,15 @@ export default function PortfolioPage() {
               const valueZec = h.amount * h.priceZec;
               return (
                 <tr key={h.symbol} onClick={() => (location.href = `/launchpad/token/${h.symbol}`)}>
-                  <td>{h.symbol}</td>
+                  <td>{h.symbol} <span className="muted" style={{ fontSize: 10 }}>{h.currency}</span></td>
                   <td>{h.amount.toFixed(0)}</td>
                   <td>
-                    {h.priceZec.toExponential(3)} ZEC
-                    {formatUsd(h.priceZec, usdRate) && <div className="muted" style={{ fontSize: 11 }}>{formatUsd(h.priceZec, usdRate)}</div>}
+                    {h.priceZec.toExponential(3)} {h.currency}
+                    {h.currency === "ZEC" && formatUsd(h.priceZec, usdRate) && <div className="muted" style={{ fontSize: 11 }}>{formatUsd(h.priceZec, usdRate)}</div>}
                   </td>
                   <td>
-                    {valueZec.toFixed(6)} ZEC
-                    {formatUsd(valueZec, usdRate) && <div className="muted" style={{ fontSize: 11 }}>{formatUsd(valueZec, usdRate)}</div>}
+                    {valueZec.toFixed(6)} {h.currency}
+                    {h.currency === "ZEC" && formatUsd(valueZec, usdRate) && <div className="muted" style={{ fontSize: 11 }}>{formatUsd(valueZec, usdRate)}</div>}
                   </td>
                 </tr>
               );

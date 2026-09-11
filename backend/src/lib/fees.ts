@@ -70,6 +70,21 @@ export function createFeeZecFor(walletId: string): number {
 }
 
 /**
+ * Brai, 2026-09-11: "quiero que puedas trabajar con Ycash y Zcash" -- YEC
+ * gets its own flat create fee (no wallet-gated discount yet -- that was
+ * asked for specifically as a ZEC-only perk, see createFeeZecFor above).
+ * Same 0.01 default as ZEC purely for simplicity; override independently
+ * via env var if Brai ever wants the two to diverge.
+ */
+export const TOKEN_CREATE_FEE_YEC = Number(process.env.YCASH_TOKEN_CREATE_FEE_YEC ?? 0.01);
+
+/** Currency-aware version of createFeeZecFor -- dispatches to the right
+ * constant/discount logic for whichever currency the creator picked. */
+export function createFeeFor(currency: "ZEC" | "YEC", walletId: string): number {
+  return currency === "YEC" ? TOKEN_CREATE_FEE_YEC : createFeeZecFor(walletId);
+}
+
+/**
  * Brai, 2026-09-08: "deja 0.1 de first buy maximo" -- product-level ceiling
  * on the optional bundled first buy at token creation (see PendingTokenCreation
  * in schema.prisma and the /api/tokens route in server.ts). Separate from

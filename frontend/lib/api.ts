@@ -10,10 +10,15 @@ async function req(path: string, opts?: RequestInit) {
   return body;
 }
 
+/** Brai, 2026-09-11: "quiero que puedas trabajar con Ycash y Zcash" -- every
+ * token/order/pending-creation now carries which chain it trades on. */
+export type Currency = "ZEC" | "YEC";
+
 export interface TokenSummary {
   symbol: string;
   name: string;
   totalSupply: number;
+  currency: Currency;
   priceZec: number;
   /** % change vs. ~24h ago; null when the token isn't old enough yet to have one. */
   priceChange24hPct: number | null;
@@ -59,6 +64,7 @@ export interface PricePoint {
 
 export interface Trade {
   side: "BUY" | "SELL";
+  currency: Currency;
   tokenAmount: number;
   zecAmount: number;
   createdAt: string;
@@ -68,7 +74,15 @@ export interface GlobalTrade extends Trade {
   symbol: string;
 }
 
-let modePromise: Promise<{ zcashMode: "real" | "mock"; tokenCreateFeeZec: number }> | null = null;
+interface ModeResponse {
+  zcashMode: "real" | "mock";
+  tokenCreateFeeZec: number;
+  /** Brai, 2026-09-11: per-currency mode/fee/first-buy-cap, so the
+   * create-token currency picker can show accurate numbers for whichever
+   * one is selected -- see /api/mode in server.ts. */
+  currencies: Record<Currency, { mode: "real" | "mock"; createFeeZec: number; maxFirstBuyZec: number }>;
+}
+let modePromise: Promise<ModeResponse> | null = null;
 
 /** Formats a ZEC amount as a USD string, e.g. "$1,234.56" or "<$0.01" for
  * dust amounts that would otherwise round to "$0.00". `usdRate` is the
@@ -123,7 +137,7 @@ export const api = {
     req("/api/wallets/import", { method: "POST", body: JSON.stringify({ words }) }),
   // Cached for the life of the page load: this never changes mid-session,
   // and every "is this simulated?" note (and the create-fee display) needs it.
-  getMode: (): Promise<{ zcashMode: "real" | "mock"; tokenCreateFeeZec: number }> => {
+  getMode: (): Promise<ModeResponse> => {
     if (!modePromise) modePromise = req("/api/mode");
     return modePromise;
   },
@@ -135,7 +149,7 @@ export const api = {
     walletId: string
   ): Promise<{
     walletTag: string;
-    holdings: { symbol: string; name: string; amount: number; priceZec: number }[];
+    holdings: { symbol: string; name: string; amount: number; priceZec: number; currency: Currency }[];
     // Last ZEC address this wallet used for a sell payout, if any -- lets
     // the Sell modal pre-fill it instead of asking to paste it in again.
     defaultRefundAddress: string | null;
@@ -153,6 +167,10 @@ export const api = {
     name: string;
     totalSupply?: number;
     creatorWalletId: string;
+    // Brai, 2026-09-11: "quiero que puedas trabajar con Ycash y Zcash" --
+    // which currency this token trades in for its whole life. Omit for ZEC
+    // (the backend defaults to it too).
+    currency?: Currency;
     creatorPayoutAddress?: string;
     logoDataUrl?: string;
     description?: string;
@@ -165,6 +183,7 @@ export const api = {
     firstBuyZec?: number;
   }): Promise<{
     creationId: string;
+    currency: Currency;
     zecAddress: string;
     zecAmount: number;
     createFeeZec: number;
@@ -174,11 +193,20 @@ export const api = {
   }> => req("/api/tokens", { method: "POST", body: JSON.stringify(data) }),
   getTokenCreation: (
     id: string
-  ): Promise<{ status: "PENDING" | "CREATED" | "EXPIRED" | "FAILED"; resultSymbol?: string; zecAddress: string | null; expectedZecAmount: number }> =>
-    req(`/api/token-creations/${id}`),
-  buy: (data: { walletId: string; symbol: string; zecAmount: number; refundAddress: string }) =>
+  ): Promise<{
+    status: "PENDING" | "CREATED" | "EXPIRED" | "FAILED";
+    resultSymbol?: string;
+    currency: Currency;
+    zecAddress: string | null;
+    expectedZecAmount: number;
+  }> => req(`/api/token-creations/${id}`),
+  buy: (
+    data: { walletId: string; symbol: string; zecAmount: number; refundAddress: string }
+  ): Promise<{ orderId: string; currency: Currency; zecAddress: string; zecAmount: number; memo: string; status: "PENDING" }> =>
     req("/api/orders/buy", { method: "POST", body: JSON.stringify(data) }),
-  sell: (data: { walletId: string; symbol: string; tokenAmount: number; refundAddress: string }) =>
+  sell: (
+    data: { walletId: string; symbol: string; tokenAmount: number; refundAddress: string }
+  ): Promise<{ id: string; currency: Currency; zecAmount: number; status: string }> =>
     req("/api/orders/sell", { method: "POST", body: JSON.stringify(data) }),
   getOrder: (id: string) => req(`/api/orders/${id}`),
 };

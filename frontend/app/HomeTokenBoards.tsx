@@ -47,7 +47,10 @@ function TokenCard({
   featured?: boolean;
   featuredLabel?: string;
 }) {
-  const mcUsd = formatCompactUsd(token.marketCapZec, usdRate);
+  // Brai, 2026-09-11: no live YEC/USD rate exists yet, so the USD estimate
+  // only makes sense for ZEC tokens -- see the matching guard on the token
+  // detail page.
+  const mcUsd = token.currency === "ZEC" ? formatCompactUsd(token.marketCapZec, usdRate) : null;
   return (
     <Link href={`/launchpad/token/${token.symbol}`} className={featured ? "board-card board-card-featured" : "board-card"}>
       {graduatedTag && <div className="board-card-pill">GRAD</div>}
@@ -60,10 +63,11 @@ function TokenCard({
       <div className="sym" style={{ display: "flex", alignItems: "center", gap: 4 }}>
         {token.symbol}
         {isOfficialToken(token.symbol) && <OfficialCheckmark />}
+        <span className="muted board-card-pill" style={{ position: "static", fontSize: 9, padding: "1px 5px" }}>{token.currency}</span>
       </div>
       <div className="name">{token.name}</div>
       <div className="mc">
-        {fmtMcap(token.marketCapZec)} ZEC{mcUsd && <span className="muted"> · {mcUsd}</span>}
+        {fmtMcap(token.marketCapZec)} {token.currency}{mcUsd && <span className="muted"> · {mcUsd}</span>}
       </div>
       {(token.twitterUrl || token.websiteUrl) && (
         <div style={{ display: "flex", gap: 6, marginTop: 4 }}>

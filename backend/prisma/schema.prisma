@@ -28,6 +28,17 @@ model InternalWallet {
   orders   Order[]
 }
 
+// Brai, 2026-09-11: "quiero que puedas trabajar con Ycash y Zcash" -- each
+// token trades in exactly ONE currency for its whole life (decided at
+// creation, see Token.currency below), not a single curve that accepts
+// either -- that was the explicit call over the alternative (one curve,
+// pay-in-either-currency with live conversion). YEC starts in mock mode
+// (see ycashMock.ts) until Brai stands up real Ycash node/wallet infra.
+enum Currency {
+  ZEC
+  YEC
+}
+
 model Token {
   id                String   @id @default(cuid())
   symbol            String   @unique
@@ -37,6 +48,17 @@ model Token {
   creatorWalletId   String
   genesisMemoTxid   String?  // txid shielded donde se inscribió name/symbol/supply
   createdAt         DateTime @default(now())
+  // Brai, 2026-09-11: which chain this token's whole trading life happens
+  // on. Defaults to ZEC so every token created before this field existed
+  // is unaffected. Deliberately NOT renaming curveReserveZec and friends
+  // below to something generic -- those columns hold real, live financial
+  // data for existing tokens, and prisma db push --accept-data-loss would
+  // happily drop-and-recreate a renamed column. They're kept ZEC-named but
+  // are really "amount in whatever `currency` is" from here on -- the
+  // bonding-curve math (bondingCurve.ts) and fee math (fees.ts) are pure
+  // percentage/ratio functions that never cared which currency they were
+  // fed, so nothing there needs to change.
+  currency          Currency @default(ZEC)
 
   // Perfil del token (todo opcional, lo carga el creador al crearlo)
   logoDataUrl       String?  @db.Text // imagen como data URL (base64), ya redimensionada en el navegador
@@ -165,6 +187,10 @@ model PendingTokenCreation {
   name                 String
   totalSupply          BigInt
   creatorWalletId      String
+  // Which currency the creator is paying the create fee (+ optional first
+  // buy) in -- becomes the resulting Token's currency, see the comment on
+  // Token.currency above.
+  currency             Currency            @default(ZEC)
   creatorPayoutAddress String?
   logoDataUrl          String?             @db.Text
   description          String?             @db.Text
@@ -222,6 +248,12 @@ model Order {
   tokenId           String
   side              OrderSide
   status            OrderStatus @default(PENDING)
+  // Brai, 2026-09-11: denormalized copy of the parent Token's currency at
+  // the time this order was placed -- lets server.ts pick the right wallet
+  // service (walletServiceFor) for this order without a join on every
+  // payment/resume-watch lookup. Defaults ZEC so every pre-existing order
+  // is unaffected.
+  currency          Currency    @default(ZEC)
 
   zecAddress        String?     // dirección diversificada generada para esta orden (BUY)
   // Diversifier (ZIP 32 `d`) de zecAddress, uno por pool shielded -- ver el

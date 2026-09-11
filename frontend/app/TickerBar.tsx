@@ -61,7 +61,7 @@ export default function TickerBar() {
           >
             <span className="ticker-symbol">{tok.symbol}</span>
             <span className="ticker-price mono">
-              {formatUsd(tok.priceZec, usdRate) ?? `${tok.priceZec.toFixed(8)} ZEC`}
+              {(tok.currency === "ZEC" ? formatUsd(tok.priceZec, usdRate) : null) ?? `${tok.priceZec.toFixed(8)} ${tok.currency}`}
             </span>
             <span className="ticker-pct mono">
               {isNew ? "NEW" : `${isUp ? "▲" : "▼"} ${Math.abs(pct).toFixed(1)}%`}

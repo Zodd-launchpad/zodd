@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { api, formatUsd, formatZec } from "@/lib/api";
+import { api, formatUsd, formatZec, type Currency } from "@/lib/api";
 import { useLanguage } from "@/lib/i18n";
 import { useZecUsdPrice } from "@/lib/zecPrice";
 
@@ -19,11 +19,25 @@ function fmtBalance(n: number) {
 // shows up immediately instead of after a round trip. Trimmed -- see the
 // matching comment in BuyModal.tsx -- so a pasted trailing newline/spaces
 // (some wallets' "copy address" includes them) doesn't fail validation.
+// Brai, 2026-09-11: also accepts "ys1" now (Ycash's shielded prefix) -- see
+// the matching comment in BuyModal.tsx.
 function isShieldedAddress(addr: string): boolean {
-  return /^(u1|zs1)/.test(addr.trim());
+  return /^(u1|zs1|ys1)/.test(addr.trim());
 }
 
-export default function SellModal({ symbol, walletId, onClose }: { symbol: string; walletId: string; onClose: () => void }) {
+export default function SellModal({
+  symbol,
+  walletId,
+  currency,
+  onClose,
+}: {
+  symbol: string;
+  walletId: string;
+  // Brai, 2026-09-11: the token's own currency (ZEC or YEC) -- see the
+  // matching prop on BuyModal.tsx.
+  currency: Currency;
+  onClose: () => void;
+}) {
   const { t } = useLanguage();
   const usdRate = useZecUsdPrice();
   const [tokenAmount, setTokenAmount] = useState("");
@@ -40,8 +54,8 @@ export default function SellModal({ symbol, walletId, onClose }: { symbol: strin
   const [priceZec, setPriceZec] = useState<number | null>(null);
 
   useEffect(() => {
-    api.getMode().then((m) => setIsRealMode(m.zcashMode === "real")).catch(() => {});
-  }, []);
+    api.getMode().then((m) => setIsRealMode(m.currencies[currency].mode === "real")).catch(() => {});
+  }, [currency]);
 
   useEffect(() => {
     let stop = false;
@@ -107,10 +121,10 @@ export default function SellModal({ symbol, walletId, onClose }: { symbol: strin
                   const amt = parseFloat(tokenAmount) || 0;
                   if (amt <= 0) return null;
                   const estZec = amt * priceZec;
-                  const usd = formatUsd(estZec, usdRate);
+                  const usd = currency === "ZEC" ? formatUsd(estZec, usdRate) : null;
                   return (
                     <span className="muted" style={{ fontSize: 11, marginTop: 4, display: "block" }}>
-                      ≈ {formatZec(estZec)} ZEC{usd && ` (≈ ${usd})`}
+                      ≈ {formatZec(estZec)} {currency}{usd && ` (≈ ${usd})`}
                     </span>
                   );
                 })()}
@@ -142,7 +156,7 @@ export default function SellModal({ symbol, walletId, onClose }: { symbol: strin
             </div>
             <div className="field">
               <label>{t("sell.addressLabel")}</label>
-              <input value={refundAddress} onChange={(e) => setRefundAddress(e.target.value)} placeholder="u1... / zs1..." />
+              <input value={refundAddress} onChange={(e) => setRefundAddress(e.target.value)} placeholder={currency === "YEC" ? "u1... / ys1..." : "u1... / zs1..."} />
               <span className="muted" style={{ fontSize: 11, marginTop: 4, display: "block" }}>{t("sell.addressHint")}</span>
             </div>
             {error && <p style={{ color: "var(--red)", fontSize: 13 }}>{error}</p>}
@@ -153,7 +167,7 @@ export default function SellModal({ symbol, walletId, onClose }: { symbol: strin
         ) : (
           <>
             <h2 style={{ marginTop: 0, color: "var(--green)" }}>{t("sell.payoutSent")}</h2>
-            <p>{t(isRealMode ? "sell.payoutBody.real" : "sell.payoutBody.simulated", { amount: result.zecAmount.toFixed(8) })}</p>
+            <p>{t(isRealMode ? "sell.payoutBody.real" : "sell.payoutBody.simulated", { amount: result.zecAmount.toFixed(8), currency })}</p>
             <button className="btn btn-gold" style={{ width: "100%" }} onClick={onClose}>
               {t("buy.close")}
             </button>

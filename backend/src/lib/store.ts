@@ -11,6 +11,12 @@ import { splitFee } from "./fees.js";
 export const prisma = new PrismaClient();
 export { DEFAULT_CURVE_CONFIG };
 
+/** Which chain a token/order/pending-creation trades on -- see the big
+ * comment on Token.currency in schema.prisma. Kept as a plain string union
+ * (not re-exporting Prisma's generated enum type) to match how every other
+ * status/side field in this file is already typed. */
+export type Currency = "ZEC" | "YEC";
+
 function num(v: unknown): number {
   if (v === null || v === undefined) return 0;
   if (typeof v === "bigint") return Number(v);
@@ -71,6 +77,9 @@ export interface TokenWithCurve {
   name: string;
   totalSupply: number;
   creatorWalletId: string;
+  /** Which chain this token trades in for its whole life -- see the big
+   * comment on Token.currency in schema.prisma. */
+  currency: Currency;
   curve: CurveState;
   createdAt: string;
   genesisMemoTxid: string | null;
@@ -91,6 +100,7 @@ function toTokenWithCurve(t: {
   name: string;
   totalSupply: bigint;
   creatorWalletId: string;
+  currency: string;
   curveReserveZec: unknown;
   curveSoldTokens: bigint;
   createdAt: Date;
@@ -111,6 +121,7 @@ function toTokenWithCurve(t: {
     name: t.name,
     totalSupply: num(t.totalSupply),
     creatorWalletId: t.creatorWalletId,
+    currency: t.currency as Currency,
     curve: { realZecReserves: num(t.curveReserveZec), tokensSold: num(t.curveSoldTokens) },
     createdAt: t.createdAt.toISOString(),
     genesisMemoTxid: t.genesisMemoTxid,
@@ -131,6 +142,10 @@ export async function createToken(input: {
   name: string;
   totalSupply: number;
   creatorWalletId: string;
+  /** Which chain this token trades in -- see Token.currency in
+   * schema.prisma. Defaults to ZEC so every pre-multi-currency caller is
+   * unaffected. */
+  currency?: Currency;
   /** Real shielded txid of the on-chain creation inscription. Only set
    * when ZCASH_MODE=real; null in demo/simulated mode (the frontend falls
    * back to the deterministic simulated display in that case). */
@@ -151,6 +166,7 @@ export async function createToken(input: {
       name: input.name,
       totalSupply: BigInt(Math.round(input.totalSupply)),
       creatorWalletId: input.creatorWalletId,
+      currency: input.currency ?? "ZEC",
       curveReserveZec: 0,
       curveSoldTokens: 0n,
       genesisMemoTxid: input.genesisMemoTxid ?? null,
@@ -384,12 +400,24 @@ export async function getFinancialAudit() {
  * payout, no matter how many times the admin route was hit. A manual
  * trigger is Brai choosing the moment on purpose; there's no reason for
  * an internal 24h-since-creation clock to override that. */
-export async function getTokensDueForFeePayout(intervalMs: number, ignoreInterval = false, minAccruedZec = 0): Promise<TokenWithCurve[]> {
+// Brai, 2026-09-11: `currency` filter added alongside multi-currency support
+// -- run-fee-distribution in server.ts is still ZEC-only admin tooling (no
+// real YEC wallet exists yet to pay a YEC creator fee out of), so it passes
+// currency: "ZEC" here to make sure a YEC token's accrued fee is never
+// swept into a ZEC payout by mistake. Omit it to get every currency (not
+// used anywhere yet, but kept general).
+export async function getTokensDueForFeePayout(
+  intervalMs: number,
+  ignoreInterval = false,
+  minAccruedZec = 0,
+  currency?: Currency
+): Promise<TokenWithCurve[]> {
   const cutoff = new Date(Date.now() - intervalMs);
   const rows = await prisma.token.findMany({
     where: {
       creatorFeeAccruedZec: minAccruedZec > 0 ? { gte: minAccruedZec } : { gt: 0 },
       creatorPayoutAddress: { not: null },
+      ...(currency ? { currency } : {}),
       ...(ignoreInterval
         ? {}
         : { OR: [{ lastFeePayoutAt: null, createdAt: { lte: cutoff } }, { lastFeePayoutAt: { lte: cutoff } }] }),
@@ -502,6 +530,7 @@ export async function getPriceChangeSinceLaunchPct(tokenId: string, currentPrice
 
 export interface TradeView {
   side: OrderSide;
+  currency: Currency;
   tokenAmount: number;
   zecAmount: number;
   createdAt: string;
@@ -525,6 +554,7 @@ export async function getRecentTrades(tokenId: string, limit = 50): Promise<Trad
   });
   return orders.map((o) => ({
     side: o.side as OrderSide,
+    currency: o.currency as Currency,
     tokenAmount: num(o.tokenAmount),
     zecAmount: num(o.zecAmount),
     createdAt: (o.filledAt ?? o.createdAt).toISOString(),
@@ -549,6 +579,7 @@ export async function getRecentTradesGlobal(limit = 30): Promise<GlobalTradeView
   });
   return orders.map((o) => ({
     side: o.side as OrderSide,
+    currency: o.currency as Currency,
     tokenAmount: num(o.tokenAmount),
     zecAmount: num(o.zecAmount),
     symbol: o.token.symbol,
@@ -568,6 +599,11 @@ export async function getPortfolio(walletId: string) {
       name: b.token.name,
       amount: num(b.amount),
       priceZec: currentPrice(curve),
+      // Brai, 2026-09-11: "quiero que puedas trabajar con Ycash y Zcash" --
+      // a wallet can now hold both ZEC- and YEC-denominated tokens, so the
+      // portfolio view has to say which is which (see PortfolioHolding in
+      // frontend/lib/api.ts).
+      currency: b.token.currency as Currency,
     };
   });
 }
@@ -583,6 +619,9 @@ export interface OrderView {
   tokenId: string;
   side: OrderSide;
   status: OrderStatus;
+  /** Copied from the parent Token at order-creation time -- see the
+   * comment on Order.currency in schema.prisma. */
+  currency: Currency;
   zecAddress?: string | null;
   zecSaplingDiversifierHex?: string | null;
   zecOrchardDiversifierHex?: string | null;
@@ -600,6 +639,7 @@ function toOrderView(o: {
   tokenId: string;
   side: string;
   status: string;
+  currency: string;
   zecAddress: string | null;
   zecSaplingDiversifierHex?: string | null;
   zecOrchardDiversifierHex?: string | null;
@@ -616,6 +656,7 @@ function toOrderView(o: {
     tokenId: o.tokenId,
     side: o.side as OrderSide,
     status: o.status as OrderStatus,
+    currency: o.currency as Currency,
     zecAddress: o.zecAddress,
     zecSaplingDiversifierHex: o.zecSaplingDiversifierHex ?? null,
     zecOrchardDiversifierHex: o.zecOrchardDiversifierHex ?? null,
@@ -628,13 +669,23 @@ function toOrderView(o: {
   };
 }
 
-export async function createBuyOrder(input: { internalWalletId: string; tokenId: string; zecAmount: number; refundAddress?: string }) {
+export async function createBuyOrder(input: {
+  internalWalletId: string;
+  tokenId: string;
+  /** The token's own currency -- caller always has this on hand from the
+   * token it just looked up. Defaults ZEC only so nothing else breaks if a
+   * caller forgets to pass it. */
+  currency?: Currency;
+  zecAmount: number;
+  refundAddress?: string;
+}) {
   const o = await prisma.order.create({
     data: {
       internalWalletId: input.internalWalletId,
       tokenId: input.tokenId,
       side: "BUY",
       status: "PENDING",
+      currency: input.currency ?? "ZEC",
       zecAmount: input.zecAmount,
       // Brai, 2026-09-07: "que la gente cuando vaya a comprar te deje la
       // wallet... asi tenemos registrado el comprador y le enviamos el
@@ -650,6 +701,7 @@ export async function createBuyOrder(input: { internalWalletId: string; tokenId:
 export async function createSellOrder(input: {
   internalWalletId: string;
   tokenId: string;
+  currency?: Currency;
   tokenAmount: number;
   refundAddress: string;
   zecAmount: number;
@@ -661,6 +713,7 @@ export async function createSellOrder(input: {
       tokenId: input.tokenId,
       side: "SELL",
       status: "FILLED",
+      currency: input.currency ?? "ZEC",
       refundAddress: input.refundAddress,
       tokenAmount: BigInt(Math.round(input.tokenAmount)),
       zecAmount: input.zecAmount,
@@ -747,6 +800,7 @@ export async function getAllKnownPaymentTxids(): Promise<string[]> {
 export async function createRepeatBuyOrder(input: {
   internalWalletId: string;
   tokenId: string;
+  currency?: Currency;
   zecAddress: string | null;
   zecAmount: number;
   tokenAmount: number;
@@ -758,6 +812,7 @@ export async function createRepeatBuyOrder(input: {
       tokenId: input.tokenId,
       side: "BUY",
       status: "FILLED",
+      currency: input.currency ?? "ZEC",
       zecAddress: input.zecAddress,
       zecAmount: input.zecAmount,
       tokenAmount: BigInt(Math.round(input.tokenAmount)),
@@ -847,6 +902,9 @@ export interface PendingTokenCreationView {
   name: string;
   status: "PENDING" | "CREATED" | "EXPIRED" | "FAILED";
   creatorWalletId: string;
+  /** Which currency the creator is paying in -- becomes the resulting
+   * Token's currency. See Token.currency in schema.prisma. */
+  currency: Currency;
   zecAddress: string | null;
   zecSaplingDiversifierHex?: string | null;
   zecOrchardDiversifierHex?: string | null;
@@ -865,6 +923,7 @@ function toPendingTokenCreationView(p: {
   name: string;
   status: string;
   creatorWalletId: string;
+  currency: string;
   zecAddress: string | null;
   zecSaplingDiversifierHex?: string | null;
   zecOrchardDiversifierHex?: string | null;
@@ -879,6 +938,7 @@ function toPendingTokenCreationView(p: {
     name: p.name,
     status: p.status as PendingTokenCreationView["status"],
     creatorWalletId: p.creatorWalletId,
+    currency: p.currency as Currency,
     zecAddress: p.zecAddress,
     zecSaplingDiversifierHex: p.zecSaplingDiversifierHex ?? null,
     zecOrchardDiversifierHex: p.zecOrchardDiversifierHex ?? null,
@@ -894,6 +954,9 @@ export async function createPendingTokenCreation(input: {
   name: string;
   totalSupply: number;
   creatorWalletId: string;
+  /** Which currency the creator is paying in -- see the comment on
+   * PendingTokenCreationView.currency. Defaults ZEC. */
+  currency?: Currency;
   creatorPayoutAddress?: string;
   logoDataUrl?: string;
   description?: string;
@@ -910,6 +973,7 @@ export async function createPendingTokenCreation(input: {
       name: input.name,
       totalSupply: BigInt(Math.round(input.totalSupply)),
       creatorWalletId: input.creatorWalletId,
+      currency: input.currency ?? "ZEC",
       creatorPayoutAddress: input.creatorPayoutAddress ?? null,
       logoDataUrl: input.logoDataUrl ?? null,
       description: input.description ?? null,
@@ -980,6 +1044,7 @@ export async function completePendingTokenCreation(id: string, genesisMemoTxid: 
     name: p.name,
     totalSupply: num(p.totalSupply),
     creatorWalletId: p.creatorWalletId,
+    currency: p.currency as Currency,
     genesisMemoTxid,
     creatorPayoutAddress: p.creatorPayoutAddress ?? undefined,
     logoDataUrl: p.logoDataUrl ?? undefined,

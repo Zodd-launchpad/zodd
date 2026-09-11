@@ -234,6 +234,7 @@ export default function MarketPage() {
                         <strong style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
                           {t2.symbol}
                           {isOfficialToken(t2.symbol) && <OfficialCheckmark />}
+                          <span className="muted" style={{ fontSize: 9, border: "1px solid var(--border)", borderRadius: 3, padding: "1px 4px" }}>{t2.currency}</span>
                         </strong>
                         <div className="muted">{t2.name}</div>
                         <TokenLinks twitterUrl={t2.twitterUrl} websiteUrl={t2.websiteUrl} />
@@ -241,11 +242,11 @@ export default function MarketPage() {
                     </div>
                   </td>
                   <td className="mono">
-                    {fmtPrice(t2.priceZec)} ZEC
+                    {fmtPrice(t2.priceZec)} {t2.currency}
                   </td>
                   <td className="mono">
-                    {fmt(t2.marketCapZec)} ZEC
-                    {formatCompactUsd(t2.marketCapZec, usdRate) && (
+                    {fmt(t2.marketCapZec)} {t2.currency}
+                    {t2.currency === "ZEC" && formatCompactUsd(t2.marketCapZec, usdRate) && (
                       <div className="muted" style={{ fontSize: 11 }}>{formatCompactUsd(t2.marketCapZec, usdRate)}</div>
                     )}
                   </td>

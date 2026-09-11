@@ -48,8 +48,8 @@ export default function TradesList({ trades }: { trades: Trade[] }) {
               {t("trades.tokens", { n: fmtTokens(tr.tokenAmount) })}
             </span>
             <span className="mono muted" style={{ minWidth: 110, textAlign: "right" }}>
-              {tr.zecAmount.toFixed(6)} ZEC
-              {formatUsd(tr.zecAmount, usdRate) && (
+              {tr.zecAmount.toFixed(6)} {tr.currency}
+              {tr.currency === "ZEC" && formatUsd(tr.zecAmount, usdRate) && (
                 <div style={{ fontSize: 11 }}>{formatUsd(tr.zecAmount, usdRate)}</div>
               )}
             </span>

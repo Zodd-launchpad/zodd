@@ -56,7 +56,7 @@ export default function ActivityFeed() {
                 className="activity-row"
               >
                 <span className={tr.side === "BUY" ? "activity-row-amount up" : "activity-row-amount down"}>
-                  {tr.zecAmount.toFixed(4)} ZEC <span className="activity-row-arrow">→</span> {tr.symbol}
+                  {tr.zecAmount.toFixed(4)} {tr.currency} <span className="activity-row-arrow">→</span> {tr.symbol}
                 </span>
               </Link>
             ))}
