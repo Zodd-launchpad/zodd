@@ -441,6 +441,8 @@ export const translations = {
     en: "A marketplace for ZODD-themed NFTs — mint, browse, and trade. Not built yet. Head to the Launchpad to see what's live today.",
     zh: "一个 ZODD 主题 NFT 的市场——铸造、浏览和交易，尚未建成。去发射台看看今天已经上线的内容吧。",
   },
+  "nft.whitelistBanner.label": { en: "NFT Whitelist is open", zh: "NFT 白名单现已开放" },
+  "nft.whitelistBanner.cta": { en: "Enter to Whitelist", zh: "进入白名单" },
 
   // ---------- Token detail page ----------
   "token.loading": { en: "Loading…", zh: "加载中…" },
