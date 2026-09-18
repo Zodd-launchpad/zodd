@@ -241,7 +241,7 @@ export const api = {
   // Brai, 2026-09-18 (v8): "si pones tu HANDLE y ya suscribiste te vaya a
   // la 4ta directamente" -- recognizes a returning applicant by handle
   // alone (works even without the localStorage-remembered address).
-  getNftWhitelistStatusByHandle: (handle: string): Promise<{ entry: NftWhitelistEntry | null }> =>
+  getNftWhitelistStatusByHandle: (handle: string): Promise<{ entry: NftWhitelistPublicStatus | null }> =>
     req(`/api/nft/whitelist/by-handle/${encodeURIComponent(handle)}`),
   // Admin-only (ADMIN_TOKEN, entered by Brai himself -- see
   // AdminNftWhitelistPage). Never called for a regular visitor.
@@ -271,5 +271,17 @@ export interface NftWhitelistEntry {
   createdAt: string;
   reviewedAt: string | null;
   reviewNote: string | null;
+  claimedAt: string | null;
+}
+
+// Brai, 2026-09-18 (v9, URGENT PRIVACY FIX): the by-handle lookup is
+// unauthenticated (anyone can type anyone's handle), so the backend never
+// sends walletAddress or reviewNote for it -- only status-relevant fields.
+export interface NftWhitelistPublicStatus {
+  id: string;
+  twitterHandle: string;
+  status: "PENDING" | "APPROVED" | "REJECTED";
+  createdAt: string;
+  reviewedAt: string | null;
   claimedAt: string | null;
 }

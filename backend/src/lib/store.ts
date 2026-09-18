@@ -1680,18 +1680,46 @@ export async function getNftWhitelistEntry(walletAddress: string): Promise<NftWh
   return entry ? toNftWhitelistEntryView(entry) : null;
 }
 
+/** Public-facing shape for the by-handle lookup below. This endpoint is
+ * UNAUTHENTICATED and reachable by typing anyone's handle, not just your
+ * own -- so it must never leak walletAddress (would deanonymize whoever
+ * owns that handle) or reviewNote (Brai's internal review comments). Only
+ * the status-relevant fields are safe to expose publicly. */
+export interface NftWhitelistPublicStatusView {
+  id: string;
+  twitterHandle: string;
+  status: NftWhitelistStatus;
+  createdAt: string;
+  reviewedAt: string | null;
+  claimedAt: string | null;
+}
+
 /** Brai, 2026-09-18 (v8): "si pones tu HANDLE y ya suscribiste te vaya a la
  * 4ta directamente" -- lets the wizard recognize a returning applicant by
  * TYPED HANDLE alone, not just the localStorage-remembered address (a
  * different browser/device has no localStorage entry, but the handle is
  * the same). twitterHandle isn't a DB-level unique constraint, but
  * submitNftWhitelistEntry above enforces it's unique in practice, so
- * findFirst is safe here. */
-export async function getNftWhitelistEntryByHandle(rawHandle: string): Promise<NftWhitelistEntryView | null> {
+ * findFirst is safe here.
+ *
+ * Brai, 2026-09-18 (v9, URGENT PRIVACY FIX): "cuando ppones el handle te
+ * dice que wallet es, no tiene que aparecer que wallet es se supone que es
+ * anonimo" -- this handle lookup has no ownership check (anyone can type
+ * anyone's handle), so it must return the wallet-free public view, never
+ * the full entry. */
+export async function getNftWhitelistEntryByHandle(rawHandle: string): Promise<NftWhitelistPublicStatusView | null> {
   const handle = normalizeTwitterHandle(rawHandle);
   if (!/^[a-z0-9_]{1,15}$/.test(handle)) return null;
   const entry = await prisma.nftWhitelistEntry.findFirst({ where: { twitterHandle: handle } });
-  return entry ? toNftWhitelistEntryView(entry) : null;
+  if (!entry) return null;
+  return {
+    id: entry.id,
+    twitterHandle: entry.twitterHandle,
+    status: entry.status as NftWhitelistStatus,
+    createdAt: entry.createdAt.toISOString(),
+    reviewedAt: entry.reviewedAt ? entry.reviewedAt.toISOString() : null,
+    claimedAt: entry.claimedAt ? entry.claimedAt.toISOString() : null,
+  };
 }
 
 /** Brai's review queue -- oldest first (FIFO), same ordering convention as

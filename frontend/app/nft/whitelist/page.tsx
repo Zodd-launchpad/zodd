@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { getNoirWallet, isNoirWalletInstalled } from "@noir-wallet/sdk";
-import { api, type NftWhitelistEntry } from "@/lib/api";
+import { api, type NftWhitelistEntry, type NftWhitelistPublicStatus } from "@/lib/api";
 import { useLanguage } from "@/lib/i18n";
 
 // Brai, 2026-09-18: "necesito que me hagas la parte de la whitelist de los
@@ -51,7 +51,13 @@ type Tasks = { follow: boolean; likeRepost: boolean; quote: boolean };
 export default function NftWhitelistPage() {
   const { t } = useLanguage();
   const [config, setConfig] = useState<{ tweetUrl: string | null; twitterHandle: string | null; quoteCaption: string } | null>(null);
-  const [entry, setEntry] = useState<NftWhitelistEntry | null | undefined>(undefined); // undefined = still loading
+  // Brai, 2026-09-18 (v9, URGENT PRIVACY FIX): entry can come from the
+  // user's OWN wallet lookup/submit (full NftWhitelistEntry, wallet
+  // included -- fine, it's their own address) or from a plain HANDLE
+  // lookup (NftWhitelistPublicStatus, wallet-free -- anyone can type
+  // anyone's handle, so it must never carry a wallet address). Never
+  // render entry.walletAddress from this shared state for that reason.
+  const [entry, setEntry] = useState<NftWhitelistEntry | NftWhitelistPublicStatus | null | undefined>(undefined); // undefined = still loading
   const [step, setStep] = useState(1);
   const [handleInput, setHandleInput] = useState("");
   const [addressInput, setAddressInput] = useState("");
@@ -116,13 +122,11 @@ export default function NftWhitelistPage() {
     try {
       const r = await api.getNftWhitelistStatusByHandle(handleInput.trim());
       if (r.entry) {
+        // Brai, 2026-09-18 (v9, URGENT PRIVACY FIX): this lookup is
+        // unauthenticated (no proof the typed handle belongs to whoever
+        // is typing), so the response has no walletAddress at all --
+        // nothing to prefill here anymore, on purpose.
         setEntry(r.entry);
-        setAddressInput(r.entry.walletAddress);
-        try {
-          localStorage.setItem(ADDRESS_STORAGE_KEY, r.entry.walletAddress);
-        } catch {
-          /* ignore */
-        }
       } else {
         setStep(2);
       }
@@ -240,10 +244,12 @@ export default function NftWhitelistPage() {
               <span className="zw-status-handle">@{entry.twitterHandle}</span>
               <span className="zw-status-word">{t(`nftWhitelist.status.${entry.status}`)}</span>
             </div>
-            <div className="zw-review-row">
-              <span className="zw-review-key">{t("nftWhitelist.wizard.reviewAddress")}</span>
-              <span className="zw-review-val mono-break">{entry.walletAddress}</span>
-            </div>
+            {/* Brai, 2026-09-18 (v9, URGENT PRIVACY FIX): "cuando ppones el
+                handle te dice que wallet es, no tiene que aparecer que
+                wallet es se supone que es anonimo" -- the wallet address
+                review row that used to be here is gone for good. This
+                status view is reachable by typing ANY handle, so showing
+                the linked wallet would deanonymize whoever owns it. */}
             <p className="muted" style={{ marginTop: 16 }}>
               {entry.status === "PENDING" && t("nftWhitelist.pendingNote")}
               {entry.status === "APPROVED" && t("nftWhitelist.approvedNote")}
