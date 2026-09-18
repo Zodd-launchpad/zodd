@@ -7,6 +7,7 @@ import { useLanguage } from "@/lib/i18n";
 import WalletOnboardModal from "./WalletOnboardModal";
 import WalletDetailModal from "./WalletDetailModal";
 import HelpModal from "./HelpModal";
+import SiteAudioToggle from "./SiteAudioToggle";
 
 const NAV = [
   { href: "/launchpad", key: "nav.launchpad" as const },
@@ -136,6 +137,11 @@ export default function HeaderBar() {
           {t("nav.connect")}
         </div>
       )}
+      {/* Brai, 2026-09-18: "agrega un icono con un parlante que permite
+          silenciar el sitio web a la derecha arriba" -- rightmost item in
+          the header so it lands top-right of the page. */}
+      <SiteAudioToggle />
+
       {showOnboard && <WalletOnboardModal onClose={() => setShowOnboard(false)} />}
       {showDetail && <WalletDetailModal onClose={() => setShowDetail(false)} />}
       {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
