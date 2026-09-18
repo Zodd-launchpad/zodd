@@ -348,13 +348,31 @@ export default function NftWhitelistPage() {
           mientras haces la whitelist en los 4 pasos" -- looping branded
           mascot clip beside the card, only while the wizard is active (not
           on the post-submit PENDIENTE/APROBADO/RECHAZADO screen). "en loop"
-          -- autoPlay + loop + muted + playsInline for reliable autoplay. */}
+          -- autoPlay + loop + muted + playsInline for reliable autoplay.
+          Brai, 2026-09-18 (v7): sent 2 more mascot clips (Eye of Horus,
+          scarab) -- "agrega esos dos videos, que queden balanceados los 3 al
+          costado" -- 3 equal-size clips stacked in the side column instead
+          of 1. */}
       {!entry && (
-        <div className="zw-video-wrap">
-          <video className="zw-video" autoPlay muted loop playsInline>
-            <source src="/zodd-mascot-loop.webm" type="video/webm" />
-            <source src="/zodd-mascot-loop.mp4" type="video/mp4" />
-          </video>
+        <div className="zw-video-col">
+          <div className="zw-video-wrap">
+            <video className="zw-video" autoPlay muted loop playsInline>
+              <source src="/zodd-mascot-loop.webm" type="video/webm" />
+              <source src="/zodd-mascot-loop.mp4" type="video/mp4" />
+            </video>
+          </div>
+          <div className="zw-video-wrap">
+            <video className="zw-video" autoPlay muted loop playsInline>
+              <source src="/zodd-mascot-eye.webm" type="video/webm" />
+              <source src="/zodd-mascot-eye.mp4" type="video/mp4" />
+            </video>
+          </div>
+          <div className="zw-video-wrap">
+            <video className="zw-video" autoPlay muted loop playsInline>
+              <source src="/zodd-mascot-scarab.webm" type="video/webm" />
+              <source src="/zodd-mascot-scarab.mp4" type="video/mp4" />
+            </video>
+          </div>
         </div>
       )}
       </div>
@@ -382,10 +400,16 @@ export default function NftWhitelistPage() {
           height: fit-content;
           box-shadow: 0 0 30px var(--glow-soft);
         }
-        .zw-video-wrap {
+        .zw-video-col {
           position: sticky;
           top: 48px;
-          width: 220px;
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+          flex-shrink: 0;
+        }
+        .zw-video-wrap {
+          width: 190px;
           flex-shrink: 0;
           border-radius: 10px;
           overflow: hidden;
@@ -402,9 +426,15 @@ export default function NftWhitelistPage() {
             flex-direction: column;
             align-items: center;
           }
-          .zw-video-wrap {
+          .zw-video-col {
             position: static;
-            width: 160px;
+            flex-direction: row;
+            width: 100%;
+            max-width: 620px;
+            justify-content: center;
+          }
+          .zw-video-wrap {
+            width: calc(33.333% - 8px);
           }
         }
         .zw-tick {
