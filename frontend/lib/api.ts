@@ -261,6 +261,39 @@ export const api = {
       headers: { "x-admin-token": adminToken },
       body: JSON.stringify({ status, note }),
     }),
+
+  // ---------- NFT marketplace ----------
+  // Brai, 2026-09-18: "empeza a deployar la pagina" -- mint (pay -> random
+  // piece), secondary market (list/unlist/buy), and the wallet-free public
+  // activity feed. Same real-ZEC payment mechanics as buy()/createToken()
+  // above (one-time address + memo, poll for FILLED/CREATED).
+  getNftCollection: (slug: string): Promise<NftCollection> => req(`/api/nft/collections/${slug}`),
+  getNftItems: (
+    slug: string,
+    opts?: { status?: "listed" | "all"; ownerWalletId?: string; sort?: "price_asc" | "price_desc" | "edition"; page?: number }
+  ): Promise<{ items: NftItem[]; total: number; page: number }> => {
+    const params = new URLSearchParams();
+    if (opts?.status) params.set("status", opts.status);
+    if (opts?.ownerWalletId) params.set("ownerWalletId", opts.ownerWalletId);
+    if (opts?.sort) params.set("sort", opts.sort);
+    if (opts?.page) params.set("page", String(opts.page));
+    const qs = params.toString();
+    return req(`/api/nft/collections/${slug}/items${qs ? `?${qs}` : ""}`);
+  },
+  getNftItem: (slug: string, editionNumber: number): Promise<{ collection: { slug: string; name: string; currency: Currency }; item: NftItem }> =>
+    req(`/api/nft/collections/${slug}/items/${editionNumber}`),
+  getWalletNfts: (walletId: string): Promise<NftItem[]> => req(`/api/wallets/${walletId}/nfts`),
+  mintNft: (data: { walletId: string; collectionSlug: string }): Promise<NftMintResult> =>
+    req("/api/nft/mint", { method: "POST", body: JSON.stringify(data) }),
+  getNftMint: (id: string): Promise<NftPendingMint> => req(`/api/nft/mints/${id}`),
+  listNftItem: (itemId: string, data: { walletId: string; priceZec: number; payoutAddress: string }): Promise<NftItem> =>
+    req(`/api/nft/items/${itemId}/list`, { method: "POST", body: JSON.stringify(data) }),
+  unlistNftItem: (itemId: string, walletId: string): Promise<NftItem> =>
+    req(`/api/nft/items/${itemId}/unlist`, { method: "POST", body: JSON.stringify({ walletId }) }),
+  buyNftItem: (itemId: string, walletId: string): Promise<NftPurchaseInit> =>
+    req(`/api/nft/items/${itemId}/buy`, { method: "POST", body: JSON.stringify({ walletId }) }),
+  getNftPurchase: (id: string): Promise<NftPurchaseOrder> => req(`/api/nft/purchases/${id}`),
+  getNftActivity: (): Promise<NftActivity[]> => req("/api/nft/activity"),
 };
 
 export interface NftWhitelistEntry {
@@ -284,4 +317,91 @@ export interface NftWhitelistPublicStatus {
   createdAt: string;
   reviewedAt: string | null;
   claimedAt: string | null;
+}
+
+// ---------- NFT marketplace ----------
+export interface NftCollection {
+  slug: string;
+  name: string;
+  description: string | null;
+  currency: Currency;
+  totalSupply: number;
+  mintPriceZec: number;
+  coverImageDataUrl: string | null;
+  mintedCount: number;
+  remaining: number;
+  soldOut: boolean;
+  createdAt: string;
+  floorZec: number | null;
+  listedCount: number;
+  salesCount: number;
+  volumeZec: number;
+}
+
+export interface NftItem {
+  id: string;
+  collectionId: string;
+  editionNumber: number;
+  name: string | null;
+  imageDataUrl: string | null;
+  traits: Record<string, string> | null;
+  mintedAt: string | null;
+  mintPaymentTxid: string | null;
+  ownerInternalWalletId: string | null;
+  // Only meaningful to the item's own owner looking at their own piece --
+  // never rendered on the public grid (see the NFT market page's own note,
+  // and the wallet-address privacy fix this session for why that matters).
+  ownerWalletTag: string | null;
+  listedPriceZec: number | null;
+  listedAt: string | null;
+  listedPayoutAddress: string | null;
+}
+
+export type NftMintResult =
+  | { free: true; status: "CREATED"; collectionSlug: string; itemId: string; editionNumber: number }
+  | { mintId: string; currency: Currency; zecAddress: string; zecAmount: number; memo: string; status: "PENDING" };
+
+export interface NftPendingMint {
+  id: string;
+  collectionId: string;
+  internalWalletId: string;
+  currency: Currency;
+  zecAddress: string | null;
+  expectedZecAmount: number;
+  status: "PENDING" | "CREATED" | "EXPIRED" | "FAILED";
+  resultItemId: string | null;
+  createdAt: string;
+  resultItem?: NftItem;
+}
+
+export interface NftPurchaseInit {
+  purchaseId: string;
+  currency: Currency;
+  zecAddress: string;
+  zecAmount: number;
+  memo: string;
+  status: "PENDING";
+}
+
+export interface NftPurchaseOrder {
+  id: string;
+  itemId: string;
+  currency: Currency;
+  zecAddress: string | null;
+  payoutAddress: string;
+  expectedZecAmount: number;
+  status: "PENDING" | "FILLED" | "EXPIRED" | "FAILED";
+  executionTxid: string | null;
+  createdAt: string;
+  filledAt: string | null;
+}
+
+export interface NftActivity {
+  kind: "MINT" | "LIST" | "SALE";
+  collectionSlug: string;
+  editionNumber: number;
+  name: string | null;
+  priceZec: number;
+  currency: Currency;
+  createdAt: string;
 }

@@ -1218,6 +1218,44 @@ app.get("/api/nft/collections/:slug/items/:editionNumber", async (req, reply) =>
   return reply.send({ collection: { slug: collection.slug, name: collection.name, currency: collection.currency }, item });
 });
 
+// Brai, 2026-09-18 (NFT marketplace launch): admin-only HTTP twin of `npm
+// run seed:nft` for art that arrives as chat attachments rather than files
+// already sitting on disk (see seedNftCollectionFromManifest's comment in
+// store.ts). Same ADMIN_TOKEN gate as every other admin mutation.
+const nftSeedItemSchema = z.object({
+  editionNumber: z.number().int().positive(),
+  name: z.string().max(200).optional(),
+  imageDataUrl: z.string().min(1),
+  traits: z.record(z.string(), z.string()).optional(),
+});
+const nftSeedManifestSchema = z.object({
+  slug: z.string().min(1),
+  name: z.string().min(1),
+  description: z.string().max(2000).optional(),
+  currency: z.enum(["ZEC", "YEC"]).optional(),
+  mintPriceZec: z.number().positive(),
+  coverImageDataUrl: z.string().optional(),
+  items: z.array(nftSeedItemSchema).min(1),
+});
+
+app.post("/api/admin/nft-seed", async (req, reply) => {
+  if (!ADMIN_TOKEN) return reply.code(503).send({ error: "ADMIN_TOKEN is not configured" });
+  if (req.headers["x-admin-token"] !== ADMIN_TOKEN) return reply.code(401).send({ error: "unauthorized" });
+  // Cast past a TS inference quirk in this zod version, where a nested
+  // schema (the z.record traits field) makes tsc infer every top-level key
+  // as optional even though .parse() genuinely enforces them at runtime --
+  // verified directly (an empty object throws on slug/name/mintPriceZec/
+  // items as expected). Harmless either way: this backend has no tsc build
+  // gate (see the standing note on that in store.ts/seedNftCollection.ts).
+  const manifest = nftSeedManifestSchema.parse(req.body) as store.NftSeedManifest;
+  try {
+    const result = await store.seedNftCollectionFromManifest(manifest);
+    return reply.send(result);
+  } catch (err: any) {
+    return reply.code(400).send({ error: err?.message ?? "seed failed" });
+  }
+});
+
 app.get("/api/wallets/:id/nfts", async (req, reply) => {
   const { id } = req.params as { id: string };
   const wallet = await store.getWallet(id);
@@ -1501,6 +1539,14 @@ app.post("/api/nft/items/:id/buy", async (req, reply) => {
     memo: walletService.buildPaymentMemoBase64(purchase.id),
     status: "PENDING",
   });
+});
+
+// Brai, 2026-09-18 (NFT marketplace launch): feeds the site-wide Live
+// Activity panel (see ActivityFeed.tsx) -- merged client-side with token
+// trades. Public/unauthenticated, so store.getRecentNftActivityGlobal
+// deliberately never includes a wallet address or tag.
+app.get("/api/nft/activity", async (_req, reply) => {
+  return reply.send(await store.getRecentNftActivityGlobal(30));
 });
 
 app.get("/api/nft/purchases/:id", async (req, reply) => {

@@ -652,6 +652,86 @@ export async function getRecentTradesGlobal(limit = 30): Promise<GlobalTradeView
   }));
 }
 
+// Brai, 2026-09-18 (NFT marketplace launch): "quiero que la compra venta y
+// listado de nfts aparezca en el LIVE ACTIVITY tambien" -- a site-wide feed
+// mirroring getRecentTradesGlobal above but for NFT events (mint, list,
+// sale), merged into the SAME panel on the frontend (see ActivityFeed.tsx).
+// Deliberately wallet-free, same lesson as the whitelist by-handle privacy
+// fix: this is public and unauthenticated, so it only ever names the PIECE
+// (collection + edition), never who owns or listed it.
+export type NftActivityKind = "MINT" | "LIST" | "SALE";
+export interface NftActivityView {
+  kind: NftActivityKind;
+  collectionSlug: string;
+  editionNumber: number;
+  name: string | null;
+  priceZec: number;
+  currency: Currency;
+  createdAt: string;
+}
+
+export async function getRecentNftActivityGlobal(limit = 30): Promise<NftActivityView[]> {
+  const perKind = Math.min(limit, 30);
+  const [mints, listings, sales] = await Promise.all([
+    prisma.nftItem.findMany({
+      where: { mintedAt: { not: null } },
+      orderBy: { mintedAt: "desc" },
+      take: perKind,
+      select: { editionNumber: true, name: true, mintedAt: true, collection: { select: { slug: true, mintPriceZec: true, currency: true } } },
+    }),
+    prisma.nftItem.findMany({
+      where: { listedAt: { not: null } },
+      orderBy: { listedAt: "desc" },
+      take: perKind,
+      select: { editionNumber: true, name: true, listedAt: true, listedPriceZec: true, collection: { select: { slug: true, currency: true } } },
+    }),
+    prisma.nftPurchaseOrder.findMany({
+      where: { status: "FILLED" },
+      orderBy: { filledAt: "desc" },
+      take: perKind,
+      select: {
+        filledAt: true,
+        currency: true,
+        expectedZecAmount: true,
+        item: { select: { editionNumber: true, name: true, collection: { select: { slug: true } } } },
+      },
+    }),
+  ]);
+
+  const rows: NftActivityView[] = [
+    ...mints.map((m) => ({
+      kind: "MINT" as const,
+      collectionSlug: m.collection.slug,
+      editionNumber: m.editionNumber,
+      name: m.name,
+      priceZec: num(m.collection.mintPriceZec),
+      currency: m.collection.currency as Currency,
+      createdAt: (m.mintedAt as Date).toISOString(),
+    })),
+    ...listings.map((l) => ({
+      kind: "LIST" as const,
+      collectionSlug: l.collection.slug,
+      editionNumber: l.editionNumber,
+      name: l.name,
+      priceZec: num(l.listedPriceZec),
+      currency: l.collection.currency as Currency,
+      createdAt: (l.listedAt as Date).toISOString(),
+    })),
+    ...sales.map((s) => ({
+      kind: "SALE" as const,
+      collectionSlug: s.item.collection.slug,
+      editionNumber: s.item.editionNumber,
+      name: s.item.name,
+      priceZec: num(s.expectedZecAmount),
+      currency: s.currency as Currency,
+      createdAt: (s.filledAt as Date).toISOString(),
+    })),
+  ];
+
+  rows.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  return rows.slice(0, limit);
+}
+
 export async function getPortfolio(walletId: string) {
   const rows = await prisma.balance.findMany({
     where: { internalWalletId: walletId, amount: { gt: 0 } },
@@ -1421,6 +1501,104 @@ export async function unlistNft(itemId: string, walletId: string): Promise<NftIt
   });
   if (result.count === 0) return null;
   return getNftItemById(itemId);
+}
+
+// Brai, 2026-09-18 (NFT marketplace launch): "empeza a deployar la pagina"
+// -- an HTTP-callable twin of scripts/seedNftCollection.ts's upsert logic,
+// for seeding art that Claude already holds in memory as base64 (sent
+// straight from chat) rather than files sitting on this container's disk.
+// Same idempotency guarantees as the CLI version: re-running against the
+// same slug upserts the collection in place, and an item that's already
+// been minted (ownerInternalWalletId set) is left completely untouched --
+// safe to call again as Brai sends more art ("vendran muchos mas").
+// ADMIN_TOKEN-gated at the route (see server.ts), same as every other
+// admin-only mutation in this file.
+export interface NftSeedManifestItem {
+  editionNumber: number;
+  name?: string | null;
+  imageDataUrl: string;
+  traits?: Record<string, string> | null;
+}
+export interface NftSeedManifest {
+  slug: string;
+  name: string;
+  description?: string | null;
+  currency?: "ZEC" | "YEC";
+  mintPriceZec: number;
+  coverImageDataUrl?: string | null;
+  items: NftSeedManifestItem[];
+}
+
+export async function seedNftCollectionFromManifest(
+  manifest: NftSeedManifest
+): Promise<{ collectionId: string; totalSupply: number; created: number; updated: number; skippedMinted: number }> {
+  if (!manifest.slug || !manifest.name || !manifest.items?.length) {
+    throw new Error("manifest needs at least slug, name, and a non-empty items[]");
+  }
+  if (!(manifest.mintPriceZec > 0)) {
+    throw new Error("manifest.mintPriceZec must be a positive number -- this is the real mint price, not a placeholder");
+  }
+  const editionNumbers = manifest.items.map((i) => i.editionNumber);
+  if (new Set(editionNumbers).size !== editionNumbers.length) {
+    throw new Error("duplicate editionNumber in manifest.items -- each piece needs a unique number");
+  }
+
+  const totalSupply = manifest.items.length;
+  const currency = manifest.currency ?? "ZEC";
+
+  const collection = await prisma.nftCollection.upsert({
+    where: { slug: manifest.slug },
+    create: {
+      slug: manifest.slug,
+      name: manifest.name,
+      description: manifest.description ?? null,
+      currency,
+      totalSupply,
+      mintPriceZec: manifest.mintPriceZec,
+      coverImageDataUrl: manifest.coverImageDataUrl ?? null,
+      hidden: true, // Brai flips this (or just links /nft) when he's ready for real users
+    },
+    update: {
+      name: manifest.name,
+      description: manifest.description ?? null,
+      currency,
+      totalSupply,
+      mintPriceZec: manifest.mintPriceZec,
+      ...(manifest.coverImageDataUrl ? { coverImageDataUrl: manifest.coverImageDataUrl } : {}),
+    },
+  });
+
+  let created = 0;
+  let updated = 0;
+  let skippedMinted = 0;
+  for (const item of manifest.items) {
+    const existing = await prisma.nftItem.findUnique({
+      where: { collectionId_editionNumber: { collectionId: collection.id, editionNumber: item.editionNumber } },
+    });
+    if (existing?.ownerInternalWalletId) {
+      skippedMinted++;
+      continue; // already minted -- never overwrite a piece someone owns
+    }
+    await prisma.nftItem.upsert({
+      where: { collectionId_editionNumber: { collectionId: collection.id, editionNumber: item.editionNumber } },
+      create: {
+        collectionId: collection.id,
+        editionNumber: item.editionNumber,
+        name: item.name ?? null,
+        imageDataUrl: item.imageDataUrl,
+        traits: item.traits ?? undefined,
+      },
+      update: {
+        name: item.name ?? null,
+        imageDataUrl: item.imageDataUrl,
+        traits: item.traits ?? undefined,
+      },
+    });
+    if (existing) updated++;
+    else created++;
+  }
+
+  return { collectionId: collection.id, totalSupply, created, updated, skippedMinted };
 }
 
 // ---------- Pending NFT mints ----------

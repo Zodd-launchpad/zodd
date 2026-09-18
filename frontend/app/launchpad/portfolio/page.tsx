@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useWallet } from "@/lib/wallet";
-import { api, formatUsd } from "@/lib/api";
+import { api, formatUsd, type NftItem } from "@/lib/api";
 import { useLanguage } from "@/lib/i18n";
 import { useZecUsdPrice } from "@/lib/zecPrice";
 
@@ -10,10 +11,15 @@ export default function PortfolioPage() {
   const { t } = useLanguage();
   const usdRate = useZecUsdPrice();
   const [holdings, setHoldings] = useState<any[] | null>(null);
+  // Brai, 2026-09-18 (NFT marketplace launch): "en portfolio tambien tienen
+  // que aparecer los NFTs que tenes" -- same wallet, its owned pieces
+  // straight from GET /api/wallets/:id/nfts (store.getWalletNfts).
+  const [nfts, setNfts] = useState<NftItem[] | null>(null);
 
   useEffect(() => {
     if (!wallet) return;
     api.portfolio(wallet.walletId).then((d) => setHoldings(d.holdings));
+    api.getWalletNfts(wallet.walletId).then(setNfts).catch(() => setNfts([]));
   }, [wallet]);
 
   if (loading) return null;
@@ -53,6 +59,29 @@ export default function PortfolioPage() {
             })}
           </tbody>
         </table>
+      )}
+
+      {nfts && nfts.length > 0 && (
+        <>
+          <h2 style={{ fontSize: 15, marginTop: 28 }}>{t("portfolio.nfts.title")}</h2>
+          <div className="nft-grid">
+            {nfts.map((it) => (
+              <Link key={it.id} href={`/nft/test/item/${it.editionNumber}`} className="nft-card">
+                <div className="nft-card-img-wrap">
+                  {it.imageDataUrl ? (
+                    <img src={it.imageDataUrl} alt={it.name ?? `#${it.editionNumber}`} className="nft-card-img" />
+                  ) : (
+                    <div className="nft-card-img-placeholder">?</div>
+                  )}
+                </div>
+                <div className="nft-card-body">
+                  <span className="nft-card-name">{it.name ?? `#${it.editionNumber}`}</span>
+                  <span className="nft-card-price">{it.listedPriceZec != null ? t("portfolio.nfts.listed") : t("portfolio.nfts.unlisted")}</span>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </>
       )}
     </div>
   );

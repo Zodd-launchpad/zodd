@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { api, GlobalTrade } from "@/lib/api";
+import { api, GlobalTrade, NftActivity } from "@/lib/api";
 import { useLanguage } from "@/lib/i18n";
 
 const POLL_MS = 4000;
@@ -14,21 +14,47 @@ const MAX_ROWS = 18;
 // token (backed by GET /api/trades, store.getRecentTradesGlobal), fixed to
 // the left edge on wide screens. Shows actual FILLED orders only, same
 // source of truth as the per-token TradesList -- never synthetic data.
-function rowKey(tr: GlobalTrade, i: number) {
-  return `${tr.createdAt}-${tr.symbol}-${tr.side}-${tr.zecAmount}-${i}`;
-}
+//
+// Brai, 2026-09-18 (NFT marketplace launch): "quiero que la compra venta y
+// listado de nfts aparezca en el LIVE ACTIVITY tambien" -- merged in with
+// the token trades below (backed by GET /api/nft/activity,
+// store.getRecentNftActivityGlobal), sorted back into one chronological
+// feed instead of a second separate panel.
+type Row = { ts: number; key: string } & (
+  | { type: "trade"; trade: GlobalTrade }
+  | { type: "nft"; nft: NftActivity }
+);
 
 export default function ActivityFeed() {
   const { t } = useLanguage();
-  const [trades, setTrades] = useState<GlobalTrade[] | null>(null);
+  const [rows, setRows] = useState<Row[] | null>(null);
   const stopRef = useRef(false);
 
   useEffect(() => {
     stopRef.current = false;
     async function load() {
       try {
-        const data = await api.getRecentTradesGlobal();
-        if (!stopRef.current) setTrades(data.slice(0, MAX_ROWS));
+        const [trades, nftRows] = await Promise.all([
+          api.getRecentTradesGlobal(),
+          api.getNftActivity().catch(() => [] as NftActivity[]),
+        ]);
+        if (stopRef.current) return;
+        const merged: Row[] = [
+          ...trades.map((tr, i) => ({
+            type: "trade" as const,
+            trade: tr,
+            ts: new Date(tr.createdAt).getTime(),
+            key: `t-${tr.createdAt}-${tr.symbol}-${tr.side}-${tr.zecAmount}-${i}`,
+          })),
+          ...nftRows.map((n, i) => ({
+            type: "nft" as const,
+            nft: n,
+            ts: new Date(n.createdAt).getTime(),
+            key: `n-${n.createdAt}-${n.collectionSlug}-${n.editionNumber}-${n.kind}-${i}`,
+          })),
+        ];
+        merged.sort((a, b) => b.ts - a.ts);
+        setRows(merged.slice(0, MAX_ROWS));
       } catch {
         /* silent -- same posture as TickerBar: a feed that can't fetch just keeps showing what it had */
       }
@@ -41,25 +67,30 @@ export default function ActivityFeed() {
     };
   }, []);
 
-  if (trades !== null && trades.length === 0) return null;
+  if (rows !== null && rows.length === 0) return null;
 
   return (
     <div className="activity-feed">
       <label className="muted activity-feed-heading">{t("activity.heading")}</label>
       <div className="activity-feed-list">
-        {trades === null
+        {rows === null
           ? null
-          : trades.map((tr, i) => (
-              <Link
-                key={rowKey(tr, i)}
-                href={`/launchpad/token/${tr.symbol}`}
-                className="activity-row"
-              >
-                <span className={tr.side === "BUY" ? "activity-row-amount up" : "activity-row-amount down"}>
-                  {tr.zecAmount.toFixed(4)} {tr.currency} <span className="activity-row-arrow">→</span> {tr.symbol}
-                </span>
-              </Link>
-            ))}
+          : rows.map((row) =>
+              row.type === "trade" ? (
+                <Link key={row.key} href={`/launchpad/token/${row.trade.symbol}`} className="activity-row">
+                  <span className={row.trade.side === "BUY" ? "activity-row-amount up" : "activity-row-amount down"}>
+                    {row.trade.zecAmount.toFixed(4)} {row.trade.currency} <span className="activity-row-arrow">→</span> {row.trade.symbol}
+                  </span>
+                </Link>
+              ) : (
+                <Link key={row.key} href={`/nft/test/item/${row.nft.editionNumber}`} className="activity-row">
+                  <span className={row.nft.kind === "LIST" ? "activity-row-amount" : "activity-row-amount up"}>
+                    {t(`activity.nft.${row.nft.kind}`)} {row.nft.name ?? `#${row.nft.editionNumber}`}{" "}
+                    <span className="activity-row-arrow">·</span> {row.nft.priceZec.toFixed(4)} {row.nft.currency}
+                  </span>
+                </Link>
+              )
+            )}
       </div>
     </div>
   );
