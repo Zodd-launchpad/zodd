@@ -92,19 +92,15 @@ export default function NftWhitelistPage() {
 
   const handleValid = /^[a-zA-Z0-9_]{1,15}$/.test(handleInput.trim());
   const addressValid = addressInput.trim().length >= 8;
-  // A task whose dependency (the handle to follow / the tweet to quote)
-  // isn't configured yet doesn't block Continue -- Brai hasn't published
-  // NFT_WHITELIST_TWEET_URL/TWITTER_HANDLE yet, and there's no server-side
-  // verification of any of this anyway (see the long comment on
-  // claimFreeNftWhitelistMint in store.ts), so gating on it would just
-  // strand people for no real reason.
-  const followRequired = !!config?.twitterHandle;
-  const tweetRequired = !!config?.tweetUrl;
-  const tasksAllDone =
-    (!followRequired || tasks.follow) && (!tweetRequired || tasks.likeRepost) && (!tweetRequired || tasks.quote);
-  const tasksLeftCount = [followRequired && !tasks.follow, tweetRequired && !tasks.likeRepost, tweetRequired && !tasks.quote].filter(
-    Boolean
-  ).length;
+  // Brai, 2026-09-18 (v6): "tenes que hacer que en el paso 3, hasta que no
+  // esta tildado, follow, like y repost y quote it... no te deje poner
+  // CONTINUAR" -- all three tasks must be ticked before Continue unlocks,
+  // full stop, no auto-satisfy for tasks that aren't configured yet. If a
+  // task's URL isn't set (e.g. NFT_WHITELIST_TWEET_URL not published yet),
+  // its button stays disabled and Continue stays blocked -- that's
+  // intentional now, not a bug.
+  const tasksAllDone = tasks.follow && tasks.likeRepost && tasks.quote;
+  const tasksLeftCount = [!tasks.follow, !tasks.likeRepost, !tasks.quote].filter(Boolean).length;
 
   function openTask(key: keyof Tasks, url: string) {
     window.open(url, "_blank", "noopener,noreferrer");
@@ -168,6 +164,7 @@ export default function NftWhitelistPage() {
 
   return (
     <div className="zw-page">
+      <div className="zw-layout">
       <div className="zw-card card">
         <span className="zw-tick zw-tick-tl" />
         <span className="zw-tick zw-tick-tr" />
@@ -347,6 +344,21 @@ export default function NftWhitelistPage() {
         )}
       </div>
 
+      {/* Brai, 2026-09-18: "quiero poner un video a reproducir en el costado
+          mientras haces la whitelist en los 4 pasos" -- looping branded
+          mascot clip beside the card, only while the wizard is active (not
+          on the post-submit PENDIENTE/APROBADO/RECHAZADO screen). "en loop"
+          -- autoPlay + loop + muted + playsInline for reliable autoplay. */}
+      {!entry && (
+        <div className="zw-video-wrap">
+          <video className="zw-video" autoPlay muted loop playsInline>
+            <source src="/zodd-mascot-loop.webm" type="video/webm" />
+            <source src="/zodd-mascot-loop.mp4" type="video/mp4" />
+          </video>
+        </div>
+      )}
+      </div>
+
       <style jsx>{`
         .zw-page {
           background: var(--bg);
@@ -355,12 +367,45 @@ export default function NftWhitelistPage() {
           display: flex;
           justify-content: center;
         }
+        .zw-layout {
+          width: 100%;
+          max-width: 900px;
+          display: flex;
+          align-items: flex-start;
+          justify-content: center;
+          gap: 24px;
+        }
         .zw-card {
           position: relative;
           width: 100%;
           max-width: 620px;
           height: fit-content;
           box-shadow: 0 0 30px var(--glow-soft);
+        }
+        .zw-video-wrap {
+          position: sticky;
+          top: 48px;
+          width: 220px;
+          flex-shrink: 0;
+          border-radius: 10px;
+          overflow: hidden;
+          border: 1px solid var(--border);
+          box-shadow: 0 0 30px var(--glow-soft);
+        }
+        .zw-video {
+          display: block;
+          width: 100%;
+          height: auto;
+        }
+        @media (max-width: 860px) {
+          .zw-layout {
+            flex-direction: column;
+            align-items: center;
+          }
+          .zw-video-wrap {
+            position: static;
+            width: 160px;
+          }
         }
         .zw-tick {
           position: absolute;
