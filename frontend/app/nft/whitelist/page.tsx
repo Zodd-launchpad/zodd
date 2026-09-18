@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { getNoirWallet, isNoirWalletInstalled } from "@noir-wallet/sdk";
 import { api, type NftWhitelistEntry, type NftWhitelistPublicStatus } from "@/lib/api";
 import { useLanguage } from "@/lib/i18n";
@@ -44,19 +44,30 @@ import { useLanguage } from "@/lib/i18n";
 // gated on the typed handle being valid, full stop; the separate
 // locked/unlocked confirmation UI is gone.
 //
-// Brai, 2026-09-18 (v10): "cuando figuras como aprobado y tocas SHARE, eso
-// tiene que sacar una captura de el cuadrado que dice NAXWEB3 APPROVED y
-// enviarlo para twitear directamente... lo mismo cuando dice UNDER
-// REVISION" -- SHARE now screenshots the status card (html2canvas) instead
-// of just opening a text-only tweet intent. Twitter's web intent URL has
-// no way to attach an image (that's a Twitter limitation, not ours), so
-// the real "direct" path only exists where the OS share sheet supports
-// file attachments (navigator.share with files -- mostly mobile Chrome/
-// Safari): there the screenshot goes straight into the X compose screen
-// already attached. Elsewhere (desktop) the screenshot downloads and the
-// tweet compose window opens alongside it, pre-filled with the caption, so
-// the user just drops the PNG in -- as close to "direct" as the platform
-// allows without a server-side bot posting on someone's behalf.
+// Brai, 2026-09-18 (v10, REVERTED): "cuando figuras como aprobado y tocas
+// SHARE, eso tiene que sacar una captura de el cuadrado que dice NAXWEB3
+// APPROVED y enviarlo para twitear directamente" -- first attempt made
+// SHARE screenshot the status card (html2canvas) and, on desktop, download
+// the PNG next to a pre-filled tweet compose window for the user to
+// manually attach. Brai's call: "eso del share quedo horrible... nadie va
+// a cargar esa foto en twitter, nadie va a ni descargarla" -- correct, a
+// download-then-manually-attach step is a dead flow, nobody completes it.
+//
+// Brai, 2026-09-18 (v11): fixed properly. SHARE now just opens the normal
+// Twitter text-intent, but pointed at /nft/whitelist/share/[handle]
+// instead of the generic whitelist page. THAT page's generateMetadata
+// sets Open Graph / Twitter Card image tags pointing at
+// /api/og/whitelist/[handle], which server-renders the status card (via
+// next/og) on the fly -- Twitter's own crawler fetches it and shows it
+// inline in the tweet compose/preview automatically. No screenshot, no
+// download, no manual attach step, works identically on mobile and
+// desktop because it's just a normal link-preview card, the same
+// mechanism every "share your result" page on the web uses.
+//
+// Brai, 2026-09-18 (v11 cont.): "la captura tiene que incluir esta foto
+// del gato tambien, la idea es que sea publicidad" -- the ZODD mascot
+// image is baked into that server-rendered card (see route.tsx) so every
+// share doubles as branded advertising.
 const ADDRESS_STORAGE_KEY = "zodd-nft-whitelist-address";
 const TOTAL_STEPS = 4;
 
@@ -80,8 +91,6 @@ export default function NftWhitelistPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [checkingHandle, setCheckingHandle] = useState(false);
-  const [sharing, setSharing] = useState(false);
-  const shareCardRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     api
@@ -153,60 +162,16 @@ export default function NftWhitelistPage() {
     }
   }
 
-  async function shareStatus() {
-    if (!entry || sharing) return;
-    setError(null);
-    setSharing(true);
+  function shareStatus() {
+    if (!entry) return;
     const caption =
       entry.status === "APPROVED" ? t("nftWhitelist.share.approved") : t("nftWhitelist.share.pending");
-    const pageUrl = "https://zodd.fun/nft/whitelist";
-    const intentUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(caption)}&url=${encodeURIComponent(pageUrl)}`;
-    try {
-      let blob: Blob | null = null;
-      if (shareCardRef.current) {
-        const html2canvas = (await import("html2canvas")).default;
-        const canvas = await html2canvas(shareCardRef.current, {
-          backgroundColor: "#0e0e10",
-          scale: 2,
-          useCORS: true,
-        });
-        blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
-      }
-
-      if (blob) {
-        const file = new File([blob], `zodd-whitelist-${entry.twitterHandle}.png`, { type: "image/png" });
-        // Mobile / any browser that supports attaching a file to the native
-        // share sheet -- this is the actual "direct to tweet, image
-        // attached" path Brai asked for.
-        if (typeof navigator !== "undefined" && navigator.share && (navigator as any).canShare?.({ files: [file] })) {
-          try {
-            await navigator.share({ files: [file], text: `${caption}\n\n${pageUrl}` });
-            return;
-          } catch (shareErr: any) {
-            if (shareErr?.name === "AbortError") return; // user closed the share sheet -- not an error
-            // fall through to the download + intent fallback below
-          }
-        }
-        // Desktop fallback: Twitter's web-intent URL can't carry an image,
-        // so download the screenshot and open the pre-filled tweet compose
-        // window right next to it.
-        const dlUrl = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = dlUrl;
-        a.download = `zodd-whitelist-${entry.twitterHandle}.png`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        setTimeout(() => URL.revokeObjectURL(dlUrl), 10000);
-      }
-      window.open(intentUrl, "_blank", "noopener,noreferrer");
-    } catch {
-      // Screenshot failed for some reason (e.g. html2canvas couldn't load) --
-      // still let them tweet the text so SHARE never just does nothing.
-      window.open(intentUrl, "_blank", "noopener,noreferrer");
-    } finally {
-      setSharing(false);
-    }
+    // Points at the per-handle share page, not the generic whitelist page --
+    // ITS Open Graph/Twitter Card tags are what put the status image (with
+    // the ZODD mascot) into the tweet, via Twitter's own link-preview crawl.
+    const shareUrl = `https://zodd.fun/nft/whitelist/share/${encodeURIComponent(entry.twitterHandle)}`;
+    const intentUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(caption)}&url=${encodeURIComponent(shareUrl)}`;
+    window.open(intentUrl, "_blank", "noopener,noreferrer");
   }
 
   function openTask(key: keyof Tasks, url: string) {
@@ -301,12 +266,12 @@ export default function NftWhitelistPage() {
             <div className="zw-step-label">{t("nftWhitelist.badge")}</div>
             {/* Brai, 2026-09-18 (v8): "te diga tu estado en GRANDE, por ej
                 gordo_cripto UNDER REVIEW" -- handle + status as one big,
-                color-coded line instead of a small heading.
-                Brai, 2026-09-18 (v10): this whole card is what SHARE
-                screenshots (html2canvas on shareCardRef) -- kept as its own
-                bordered block so the captured PNG reads as a standalone
-                image, not a random slice of the page. */}
-            <div ref={shareCardRef} className="zw-share-card">
+                color-coded line instead of a small heading. Kept as its
+                own bordered block purely for visual polish now -- the
+                actual shareable image is server-rendered separately (see
+                /api/og/whitelist/[handle]/route.tsx), this on-page card
+                isn't screenshotted anymore (v11). */}
+            <div className="zw-share-card">
               <div className="zw-share-brand mono">ZODD.FUN &middot; NFT WHITELIST</div>
               <div className={`zw-status-big zw-status-${entry.status.toLowerCase()}`}>
                 <span className="zw-status-handle">@{entry.twitterHandle}</span>
@@ -333,8 +298,8 @@ export default function NftWhitelistPage() {
                   {t("nftWhitelist.wizard.resubmit")}
                 </button>
               ) : (
-                <button className="btn btn-outline" disabled={sharing} onClick={shareStatus}>
-                  {sharing ? t("nftWhitelist.wizard.sharing") : t("nftWhitelist.wizard.share")}
+                <button className="btn btn-outline" onClick={shareStatus}>
+                  {t("nftWhitelist.wizard.share")}
                 </button>
               )}
             </div>

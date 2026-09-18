@@ -254,7 +254,6 @@ export const translations = {
   // jumps straight to when there's already an entry for that handle.
   "nftWhitelist.wizard.checking": { en: "CHECKING…", zh: "查询中…" },
   "nftWhitelist.wizard.share": { en: "SHARE", zh: "分享" },
-  "nftWhitelist.wizard.sharing": { en: "PREPARING…", zh: "生成中…" },
   "nftWhitelist.share.pending": {
     en: "Just applied for the ZODD NFT whitelist 🐸 — under review!",
     zh: "刚刚申请了 ZODD NFT 白名单 🐸 —— 审核中！",
