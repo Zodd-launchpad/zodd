@@ -1326,9 +1326,21 @@ app.get("/api/nft/mints/:id", async (req, reply) => {
 // follow can be set later without a code change.
 const NFT_WHITELIST_TWEET_URL = process.env.NFT_WHITELIST_TWEET_URL ?? null;
 const NFT_WHITELIST_TWITTER_HANDLE = process.env.NFT_WHITELIST_TWITTER_HANDLE ?? null;
+// Brai, original ask: "que le haga retwitear un twit con una leyenda de me
+// he suscripto para la whitelist de estos nft" -- the caption the "quote"
+// task pre-fills into X's compose-quote intent link (see the wizard's
+// tasks step in frontend/app/nft/whitelist/page.tsx). Same "env var, unset
+// is fine" pattern as the two above -- falls back to a sensible default so
+// the page still works before Brai sets one.
+const NFT_WHITELIST_QUOTE_CAPTION =
+  process.env.NFT_WHITELIST_QUOTE_CAPTION ?? "Me sume a la whitelist de $ZODD NFT 🐸";
 
 app.get("/api/nft/whitelist/config", async (_req, reply) => {
-  return reply.send({ tweetUrl: NFT_WHITELIST_TWEET_URL, twitterHandle: NFT_WHITELIST_TWITTER_HANDLE });
+  return reply.send({
+    tweetUrl: NFT_WHITELIST_TWEET_URL,
+    twitterHandle: NFT_WHITELIST_TWITTER_HANDLE,
+    quoteCaption: NFT_WHITELIST_QUOTE_CAPTION,
+  });
 });
 
 // Brai, 2026-09-18 (v2): "no se necesita conectar la wallet para agregar,

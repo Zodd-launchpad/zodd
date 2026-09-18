@@ -196,6 +196,58 @@ export const translations = {
   "nftWhitelist.pendingNote": { en: "We'll review your follow/like/retweet by hand. No need to resubmit.", zh: "我们会人工审核你的关注/点赞/转发。无需重复提交。" },
   "nftWhitelist.approvedNote": { en: "You're whitelisted — your next mint on this collection will be free.", zh: "你已进入白名单——本系列下一次铸造将免费。" },
   "nftWhitelist.rejectedNote": { en: "Not approved this time. Double-check the steps above and you can resubmit.", zh: "本次未通过。请检查以上步骤后可重新提交。" },
+  // Brai, 2026-09-18 (v3): "esta muy pobre... te envio unas fotos de una
+  // pagina para q veas lo que tenes que copiar" -- redesigned as a 4-step
+  // wizard matching the reference screenshots' pixel-terminal look (see
+  // the long comment at the top of frontend/app/nft/whitelist/page.tsx).
+  "nftWhitelist.wizard.glory": { en: "4 STEPS TO GLORY", zh: "四步登顶" },
+  "nftWhitelist.wizard.log1": { en: "queue is open", zh: "队列已开放" },
+  "nftWhitelist.wizard.log2": { en: "reviewed by hand", zh: "人工审核" },
+  "nftWhitelist.wizard.log3": { en: "waiting on you", zh: "等待你的操作" },
+  "nftWhitelist.wizard.step1Label": { en: "X account", zh: "X 账号" },
+  "nftWhitelist.wizard.step1Heading": { en: "Your X handle", zh: "你的 X 账号" },
+  "nftWhitelist.wizard.step1Body": {
+    en: "Type your X (Twitter) handle — just the name, no @ needed, no login required.",
+    zh: "输入你的 X（推特）账号——只需用户名，不用加 @，也不需要登录。",
+  },
+  "nftWhitelist.wizard.step1Set": { en: "@{handle} set", zh: "@{handle} 已设置" },
+  "nftWhitelist.wizard.change": { en: "change", zh: "修改" },
+  "nftWhitelist.wizard.step2Label": { en: "Wallet address", zh: "钱包地址" },
+  "nftWhitelist.wizard.step2Heading": { en: "Your Zcash wallet address", zh: "你的 Zcash 钱包地址" },
+  "nftWhitelist.wizard.step2Body": {
+    en: "Paste the Zcash address that should receive the free mint — transparent, shielded or unified all work.",
+    zh: "粘贴用来接收免费铸造的 Zcash 地址——透明、屏蔽或统一地址都可以。",
+  },
+  "nftWhitelist.wizard.noirAutofill": { en: "Autofill from Noir", zh: "从 Noir 自动填入" },
+  "nftWhitelist.wizard.noirAutofilling": { en: "Connecting…", zh: "连接中…" },
+  "nftWhitelist.wizard.step3Label": { en: "Tasks", zh: "任务" },
+  "nftWhitelist.wizard.step3Heading": { en: "Complete the tasks", zh: "完成任务" },
+  "nftWhitelist.wizard.step3Body": {
+    en: "Each one opens X in a new tab and marks itself done — come back here once you've done it for real.",
+    zh: "每一项都会在新标签页打开 X 并自动标记完成——请在实际完成后再回到这里。",
+  },
+  "nftWhitelist.wizard.taskFollow": { en: "Follow", zh: "关注" },
+  "nftWhitelist.wizard.taskFollowDesc": { en: "Follow our X account", zh: "关注我们的 X 账号" },
+  "nftWhitelist.wizard.taskLikeRepost": { en: "Like & repost", zh: "点赞并转发" },
+  "nftWhitelist.wizard.taskLikeRepostDesc": { en: "Like and repost the pinned announcement", zh: "点赞并转发置顶公告" },
+  "nftWhitelist.wizard.taskQuote": { en: "Quote it", zh: "引用转发" },
+  "nftWhitelist.wizard.taskQuoteDesc": { en: "Quote the tweet with the caption we prefill for you", zh: "引用该推文，我们已为你预填文案" },
+  "nftWhitelist.wizard.open": { en: "OPEN", zh: "打开" },
+  "nftWhitelist.wizard.tasksLeft": { en: "{n} task(s) left", zh: "还剩 {n} 项任务" },
+  "nftWhitelist.wizard.step4Label": { en: "Review", zh: "确认" },
+  "nftWhitelist.wizard.step4Heading": { en: "One last look", zh: "最后确认" },
+  "nftWhitelist.wizard.step4Body": {
+    en: "Check everything below. Once you send it, it's locked in for review.",
+    zh: "请检查以下所有内容。提交后即锁定，等待审核。",
+  },
+  "nftWhitelist.wizard.reviewHandle": { en: "X handle", zh: "X 账号" },
+  "nftWhitelist.wizard.reviewAddress": { en: "Wallet address", zh: "钱包地址" },
+  "nftWhitelist.wizard.reviewTasks": { en: "Tasks", zh: "任务" },
+  "nftWhitelist.wizard.tasksDoneCount": { en: "{done} of {total} done", zh: "已完成 {done}/{total}" },
+  "nftWhitelist.wizard.back": { en: "BACK", zh: "返回" },
+  "nftWhitelist.wizard.continue": { en: "CONTINUE", zh: "继续" },
+  "nftWhitelist.wizard.submit": { en: "SEAL IT", zh: "提交" },
+  "nftWhitelist.wizard.resubmit": { en: "APPLY AGAIN", zh: "重新申请" },
   // Brai, 2026-09-07: tried a Noir-specific banner (first a quiet 2-line
   // copy button, then a big bronze "GOT NOIR" box copying address+memo
   // together) across a few rounds, but it still didn't work reliably for

@@ -229,7 +229,7 @@ export const api = {
   // Brai, 2026-09-18: "necesito que me hagas la parte de la whitelist de
   // los nft" -- see the matching routes in server.ts. Nothing here talks
   // to Twitter/X directly; it's a submit-and-wait-for-Brai queue.
-  getNftWhitelistConfig: (): Promise<{ tweetUrl: string | null; twitterHandle: string | null }> =>
+  getNftWhitelistConfig: (): Promise<{ tweetUrl: string | null; twitterHandle: string | null; quoteCaption: string }> =>
     req("/api/nft/whitelist/config"),
   // Brai, 2026-09-18 (v2): "no se necesita conectar la wallet para agregar,
   // solo hay que poner la wallet y el handle" -- no wallet connection, just
