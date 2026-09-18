@@ -32,7 +32,11 @@ export default function WalletOnboardModal({ onClose }: { onClose: () => void })
     } catch (e: any) {
       if (e?.message === "noir-not-installed") {
         setError(t("onboard.noir.notInstalled"));
-      } else if (e?.code === 4001) {
+      } else if (e?.code === 4001 || /reject/i.test(e?.message ?? "")) {
+        // Brai, 2026-09-18: saw the extension's own raw "User rejected the
+        // request" text leak through here instead of our translated copy --
+        // its rejection error apparently doesn't always carry code 4001, so
+        // this also catches it by message text.
         setError(t("onboard.noir.rejected"));
       } else {
         setError(e?.message ?? t("onboard.error.generic"));
@@ -139,7 +143,21 @@ export default function WalletOnboardModal({ onClose }: { onClose: () => void })
                 {t("onboard.cards.money.label")}
               </span>
               <p style={{ fontWeight: 700, margin: "8px 0 4px", fontSize: 15 }}>{t("onboard.cards.money.title")}</p>
-              <p className="muted" style={{ fontSize: 13, margin: 0 }}>{t("onboard.cards.money.body")}</p>
+              <p className="muted" style={{ fontSize: 13, margin: "0 0 10px" }}>{t("onboard.cards.money.body")}</p>
+              {/* Brai, 2026-09-18: "ahi tiene que estar el link bien grande
+                  para conectar con NOIR" -- this card IS "your real Zcash
+                  wallet", so the big, obvious way to hook up that real
+                  wallet belongs inside it, not as a small third button
+                  below the create/import pair further down. */}
+              <button
+                className="btn btn-gold"
+                style={{ width: "100%" }}
+                disabled={noirConnecting}
+                onClick={handleConnectNoir}
+              >
+                {noirConnecting ? t("onboard.noir.connecting") : t("onboard.noir.connectButton")}
+              </button>
+              {error && <p style={{ color: "var(--red)", fontSize: 12, marginTop: 8, marginBottom: 0 }}>{error}</p>}
             </div>
 
             <p style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>{t("onboard.cards.reassurance")}</p>
@@ -156,24 +174,10 @@ export default function WalletOnboardModal({ onClose }: { onClose: () => void })
               >
                 {t("onboard.importButton")}
               </button>
-              <button className="btn btn-gold" style={{ flex: 1 }} onClick={startWords}>
+              <button className="btn btn-outline" style={{ flex: 1 }} onClick={startWords}>
                 {t("onboard.createButton")}
               </button>
             </div>
-
-            {/* Brai, 2026-09-18: tercera opcion -- conectar la extension
-                Noir en vez de crear/importar por 12 palabras. Separada
-                visualmente de las dos de arriba porque es un mecanismo
-                distinto (tu wallet real, no una interna custodiada). */}
-            <button
-              className="btn btn-outline"
-              style={{ width: "100%", marginTop: 8 }}
-              disabled={noirConnecting}
-              onClick={handleConnectNoir}
-            >
-              {noirConnecting ? t("onboard.noir.connecting") : t("onboard.noir.connectButton")}
-            </button>
-            {error && <p style={{ color: "var(--red)", fontSize: 13, marginTop: 8 }}>{error}</p>}
           </>
         )}
 
