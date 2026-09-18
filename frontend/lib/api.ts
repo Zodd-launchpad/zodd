@@ -231,10 +231,13 @@ export const api = {
   // to Twitter/X directly; it's a submit-and-wait-for-Brai queue.
   getNftWhitelistConfig: (): Promise<{ tweetUrl: string | null; twitterHandle: string | null }> =>
     req("/api/nft/whitelist/config"),
-  submitNftWhitelist: (data: { walletId: string; twitterHandle: string }): Promise<NftWhitelistEntry> =>
+  // Brai, 2026-09-18 (v2): "no se necesita conectar la wallet para agregar,
+  // solo hay que poner la wallet y el handle" -- no wallet connection, just
+  // a pasted-in address.
+  submitNftWhitelist: (data: { walletAddress: string; twitterHandle: string }): Promise<NftWhitelistEntry> =>
     req("/api/nft/whitelist", { method: "POST", body: JSON.stringify(data) }),
-  getNftWhitelistStatus: (walletId: string): Promise<{ entry: NftWhitelistEntry | null }> =>
-    req(`/api/nft/whitelist/${walletId}`),
+  getNftWhitelistStatus: (walletAddress: string): Promise<{ entry: NftWhitelistEntry | null }> =>
+    req(`/api/nft/whitelist/status/${encodeURIComponent(walletAddress)}`),
   // Admin-only (ADMIN_TOKEN, entered by Brai himself -- see
   // AdminNftWhitelistPage). Never called for a regular visitor.
   adminListNftWhitelist: (
@@ -257,8 +260,7 @@ export const api = {
 
 export interface NftWhitelistEntry {
   id: string;
-  internalWalletId: string;
-  walletTag: string;
+  walletAddress: string;
   twitterHandle: string;
   status: "PENDING" | "APPROVED" | "REJECTED";
   createdAt: string;

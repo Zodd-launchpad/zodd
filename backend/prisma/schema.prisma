@@ -53,10 +53,6 @@ model InternalWallet {
   nftMints             PendingNftMint[]
   nftPurchasesAsBuyer  NftPurchaseOrder[] @relation("NftBuyer")
   nftPurchasesAsSeller NftPurchaseOrder[] @relation("NftSeller")
-  // Brai, 2026-09-18: "necesito la whitelist de los nft" -- at most one
-  // whitelist application per wallet (see NftWhitelistEntry below).
-  // Nullable: most wallets never apply.
-  nftWhitelistEntry NftWhitelistEntry?
 }
 
 // Brai, 2026-09-11: "quiero que puedas trabajar con Ycash y Zcash" -- each
@@ -520,29 +516,44 @@ enum NftWhitelistStatus {
 // himself and clicking approve/reject (see /api/admin/nft-whitelist* in
 // server.ts). The point of the whole feature ("llamar a los KOL... les
 // vamos a dar whitelist, o sea minteo gratis") is that an APPROVED,
-// unclaimed entry lets that wallet's NEXT /api/nft/mint call skip payment
-// entirely (see claimFreeNftWhitelistMint in store.ts) -- exactly one free
-// mint per approved wallet, never more.
+// unclaimed entry lets a matching wallet's NEXT /api/nft/mint call skip
+// payment entirely (see claimFreeNftWhitelistMint in store.ts) -- exactly
+// one free mint per approved entry, never more, and it's never actually
+// paid by anyone -- no ZEC moves for a free mint, it's a straight
+// assignment (Brai, 2026-09-18: "no se descuenta de mi wallet el minteo...
+// solo son gratis, es publicidad, un gasto administrativo").
+//
+// Brai, 2026-09-18 (v2): "tampoco se necesita conectar la wallet para
+// agregar, solo hay que poner la wallet y el handle" -- no InternalWallet
+// required at signup anymore (dropped the FK), just whatever Zcash address
+// the person pastes in by hand. walletAddress is that raw string, unique so
+// the same address can't queue twice. Matching it back to an actual
+// connected wallet later (to know WHO to give the free mint to) is
+// best-effort -- see the long comment on claimFreeNftWhitelistMint in
+// store.ts for why, and which address field(s) it checks.
 model NftWhitelistEntry {
-  id               String             @id @default(cuid())
-  internalWalletId String             @unique
+  id            String             @id @default(cuid())
+  walletAddress String             @unique
   // Normalizado: sin "@", en minusculas (ver normalizeTwitterHandle en
   // store.ts) -- para que "@Brai" y "brai" no puedan registrarse como dos
   // entradas distintas, y para poder buscarlo case-insensitive.
-  twitterHandle    String
-  status           NftWhitelistStatus @default(PENDING)
-  createdAt        DateTime           @default(now())
-  reviewedAt       DateTime?
+  twitterHandle String
+  status        NftWhitelistStatus @default(PENDING)
+  createdAt     DateTime           @default(now())
+  reviewedAt    DateTime?
   // Nota libre de Brai al aprobar/rechazar (ej. "KOL, 40k followers" o
   // "no encuentro el retweet") -- puramente para su propio registro, nunca
   // mostrada al usuario.
-  reviewNote       String?
+  reviewNote    String?
   // Se llena cuando el mint gratis efectivamente se usa (ver
-  // claimFreeNftWhitelistMint) -- una vez seteado, ese wallet ya no puede
+  // claimFreeNftWhitelistMint) -- una vez seteado, esta entrada ya no puede
   // volver a mintear gratis aunque siga APPROVED.
-  claimedAt        DateTime?
-
-  internalWallet InternalWallet @relation(fields: [internalWalletId], references: [id])
+  claimedAt     DateTime?
+  // Que InternalWallet.id efectivamente se llevo el mint gratis -- solo
+  // informativo (no hay relacion FK a proposito, mismo patron que
+  // Token.creatorWalletId mas arriba: un string suelto, no un join
+  // obligatorio).
+  claimedByWalletId String?
 
   @@index([status])
   @@index([twitterHandle])

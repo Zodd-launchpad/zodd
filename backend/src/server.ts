@@ -1331,23 +1331,24 @@ app.get("/api/nft/whitelist/config", async (_req, reply) => {
   return reply.send({ tweetUrl: NFT_WHITELIST_TWEET_URL, twitterHandle: NFT_WHITELIST_TWITTER_HANDLE });
 });
 
+// Brai, 2026-09-18 (v2): "no se necesita conectar la wallet para agregar,
+// solo hay que poner la wallet y el handle" -- no walletId/requireWallet
+// here on purpose, this route is reachable with no wallet at all.
 const nftWhitelistSubmitSchema = z.object({
-  walletId: z.string(),
+  walletAddress: z.string().trim().min(1).max(200),
   twitterHandle: z.string().trim().min(1).max(20),
 });
 
 app.post("/api/nft/whitelist", async (req, reply) => {
   const body = nftWhitelistSubmitSchema.parse(req.body);
-  const wallet = await store.getWallet(body.walletId);
-  if (!wallet) return reply.code(400).send({ error: "invalid wallet" });
-  const result = await store.submitNftWhitelistEntry(body.walletId, body.twitterHandle);
+  const result = await store.submitNftWhitelistEntry(body.walletAddress, body.twitterHandle);
   if ("error" in result) return reply.code(400).send({ error: result.error });
   return reply.send(result);
 });
 
-app.get("/api/nft/whitelist/:walletId", async (req, reply) => {
-  const { walletId } = req.params as { walletId: string };
-  const entry = await store.getNftWhitelistEntry(walletId);
+app.get("/api/nft/whitelist/status/:walletAddress", async (req, reply) => {
+  const { walletAddress } = req.params as { walletAddress: string };
+  const entry = await store.getNftWhitelistEntry(walletAddress);
   return reply.send({ entry }); // { entry: null } when they haven't applied
 });
 

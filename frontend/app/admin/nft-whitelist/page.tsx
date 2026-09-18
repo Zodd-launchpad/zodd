@@ -135,8 +135,8 @@ export default function AdminNftWhitelistPage() {
                   <a href={`https://x.com/${e.twitterHandle}`} target="_blank" rel="noreferrer" style={{ color: "var(--accent)", fontWeight: 700 }}>
                     @{e.twitterHandle}
                   </a>
-                  <p className="muted" style={{ fontSize: 11, margin: "2px 0 0" }}>
-                    wallet {e.walletTag} &middot; {new Date(e.createdAt).toLocaleString()}
+                  <p className="muted" style={{ fontSize: 11, margin: "2px 0 0", wordBreak: "break-all" }}>
+                    {e.walletAddress} &middot; {new Date(e.createdAt).toLocaleString()}
                   </p>
                   {e.reviewNote && <p className="muted" style={{ fontSize: 11, margin: "4px 0 0" }}>note: {e.reviewNote}</p>}
                   {e.claimedAt && <p className="muted" style={{ fontSize: 11, margin: "4px 0 0", color: "var(--green)" }}>free mint claimed</p>}
