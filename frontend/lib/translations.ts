@@ -248,6 +248,20 @@ export const translations = {
   "nftWhitelist.wizard.continue": { en: "CONTINUE", zh: "继续" },
   "nftWhitelist.wizard.submit": { en: "SEAL IT", zh: "提交" },
   "nftWhitelist.wizard.resubmit": { en: "APPLY AGAIN", zh: "重新申请" },
+  // Brai, 2026-09-18 (v8): "si pones tu HANDLE y ya suscribiste te vaya a
+  // la 4ta directamente ... y un boton de share" -- checking the handle on
+  // step 1's Continue, and a share button on the big status screen it
+  // jumps straight to when there's already an entry for that handle.
+  "nftWhitelist.wizard.checking": { en: "CHECKING…", zh: "查询中…" },
+  "nftWhitelist.wizard.share": { en: "SHARE", zh: "分享" },
+  "nftWhitelist.share.pending": {
+    en: "Just applied for the ZODD NFT whitelist 🐸 — under review!",
+    zh: "刚刚申请了 ZODD NFT 白名单 🐸 —— 审核中！",
+  },
+  "nftWhitelist.share.approved": {
+    en: "I'm whitelisted for the ZODD NFT drop 🎉 — free mint locked in via @zodd_zcash",
+    zh: "我已进入 ZODD NFT 白名单 🎉 —— 通过 @zodd_zcash 锁定免费铸造",
+  },
   // Brai, 2026-09-07: tried a Noir-specific banner (first a quiet 2-line
   // copy button, then a big bronze "GOT NOIR" box copying address+memo
   // together) across a few rounds, but it still didn't work reliably for

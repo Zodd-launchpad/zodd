@@ -1680,6 +1680,20 @@ export async function getNftWhitelistEntry(walletAddress: string): Promise<NftWh
   return entry ? toNftWhitelistEntryView(entry) : null;
 }
 
+/** Brai, 2026-09-18 (v8): "si pones tu HANDLE y ya suscribiste te vaya a la
+ * 4ta directamente" -- lets the wizard recognize a returning applicant by
+ * TYPED HANDLE alone, not just the localStorage-remembered address (a
+ * different browser/device has no localStorage entry, but the handle is
+ * the same). twitterHandle isn't a DB-level unique constraint, but
+ * submitNftWhitelistEntry above enforces it's unique in practice, so
+ * findFirst is safe here. */
+export async function getNftWhitelistEntryByHandle(rawHandle: string): Promise<NftWhitelistEntryView | null> {
+  const handle = normalizeTwitterHandle(rawHandle);
+  if (!/^[a-z0-9_]{1,15}$/.test(handle)) return null;
+  const entry = await prisma.nftWhitelistEntry.findFirst({ where: { twitterHandle: handle } });
+  return entry ? toNftWhitelistEntryView(entry) : null;
+}
+
 /** Brai's review queue -- oldest first (FIFO), same ordering convention as
  * every other admin-facing list in this file. */
 export async function listNftWhitelistEntries(status?: NftWhitelistStatus): Promise<NftWhitelistEntryView[]> {

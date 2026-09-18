@@ -59,6 +59,7 @@ export default function NftWhitelistPage() {
   const [noirBusy, setNoirBusy] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [checkingHandle, setCheckingHandle] = useState(false);
 
   useEffect(() => {
     api
@@ -101,6 +102,46 @@ export default function NftWhitelistPage() {
   // intentional now, not a bug.
   const tasksAllDone = tasks.follow && tasks.likeRepost && tasks.quote;
   const tasksLeftCount = [!tasks.follow, !tasks.likeRepost, !tasks.quote].filter(Boolean).length;
+
+  // Brai, 2026-09-18 (v8): "si pones tu HANDLE y ya suscribiste te vaya a
+  // la 4ta directamente" -- called from step 1's Continue (and Enter).
+  // Looks the typed handle up on the server first; if it already has an
+  // entry, jump straight to the big status screen instead of stepping
+  // through the wizard again. A lookup failure (network hiccup) doesn't
+  // block anyone -- it just falls through to the normal step 2.
+  async function continueFromStep1() {
+    if (!handleValid) return;
+    setError(null);
+    setCheckingHandle(true);
+    try {
+      const r = await api.getNftWhitelistStatusByHandle(handleInput.trim());
+      if (r.entry) {
+        setEntry(r.entry);
+        setAddressInput(r.entry.walletAddress);
+        try {
+          localStorage.setItem(ADDRESS_STORAGE_KEY, r.entry.walletAddress);
+        } catch {
+          /* ignore */
+        }
+      } else {
+        setStep(2);
+      }
+    } catch {
+      setStep(2);
+    } finally {
+      setCheckingHandle(false);
+    }
+  }
+
+  function shareStatus() {
+    if (!entry) return;
+    const caption =
+      entry.status === "APPROVED" ? t("nftWhitelist.share.approved") : t("nftWhitelist.share.pending");
+    const url = `https://twitter.com/intent/tweet?text=${encodeURIComponent(caption)}&url=${encodeURIComponent(
+      "https://zodd.fun/nft/whitelist"
+    )}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
 
   function openTask(key: keyof Tasks, url: string) {
     window.open(url, "_blank", "noopener,noreferrer");
@@ -192,10 +233,12 @@ export default function NftWhitelistPage() {
         {entry ? (
           <>
             <div className="zw-step-label">{t("nftWhitelist.badge")}</div>
-            <h2 className="zw-heading">{t(`nftWhitelist.status.${entry.status}`)}</h2>
-            <div className="zw-review-row">
-              <span className="zw-review-key">{t("nftWhitelist.wizard.reviewHandle")}</span>
-              <span className="zw-review-val">@{entry.twitterHandle}</span>
+            {/* Brai, 2026-09-18 (v8): "te diga tu estado en GRANDE, por ej
+                gordo_cripto UNDER REVIEW" -- handle + status as one big,
+                color-coded line instead of a small heading. */}
+            <div className={`zw-status-big zw-status-${entry.status.toLowerCase()}`}>
+              <span className="zw-status-handle">@{entry.twitterHandle}</span>
+              <span className="zw-status-word">{t(`nftWhitelist.status.${entry.status}`)}</span>
             </div>
             <div className="zw-review-row">
               <span className="zw-review-key">{t("nftWhitelist.wizard.reviewAddress")}</span>
@@ -206,15 +249,19 @@ export default function NftWhitelistPage() {
               {entry.status === "APPROVED" && t("nftWhitelist.approvedNote")}
               {entry.status === "REJECTED" && t("nftWhitelist.rejectedNote")}
             </p>
-            {entry.status === "REJECTED" && (
-              <div className="zw-footer">
-                <span />
-                <span />
+            <div className="zw-footer">
+              <span />
+              <span />
+              {entry.status === "REJECTED" ? (
                 <button className="btn btn-gold" onClick={applyAgain}>
                   {t("nftWhitelist.wizard.resubmit")}
                 </button>
-              </div>
-            )}
+              ) : (
+                <button className="btn btn-outline" onClick={shareStatus}>
+                  {t("nftWhitelist.wizard.share")}
+                </button>
+              )}
+            </div>
           </>
         ) : (
           <>
@@ -230,7 +277,7 @@ export default function NftWhitelistPage() {
                     onChange={(e) => setHandleInput(e.target.value.replace(/^@/, ""))}
                     placeholder="yourhandle"
                     onKeyDown={(e) => {
-                      if (e.key === "Enter" && handleValid) setStep(2);
+                      if (e.key === "Enter" && handleValid && !checkingHandle) continueFromStep1();
                     }}
                   />
                 </div>
@@ -328,10 +375,14 @@ export default function NftWhitelistPage() {
               {step < TOTAL_STEPS && (
                 <button
                   className="btn btn-gold"
-                  disabled={(step === 1 && !handleValid) || (step === 2 && !addressValid) || (step === 3 && !tasksAllDone)}
-                  onClick={() => setStep(step + 1)}
+                  disabled={
+                    (step === 1 && (!handleValid || checkingHandle)) ||
+                    (step === 2 && !addressValid) ||
+                    (step === 3 && !tasksAllDone)
+                  }
+                  onClick={() => (step === 1 ? continueFromStep1() : setStep(step + 1))}
                 >
-                  {t("nftWhitelist.wizard.continue")}
+                  {step === 1 && checkingHandle ? t("nftWhitelist.wizard.checking") : t("nftWhitelist.wizard.continue")}
                 </button>
               )}
               {step === TOTAL_STEPS && (
@@ -468,6 +519,28 @@ export default function NftWhitelistPage() {
         .zw-step-label { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 4px; }
         .zw-heading { font-size: 20px; margin: 0 0 8px; }
         .zw-connected { font-size: 13px; color: var(--green); }
+        .zw-status-big {
+          display: flex;
+          flex-wrap: wrap;
+          align-items: baseline;
+          gap: 10px;
+          margin: 4px 0 18px;
+          font-size: 28px;
+          font-weight: 800;
+          letter-spacing: 0.01em;
+          line-height: 1.15;
+        }
+        .zw-status-handle {
+          color: var(--accent);
+          text-shadow: 0 0 20px var(--glow);
+        }
+        .zw-status-word { text-transform: uppercase; }
+        .zw-status-pending .zw-status-word { color: var(--text-dim); }
+        .zw-status-approved .zw-status-word { color: var(--green); text-shadow: 0 0 16px var(--green-glow); }
+        .zw-status-rejected .zw-status-word { color: var(--red); text-shadow: 0 0 16px var(--red-glow); }
+        @media (max-width: 480px) {
+          .zw-status-big { font-size: 22px; }
+        }
         .zw-link {
           background: none;
           border: none;

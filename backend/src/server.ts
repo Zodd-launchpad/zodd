@@ -1364,6 +1364,17 @@ app.get("/api/nft/whitelist/status/:walletAddress", async (req, reply) => {
   return reply.send({ entry }); // { entry: null } when they haven't applied
 });
 
+// Brai, 2026-09-18 (v8): "si pones tu HANDLE y ya suscribiste te vaya a la
+// 4ta directamente" -- looked up by handle so a returning applicant is
+// recognized even on a different browser/device (localStorage alone can't
+// do that, since it only remembers the address on the machine they
+// originally submitted from).
+app.get("/api/nft/whitelist/by-handle/:handle", async (req, reply) => {
+  const { handle } = req.params as { handle: string };
+  const entry = await store.getNftWhitelistEntryByHandle(handle);
+  return reply.send({ entry });
+});
+
 const nftWhitelistListQuerySchema = z.object({
   status: z.enum(["PENDING", "APPROVED", "REJECTED"]).optional(),
 });

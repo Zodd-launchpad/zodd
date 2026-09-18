@@ -238,6 +238,11 @@ export const api = {
     req("/api/nft/whitelist", { method: "POST", body: JSON.stringify(data) }),
   getNftWhitelistStatus: (walletAddress: string): Promise<{ entry: NftWhitelistEntry | null }> =>
     req(`/api/nft/whitelist/status/${encodeURIComponent(walletAddress)}`),
+  // Brai, 2026-09-18 (v8): "si pones tu HANDLE y ya suscribiste te vaya a
+  // la 4ta directamente" -- recognizes a returning applicant by handle
+  // alone (works even without the localStorage-remembered address).
+  getNftWhitelistStatusByHandle: (handle: string): Promise<{ entry: NftWhitelistEntry | null }> =>
+    req(`/api/nft/whitelist/by-handle/${encodeURIComponent(handle)}`),
   // Admin-only (ADMIN_TOKEN, entered by Brai himself -- see
   // AdminNftWhitelistPage). Never called for a regular visitor.
   adminListNftWhitelist: (
