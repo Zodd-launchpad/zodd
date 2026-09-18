@@ -169,6 +169,31 @@ export const translations = {
   "payment.noir.notInstalled": { en: "Noir Wallet isn't installed — scan the QR below instead.", zh: "未安装 Noir 钱包——请改用下方二维码。" },
   "payment.noir.rejected": { en: "Payment was closed before approving in Noir.", zh: "付款在 Noir 中批准前被关闭。" },
   "payment.noir.failed": { en: "Couldn't send from Noir — scan the QR below instead.", zh: "无法从 Noir 发送——请改用下方二维码。" },
+
+  // Brai, 2026-09-18: "necesito que me hagas la parte de la whitelist de
+  // los nft" -- public submission page (frontend/app/nft/whitelist).
+  "nftWhitelist.badge": { en: "NFT WHITELIST", zh: "NFT 白名单" },
+  "nftWhitelist.title": { en: "Apply for free mint", zh: "申请免费铸造资格" },
+  "nftWhitelist.body": {
+    en: "Complete the steps below, then submit your X (Twitter) handle. Every application is reviewed by hand — you'll see your status here once it's checked.",
+    zh: "完成以下步骤，然后提交你的 X（推特）账号。每个申请都会人工审核——审核后可在此查看状态。",
+  },
+  "nftWhitelist.step.follow": { en: "Follow", zh: "关注" },
+  "nftWhitelist.step.likeRetweet": { en: "Like and retweet", zh: "点赞并转发" },
+  "nftWhitelist.step.tweetLink": { en: "this tweet", zh: "这条推文" },
+  "nftWhitelist.step.submit": { en: "Submit your X handle below.", zh: "在下方提交你的 X 账号。" },
+  "nftWhitelist.notConfiguredYet": { en: "The tweet link isn't posted yet — check back soon.", zh: "推文链接尚未发布——请稍后再来查看。" },
+  "nftWhitelist.handleLabel": { en: "Your X (Twitter) handle", zh: "你的 X（推特）账号" },
+  "nftWhitelist.submitButton": { en: "Submit for review", zh: "提交审核" },
+  "nftWhitelist.resubmitButton": { en: "Resubmit", zh: "重新提交" },
+  "nftWhitelist.submitting": { en: "Submitting…", zh: "提交中…" },
+  "nftWhitelist.error.empty": { en: "Enter your X handle first.", zh: "请先输入你的 X 账号。" },
+  "nftWhitelist.status.PENDING": { en: "Under review", zh: "审核中" },
+  "nftWhitelist.status.APPROVED": { en: "Approved", zh: "已通过" },
+  "nftWhitelist.status.REJECTED": { en: "Not approved", zh: "未通过" },
+  "nftWhitelist.pendingNote": { en: "We'll review your follow/like/retweet by hand. No need to resubmit.", zh: "我们会人工审核你的关注/点赞/转发。无需重复提交。" },
+  "nftWhitelist.approvedNote": { en: "You're whitelisted — your next mint on this collection will be free.", zh: "你已进入白名单——本系列下一次铸造将免费。" },
+  "nftWhitelist.rejectedNote": { en: "Not approved this time. Double-check the steps above and you can resubmit.", zh: "本次未通过。请检查以上步骤后可重新提交。" },
   // Brai, 2026-09-07: tried a Noir-specific banner (first a quiet 2-line
   // copy button, then a big bronze "GOT NOIR" box copying address+memo
   // together) across a few rounds, but it still didn't work reliably for

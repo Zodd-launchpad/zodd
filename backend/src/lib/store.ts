@@ -1575,6 +1575,168 @@ export async function completePendingNftMint(
   return { collectionSlug: collection.slug, itemId: item.id, editionNumber: item.editionNumber };
 }
 
+// ---------- NFT whitelist (Twitter, manually reviewed) ----------
+// Brai, 2026-09-18: see the long comment on NftWhitelistEntry in
+// schema.prisma for the full design. Short version: users submit a
+// Twitter/X handle, Brai reviews by hand (approve/reject), and an approved
+// wallet's next mint is free -- exactly once.
+
+export type NftWhitelistStatus = "PENDING" | "APPROVED" | "REJECTED";
+
+export interface NftWhitelistEntryView {
+  id: string;
+  internalWalletId: string;
+  walletTag: string;
+  twitterHandle: string;
+  status: NftWhitelistStatus;
+  createdAt: string;
+  reviewedAt: string | null;
+  reviewNote: string | null;
+  claimedAt: string | null;
+}
+
+function toNftWhitelistEntryView(e: {
+  id: string;
+  internalWalletId: string;
+  twitterHandle: string;
+  status: string;
+  createdAt: Date;
+  reviewedAt: Date | null;
+  reviewNote: string | null;
+  claimedAt: Date | null;
+  internalWallet?: { walletTag: string } | null;
+}): NftWhitelistEntryView {
+  return {
+    id: e.id,
+    internalWalletId: e.internalWalletId,
+    walletTag: e.internalWallet?.walletTag ?? "",
+    twitterHandle: e.twitterHandle,
+    status: e.status as NftWhitelistStatus,
+    createdAt: e.createdAt.toISOString(),
+    reviewedAt: e.reviewedAt ? e.reviewedAt.toISOString() : null,
+    reviewNote: e.reviewNote,
+    claimedAt: e.claimedAt ? e.claimedAt.toISOString() : null,
+  };
+}
+
+/** Strips a leading "@" and lowercases, so "@Brai", "brai" and "BRAI" all
+ * land on the same row -- X handles are case-insensitive themselves. */
+function normalizeTwitterHandle(raw: string): string {
+  return raw.trim().replace(/^@/, "").toLowerCase();
+}
+
+/** Submits (or re-submits) a wallet's whitelist application. Re-submitting
+ * while still PENDING or after a REJECTED just overwrites the handle and
+ * resets to PENDING (lets someone fix a typo'd handle without emailing
+ * Brai about it) -- but an already-APPROVED entry is left untouched, so a
+ * stray re-submit can never downgrade a wallet that already has its free
+ * mint locked in. Returns { error } instead of throwing for the two
+ * user-facing validation cases (bad handle shape, handle already claimed
+ * by a different wallet) so server.ts can send a clean 400 either way. */
+export async function submitNftWhitelistEntry(
+  walletId: string,
+  rawHandle: string
+): Promise<NftWhitelistEntryView | { error: string }> {
+  const handle = normalizeTwitterHandle(rawHandle);
+  if (!/^[a-z0-9_]{1,15}$/.test(handle)) {
+    return { error: "that doesn't look like a valid X/Twitter handle" };
+  }
+  const existing = await prisma.nftWhitelistEntry.findUnique({
+    where: { internalWalletId: walletId },
+    include: { internalWallet: { select: { walletTag: true } } },
+  });
+  if (existing?.status === "APPROVED") {
+    return toNftWhitelistEntryView(existing);
+  }
+  const takenByAnotherWallet = await prisma.nftWhitelistEntry.findFirst({
+    where: { twitterHandle: handle, internalWalletId: { not: walletId } },
+  });
+  if (takenByAnotherWallet) {
+    return { error: "that X/Twitter handle is already registered by another wallet" };
+  }
+  const entry = await prisma.nftWhitelistEntry.upsert({
+    where: { internalWalletId: walletId },
+    create: { internalWalletId: walletId, twitterHandle: handle, status: "PENDING" },
+    update: { twitterHandle: handle, status: "PENDING", reviewedAt: null, reviewNote: null },
+    include: { internalWallet: { select: { walletTag: true } } },
+  });
+  return toNftWhitelistEntryView(entry);
+}
+
+export async function getNftWhitelistEntry(walletId: string): Promise<NftWhitelistEntryView | null> {
+  const entry = await prisma.nftWhitelistEntry.findUnique({
+    where: { internalWalletId: walletId },
+    include: { internalWallet: { select: { walletTag: true } } },
+  });
+  return entry ? toNftWhitelistEntryView(entry) : null;
+}
+
+/** Brai's review queue -- oldest first (FIFO), same ordering convention as
+ * every other admin-facing list in this file. */
+export async function listNftWhitelistEntries(status?: NftWhitelistStatus): Promise<NftWhitelistEntryView[]> {
+  const entries = await prisma.nftWhitelistEntry.findMany({
+    where: status ? { status } : undefined,
+    orderBy: { createdAt: "asc" },
+    include: { internalWallet: { select: { walletTag: true } } },
+  });
+  return entries.map(toNftWhitelistEntryView);
+}
+
+export async function reviewNftWhitelistEntry(
+  id: string,
+  status: "APPROVED" | "REJECTED",
+  note?: string
+): Promise<NftWhitelistEntryView | null> {
+  try {
+    const entry = await prisma.nftWhitelistEntry.update({
+      where: { id },
+      data: { status, reviewedAt: new Date(), reviewNote: note ?? null },
+      include: { internalWallet: { select: { walletTag: true } } },
+    });
+    return toNftWhitelistEntryView(entry);
+  } catch {
+    return null; // id doesn't exist
+  }
+}
+
+/** The payoff: an APPROVED, not-yet-claimed wallet mints a random piece
+ * for free, no payment/deposit-address dance at all -- reuses the exact
+ * same atomic claimRandomUnmintedNftItem race-safe claim that a real paid
+ * mint uses (see completePendingNftMint above), just triggered directly
+ * instead of from a confirmed payment. The synthetic txid-shaped string is
+ * only for readability in NftItem.mintPaymentTxid/admin logs -- it can
+ * never collide with a real 64-hex-char chain txid, so it's harmless to
+ * getAllKnownPaymentTxids' consumed-txid seeding. Marks claimedAt in the
+ * same transaction as the mint so a double-click can't claim twice.
+ * Returns a tagged error instead of throwing for every expected case
+ * (not approved, already used, collection missing/sold out) so server.ts
+ * can turn each into a clean, specific 4xx. */
+export async function claimFreeNftWhitelistMint(
+  collectionSlug: string,
+  walletId: string
+): Promise<
+  | { ok: true; collectionSlug: string; itemId: string; editionNumber: number }
+  | { ok: false; error: "not_approved" | "already_claimed" | "collection_not_found" | "sold_out" }
+> {
+  const entry = await prisma.nftWhitelistEntry.findUnique({ where: { internalWalletId: walletId } });
+  if (!entry || entry.status !== "APPROVED") return { ok: false, error: "not_approved" };
+  if (entry.claimedAt) return { ok: false, error: "already_claimed" };
+
+  const collection = await prisma.nftCollection.findUnique({ where: { slug: collectionSlug } });
+  if (!collection) return { ok: false, error: "collection_not_found" };
+
+  const txid = `whitelist-free-${walletId}-${Date.now()}`;
+  const itemId = await claimRandomUnmintedNftItem(collection.id, walletId, txid);
+  if (!itemId) return { ok: false, error: "sold_out" };
+
+  const [item] = await prisma.$transaction([
+    prisma.nftItem.findUniqueOrThrow({ where: { id: itemId } }),
+    prisma.nftCollection.update({ where: { id: collection.id }, data: { mintedCount: { increment: 1 } } }),
+    prisma.nftWhitelistEntry.update({ where: { id: entry.id }, data: { claimedAt: new Date() } }),
+  ]);
+  return { ok: true, collectionSlug, itemId: item.id, editionNumber: item.editionNumber };
+}
+
 // ---------- NFT secondary-market purchases ----------
 // Buying a LISTED piece -- same address-per-order mechanism as a token buy
 // order, but the platform relays the payout to the CURRENT OWNER instead

@@ -1246,6 +1246,25 @@ app.post("/api/nft/mint", async (req, reply) => {
   if (collection.mintedCount >= collection.totalSupply) {
     return reply.code(409).send({ error: "sold out" });
   }
+
+  // Brai, 2026-09-18: "les vamos a dar whitelist, o sea minteo gratis" --
+  // an APPROVED, not-yet-used whitelist entry (see /api/nft/whitelist*
+  // below) skips the entire payment/deposit-address dance below. Anything
+  // other than a clean success here (not whitelisted, already used their
+  // free mint, sold out) just falls through to the normal paid flow --
+  // "not approved" is by far the common case (most buyers never applied).
+  const freeMint = await store.claimFreeNftWhitelistMint(body.collectionSlug, wallet.id);
+  if (freeMint.ok) {
+    app.log.info(`NFT free whitelist mint: wallet ${wallet.id} -> ${freeMint.collectionSlug} #${freeMint.editionNumber}`);
+    return reply.send({
+      free: true,
+      status: "CREATED",
+      collectionSlug: freeMint.collectionSlug,
+      itemId: freeMint.itemId,
+      editionNumber: freeMint.editionNumber,
+    });
+  }
+
   const walletService = walletServiceFor(collection.currency);
 
   const pending = await store.createPendingNftMint({
@@ -1291,6 +1310,72 @@ app.get("/api/nft/mints/:id", async (req, reply) => {
     return reply.send({ ...pending, resultItem: item });
   }
   return reply.send(pending);
+});
+
+// ---------- NFT whitelist (Twitter, manually reviewed by Brai) ----------
+// Brai, 2026-09-18: "la idea es que la gente ingrese su handle de twitter y
+// que le haga retwitear un twit ... likear y seguir nuestro twitter, esto
+// lo deje en revision, una revision manual en la cual yo te dire cuales
+// son los aceptados". Nothing here checks Twitter/X itself -- there's no
+// API call to X anywhere in this file. This is only: (1) a public route
+// for someone to submit their handle, (2) a public route to check their
+// own status, and (3) ADMIN_TOKEN-gated routes for Brai to see the queue
+// and approve/reject by hand. TWEET_URL/handle are env vars (unset is
+// fine -- same "deja todo en X" pattern as the collection itself not
+// existing yet) so the actual tweet to retweet/like and the account to
+// follow can be set later without a code change.
+const NFT_WHITELIST_TWEET_URL = process.env.NFT_WHITELIST_TWEET_URL ?? null;
+const NFT_WHITELIST_TWITTER_HANDLE = process.env.NFT_WHITELIST_TWITTER_HANDLE ?? null;
+
+app.get("/api/nft/whitelist/config", async (_req, reply) => {
+  return reply.send({ tweetUrl: NFT_WHITELIST_TWEET_URL, twitterHandle: NFT_WHITELIST_TWITTER_HANDLE });
+});
+
+const nftWhitelistSubmitSchema = z.object({
+  walletId: z.string(),
+  twitterHandle: z.string().trim().min(1).max(20),
+});
+
+app.post("/api/nft/whitelist", async (req, reply) => {
+  const body = nftWhitelistSubmitSchema.parse(req.body);
+  const wallet = await store.getWallet(body.walletId);
+  if (!wallet) return reply.code(400).send({ error: "invalid wallet" });
+  const result = await store.submitNftWhitelistEntry(body.walletId, body.twitterHandle);
+  if ("error" in result) return reply.code(400).send({ error: result.error });
+  return reply.send(result);
+});
+
+app.get("/api/nft/whitelist/:walletId", async (req, reply) => {
+  const { walletId } = req.params as { walletId: string };
+  const entry = await store.getNftWhitelistEntry(walletId);
+  return reply.send({ entry }); // { entry: null } when they haven't applied
+});
+
+const nftWhitelistListQuerySchema = z.object({
+  status: z.enum(["PENDING", "APPROVED", "REJECTED"]).optional(),
+});
+
+app.get("/api/admin/nft-whitelist", async (req, reply) => {
+  if (!ADMIN_TOKEN) return reply.code(503).send({ error: "ADMIN_TOKEN is not configured" });
+  if (req.headers["x-admin-token"] !== ADMIN_TOKEN) return reply.code(401).send({ error: "unauthorized" });
+  const q = nftWhitelistListQuerySchema.parse(req.query);
+  const entries = await store.listNftWhitelistEntries(q.status);
+  return reply.send({ entries });
+});
+
+const nftWhitelistReviewSchema = z.object({
+  status: z.enum(["APPROVED", "REJECTED"]),
+  note: z.string().max(500).optional(),
+});
+
+app.post("/api/admin/nft-whitelist/:id/review", async (req, reply) => {
+  if (!ADMIN_TOKEN) return reply.code(503).send({ error: "ADMIN_TOKEN is not configured" });
+  if (req.headers["x-admin-token"] !== ADMIN_TOKEN) return reply.code(401).send({ error: "unauthorized" });
+  const { id } = req.params as { id: string };
+  const body = nftWhitelistReviewSchema.parse(req.body);
+  const entry = await store.reviewNftWhitelistEntry(id, body.status, body.note);
+  if (!entry) return reply.code(404).send({ error: "whitelist entry not found" });
+  return reply.send(entry);
 });
 
 // ---------- NFT: list / unlist / buy (secondary market, no offers) ----------

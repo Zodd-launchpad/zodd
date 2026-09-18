@@ -224,4 +224,45 @@ export const api = {
   ): Promise<{ id: string; currency: Currency; zecAmount: number; status: string }> =>
     req("/api/orders/sell", { method: "POST", body: JSON.stringify(data) }),
   getOrder: (id: string) => req(`/api/orders/${id}`),
+
+  // ---------- NFT whitelist (Twitter, manually reviewed) ----------
+  // Brai, 2026-09-18: "necesito que me hagas la parte de la whitelist de
+  // los nft" -- see the matching routes in server.ts. Nothing here talks
+  // to Twitter/X directly; it's a submit-and-wait-for-Brai queue.
+  getNftWhitelistConfig: (): Promise<{ tweetUrl: string | null; twitterHandle: string | null }> =>
+    req("/api/nft/whitelist/config"),
+  submitNftWhitelist: (data: { walletId: string; twitterHandle: string }): Promise<NftWhitelistEntry> =>
+    req("/api/nft/whitelist", { method: "POST", body: JSON.stringify(data) }),
+  getNftWhitelistStatus: (walletId: string): Promise<{ entry: NftWhitelistEntry | null }> =>
+    req(`/api/nft/whitelist/${walletId}`),
+  // Admin-only (ADMIN_TOKEN, entered by Brai himself -- see
+  // AdminNftWhitelistPage). Never called for a regular visitor.
+  adminListNftWhitelist: (
+    adminToken: string,
+    status?: "PENDING" | "APPROVED" | "REJECTED"
+  ): Promise<{ entries: NftWhitelistEntry[] }> =>
+    req(`/api/admin/nft-whitelist${status ? `?status=${status}` : ""}`, { headers: { "x-admin-token": adminToken } }),
+  adminReviewNftWhitelist: (
+    adminToken: string,
+    id: string,
+    status: "APPROVED" | "REJECTED",
+    note?: string
+  ): Promise<NftWhitelistEntry> =>
+    req(`/api/admin/nft-whitelist/${id}/review`, {
+      method: "POST",
+      headers: { "x-admin-token": adminToken },
+      body: JSON.stringify({ status, note }),
+    }),
 };
+
+export interface NftWhitelistEntry {
+  id: string;
+  internalWalletId: string;
+  walletTag: string;
+  twitterHandle: string;
+  status: "PENDING" | "APPROVED" | "REJECTED";
+  createdAt: string;
+  reviewedAt: string | null;
+  reviewNote: string | null;
+  claimedAt: string | null;
+}

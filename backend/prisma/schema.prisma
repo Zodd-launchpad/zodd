@@ -53,6 +53,10 @@ model InternalWallet {
   nftMints             PendingNftMint[]
   nftPurchasesAsBuyer  NftPurchaseOrder[] @relation("NftBuyer")
   nftPurchasesAsSeller NftPurchaseOrder[] @relation("NftSeller")
+  // Brai, 2026-09-18: "necesito la whitelist de los nft" -- at most one
+  // whitelist application per wallet (see NftWhitelistEntry below).
+  // Nullable: most wallets never apply.
+  nftWhitelistEntry NftWhitelistEntry?
 }
 
 // Brai, 2026-09-11: "quiero que puedas trabajar con Ycash y Zcash" -- each
@@ -498,4 +502,48 @@ model NoirAuthChallenge {
   createdAt DateTime @default(now())
 
   @@index([createdAt])
+}
+
+enum NftWhitelistStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+// Brai, 2026-09-18: "necesito que me hagas la parte de la whitelist de los
+// nft ... la gente ingrese su handle de twitter y que le haga retwitear un
+// twit ... likear y seguir nuestro twitter, esto lo deje en revision, una
+// revision manual en la cual yo te dire cuales son los aceptados" -- this
+// is purely the submission + review-queue record. The actual checking of
+// "did they really retweet/like/follow" is NOT automated anywhere in this
+// codebase (no Twitter API call) -- it's 100% Brai looking at the handle
+// himself and clicking approve/reject (see /api/admin/nft-whitelist* in
+// server.ts). The point of the whole feature ("llamar a los KOL... les
+// vamos a dar whitelist, o sea minteo gratis") is that an APPROVED,
+// unclaimed entry lets that wallet's NEXT /api/nft/mint call skip payment
+// entirely (see claimFreeNftWhitelistMint in store.ts) -- exactly one free
+// mint per approved wallet, never more.
+model NftWhitelistEntry {
+  id               String             @id @default(cuid())
+  internalWalletId String             @unique
+  // Normalizado: sin "@", en minusculas (ver normalizeTwitterHandle en
+  // store.ts) -- para que "@Brai" y "brai" no puedan registrarse como dos
+  // entradas distintas, y para poder buscarlo case-insensitive.
+  twitterHandle    String
+  status           NftWhitelistStatus @default(PENDING)
+  createdAt        DateTime           @default(now())
+  reviewedAt       DateTime?
+  // Nota libre de Brai al aprobar/rechazar (ej. "KOL, 40k followers" o
+  // "no encuentro el retweet") -- puramente para su propio registro, nunca
+  // mostrada al usuario.
+  reviewNote       String?
+  // Se llena cuando el mint gratis efectivamente se usa (ver
+  // claimFreeNftWhitelistMint) -- una vez seteado, ese wallet ya no puede
+  // volver a mintear gratis aunque siga APPROVED.
+  claimedAt        DateTime?
+
+  internalWallet InternalWallet @relation(fields: [internalWalletId], references: [id])
+
+  @@index([status])
+  @@index([twitterHandle])
 }
