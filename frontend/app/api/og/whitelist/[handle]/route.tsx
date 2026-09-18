@@ -2,6 +2,20 @@ import { ImageResponse } from "next/og";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
+// Brai, 2026-09-18 (v13): found the actual "image doesn't show on the real
+// tweet" bug (not just the compose-preview thing) -- next/og's
+// ImageResponse defaults to `Cache-Control: public, immutable,
+// max-age=31536000` (ONE YEAR) when no headers are passed. That means (a)
+// an approved handle's card can keep showing "UNDER REVIEW" for a year
+// after Brai approves them, and (b) if X's own crawler ever cached this
+// exact image URL during an earlier broken state (while this feature was
+// being built), it could stay stuck on that broken state indefinitely.
+// Forcing a short, revalidating cache here + the per-share freshness token
+// added to the share URL (see share/[handle]/page.tsx) together make sure
+// every new SHARE click is guaranteed to hit X's crawler as a URL it has
+// never seen before, bypassing any stuck cache from before this fix.
+export const dynamic = "force-dynamic";
+
 // Brai, 2026-09-18 (v11): "eso del share quedo horrible, tocas share y te
 // baja una foto? ... corrige eso" -- the html2canvas-download-then-attach
 // flow was dead on arrival (nobody downloads a PNG to manually attach it
@@ -105,6 +119,15 @@ export async function GET(_req: Request, { params }: { params: { handle: string 
         </div>
       </div>
     ),
-    { width: 1200, height: 630 }
+    {
+      width: 1200,
+      height: 630,
+      headers: {
+        // 5 minutes, not a year -- a status change (PENDING -> APPROVED)
+        // should show up in a freshly-crawled card within minutes, not be
+        // stuck for a year at X's/any CDN's edge.
+        "Cache-Control": "public, max-age=300, must-revalidate",
+      },
+    }
   );
 }

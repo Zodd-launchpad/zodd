@@ -24,7 +24,13 @@ async function lookupStatus(handle: string): Promise<Status> {
   }
 }
 
-export async function generateMetadata({ params }: { params: { handle: string } }): Promise<Metadata> {
+export async function generateMetadata({
+  params,
+  searchParams,
+}: {
+  params: { handle: string };
+  searchParams: { [key: string]: string | string[] | undefined };
+}): Promise<Metadata> {
   const handle = params.handle;
   const status = await lookupStatus(handle);
   const title =
@@ -34,8 +40,16 @@ export async function generateMetadata({ params }: { params: { handle: string } 
       ? `@${handle} — ZODD NFT whitelist`
       : `@${handle} applied for the ZODD NFT whitelist 🐸`;
   const description = "Free mint whitelist for the ZODD NFT drop on Zcash. Apply in under a minute.";
-  const imageUrl = `${SITE_URL}/api/og/whitelist/${encodeURIComponent(handle)}`;
-  const pageUrl = `${SITE_URL}/nft/whitelist/share/${encodeURIComponent(handle)}`;
+  // Brai, 2026-09-18 (v13): the SHARE button appends ?t=<token> to the URL
+  // it tweets (see shareStatus() in ../../page.tsx) so every share is a
+  // brand-new URL X has never crawled before -- carrying that same token
+  // into the image URL too so the whole card (page + image) is always
+  // fetched fresh, never served from a stuck/stale cache from before the
+  // image-caching fix below.
+  const token = typeof searchParams?.t === "string" ? searchParams.t : "";
+  const tokenQuery = token ? `?t=${encodeURIComponent(token)}` : "";
+  const imageUrl = `${SITE_URL}/api/og/whitelist/${encodeURIComponent(handle)}${tokenQuery}`;
+  const pageUrl = `${SITE_URL}/nft/whitelist/share/${encodeURIComponent(handle)}${tokenQuery}`;
 
   return {
     title,

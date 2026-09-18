@@ -199,7 +199,16 @@ export default function NftWhitelistPage() {
     // Points at the per-handle share page, not the generic whitelist page --
     // ITS Open Graph/Twitter Card tags are what put the status image (with
     // the ZODD mascot) into the tweet, via Twitter's own link-preview crawl.
-    const shareUrl = `https://zodd.fun/nft/whitelist/share/${encodeURIComponent(entry.twitterHandle)}`;
+    //
+    // Brai, 2026-09-18 (v13): "sigue sin llegar la foto del gato" -- X caches
+    // a link's card (title/image) per exact URL, sometimes for a long time,
+    // and can get stuck on whatever it first saw for that URL (e.g. while
+    // this feature was still being built). A random token on every SHARE
+    // click makes each tweet's URL one X has genuinely never crawled before,
+    // so there's no stale cache to get stuck on -- combined with the
+    // image-caching fix in /api/og/whitelist/[handle]/route.tsx.
+    const freshToken = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const shareUrl = `https://zodd.fun/nft/whitelist/share/${encodeURIComponent(entry.twitterHandle)}?t=${freshToken}`;
     const intentUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(caption)}&url=${encodeURIComponent(shareUrl)}`;
     window.open(intentUrl, "_blank", "noopener,noreferrer");
   }
