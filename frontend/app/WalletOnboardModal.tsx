@@ -13,8 +13,34 @@ export default function WalletOnboardModal({ onClose }: { onClose: () => void })
   const [checkInputs, setCheckInputs] = useState(["", "", ""]);
   const [importText, setImportText] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const { createWallet, importWallet } = useWallet();
+  const [noirConnecting, setNoirConnecting] = useState(false);
+  const { createWallet, importWallet, connectNoir } = useWallet();
   const { t } = useLanguage();
+
+  // Brai, 2026-09-18: "conectas la extension de la wallet NOIR ... ya te
+  // asocia tu wallet" -- third way in, alongside create/import. Errors
+  // here are the extension not being installed at all vs. the user just
+  // closing the approval popup (code 4001, per @noir-wallet/sdk's own
+  // documented error shape) -- both are common/expected, not "somethingwentwrong".
+  async function handleConnectNoir() {
+    setError(null);
+    setNoirConnecting(true);
+    try {
+      await connectNoir();
+      onClose();
+      location.reload();
+    } catch (e: any) {
+      if (e?.message === "noir-not-installed") {
+        setError(t("onboard.noir.notInstalled"));
+      } else if (e?.code === 4001) {
+        setError(t("onboard.noir.rejected"));
+      } else {
+        setError(e?.message ?? t("onboard.error.generic"));
+      }
+    } finally {
+      setNoirConnecting(false);
+    }
+  }
 
   // For the demo we show the words before they're persisted anywhere: the
   // real API already generated them, we just need something for the visual
@@ -134,6 +160,20 @@ export default function WalletOnboardModal({ onClose }: { onClose: () => void })
                 {t("onboard.createButton")}
               </button>
             </div>
+
+            {/* Brai, 2026-09-18: tercera opcion -- conectar la extension
+                Noir en vez de crear/importar por 12 palabras. Separada
+                visualmente de las dos de arriba porque es un mecanismo
+                distinto (tu wallet real, no una interna custodiada). */}
+            <button
+              className="btn btn-outline"
+              style={{ width: "100%", marginTop: 8 }}
+              disabled={noirConnecting}
+              onClick={handleConnectNoir}
+            >
+              {noirConnecting ? t("onboard.noir.connecting") : t("onboard.noir.connectButton")}
+            </button>
+            {error && <p style={{ color: "var(--red)", fontSize: 13, marginTop: 8 }}>{error}</p>}
           </>
         )}
 

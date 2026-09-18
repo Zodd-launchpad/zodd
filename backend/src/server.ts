@@ -9,6 +9,7 @@ import { startFeeDistributor, runFeeDistributionOnce } from "./lib/feeDistributo
 import { startZecPricePolling, getZecUsdPrice } from "./lib/zecPrice.js";
 import { withTokenLock } from "./lib/mutex.js";
 import { checkOrderRateLimit } from "./lib/rateLimit.js";
+import { verifyMessageSignature } from "@noir-wallet/sdk";
 
 // ZCASH_MODE=real switches every ZEC payment/inscription in this service to
 // actually move ZEC through zcash-wallet-service, instead of the mock.
@@ -100,6 +101,74 @@ app.post("/api/wallets/import", async (req, reply) => {
   const wallet = await store.findWalletBySeedWords(normalized);
   if (!wallet) return reply.code(404).send({ error: "no wallet found for those words" });
   return reply.send({ walletId: wallet.id, walletTag: wallet.walletTag });
+});
+
+// ---------- Noir Wallet connect ----------
+// Brai, 2026-09-18: "conectas la extension de la wallet NOIR para
+// navegador y ya te asocia tu wallet ... eso tenemos que integrar a la
+// pagina". Third way into a wallet, alongside create/import above: connect
+// the Noir Wallet browser extension instead of a 12-word phrase. This is a
+// standard "Sign-In with wallet" challenge/signature flow (same idea as
+// MetaMask/WalletConnect logins) -- see the long comment on
+// NoirAuthChallenge in schema.prisma for the full why. It does NOT change
+// how paying for anything works: a Noir-connected wallet still buys/mints
+// by sending real ZEC to a one-time deposit address exactly like today
+// (see zcashReal.ts) -- Noir here is only ever (a) an alternative login,
+// and (b) optionally, on the frontend, an alternative way to SEND that
+// same on-chain payment (zcash.sendTransaction() instead of scanning a
+// QR) -- both land on the identical deposit address and are picked up by
+// the identical polling/handlePaymentDetected code path, so nothing below
+// this route touches payment logic at all.
+app.post("/api/wallets/noir-challenge", async (_req, reply) => {
+  const { nonce, message } = await store.createNoirChallenge();
+  return reply.send({ nonce, message });
+});
+
+const connectNoirSchema = z.object({
+  nonce: z.string().min(1),
+  signature: z.string().min(1),
+  pubkey: z.string().min(1),
+  // La direccion TRANSPARENTE es la que firma el mensaje (Noir firma con
+  // la clave de esa direccion, ver signMessage() del SDK) -- es la que
+  // usamos como identidad/login. La shielded es la que se guarda como
+  // defaultRefundAddress para que los payouts (sell, venta NFT) le lleguen
+  // ahi, nunca a la transparente (misma regla que isShieldedAddress abajo
+  // exige para todo pago automatico saliente de la plataforma).
+  transparentAddress: z.string().trim().min(10),
+  shieldedAddress: z
+    .string()
+    .trim()
+    .min(10)
+    .refine(isShieldedAddress, "shielded address must start with u1 or zs1"),
+});
+
+app.post("/api/wallets/connect-noir", async (req, reply) => {
+  const body = connectNoirSchema.safeParse(req.body);
+  if (!body.success) return reply.code(400).send({ error: body.error.errors[0]?.message ?? "invalid request" });
+
+  const challenge = await store.consumeNoirChallenge(body.data.nonce);
+  if (!challenge) {
+    return reply.code(400).send({ error: "challenge expired or already used -- try connecting again" });
+  }
+
+  let verified;
+  try {
+    verified = verifyMessageSignature({
+      message: challenge.message,
+      signature: body.data.signature,
+      pubkey: body.data.pubkey,
+      address: body.data.transparentAddress,
+    });
+  } catch (err: any) {
+    app.log.warn(`noir signature verification threw: ${err?.message ?? err}`);
+    return reply.code(401).send({ error: "couldn't verify that signature" });
+  }
+  if (!verified.valid || verified.addressMatch === false) {
+    return reply.code(401).send({ error: "signature doesn't match that address -- connect Noir again and try once more" });
+  }
+
+  const wallet = await store.connectOrCreateNoirWallet(body.data.transparentAddress, body.data.shieldedAddress);
+  return reply.send({ walletId: wallet.id, walletTag: wallet.walletTag, noirAddress: body.data.transparentAddress });
 });
 
 app.get("/api/wallets/:id/portfolio", async (req, reply) => {
@@ -592,6 +661,21 @@ async function handlePaymentDetected(orderId: string, confirmedZecAmount: number
     return;
   }
 
+  // Brai, 2026-09-18: NFT mint/purchase payments reuse this exact same
+  // dispatcher (same generateOrderAddress(id, amount) mechanism, just a
+  // different table the id belongs to) -- see the big comment on this
+  // function above for why it has to check each possibility in turn.
+  const pendingNftMint = await store.getPendingNftMint(orderId).catch(() => null);
+  if (pendingNftMint) {
+    await handleNftMintPayment(pendingNftMint, confirmedZecAmount, txid, isRepeat);
+    return;
+  }
+  const nftPurchase = await store.getNftPurchaseOrder(orderId).catch(() => null);
+  if (nftPurchase) {
+    await handleNftPurchasePayment(nftPurchase, confirmedZecAmount, txid, isRepeat);
+    return;
+  }
+
   // When the zcash-service detects a buy order's payment, the order
   // executes against the bonding curve at that moment's price. A payer who
   // resends the exact same amount to the exact same order again (Brai:
@@ -659,9 +743,13 @@ ycashModule.onPaymentDetected(handlePaymentDetected);
 // and are still PENDING, and resume watching them.
 (async () => {
   try {
-    const [orders, creations] = await Promise.all([
+    const [orders, creations, nftMints, nftPurchases] = await Promise.all([
       store.getPendingOrdersAwaitingPayment(),
       store.getPendingTokenCreationsAwaitingPayment(),
+      // Brai, 2026-09-18: NFT mint/purchase payments need the exact same
+      // restart-recovery as every other real-ZEC payment here.
+      store.getPendingNftMintsAwaitingPayment(),
+      store.getPendingNftPurchasesAwaitingPayment(),
     ]);
     // Brai, 2026-09-11: each order/creation now resumes against ITS OWN
     // currency's wallet service, not always the ZEC one -- see
@@ -674,8 +762,18 @@ ycashModule.onPaymentDetected(handlePaymentDetected);
       if (c.zecAddress)
         walletServiceFor(c.currency).resumeWatching(c.id, c.zecAddress, c.expectedZecAmount, new Date(c.createdAt).getTime(), c.zecSaplingDiversifierHex, c.zecOrchardDiversifierHex);
     }
-    if (orders.length || creations.length) {
-      app.log.info(`resumed watching ${orders.length} pending order(s) and ${creations.length} pending token-creation(s) from before this restart`);
+    for (const m of nftMints) {
+      if (m.zecAddress)
+        walletServiceFor(m.currency).resumeWatching(m.id, m.zecAddress, m.expectedZecAmount, new Date(m.createdAt).getTime(), m.zecSaplingDiversifierHex, m.zecOrchardDiversifierHex);
+    }
+    for (const p of nftPurchases) {
+      if (p.zecAddress)
+        walletServiceFor(p.currency).resumeWatching(p.id, p.zecAddress, p.expectedZecAmount, new Date(p.createdAt).getTime(), p.zecSaplingDiversifierHex, p.zecOrchardDiversifierHex);
+    }
+    if (orders.length || creations.length || nftMints.length || nftPurchases.length) {
+      app.log.info(
+        `resumed watching ${orders.length} pending order(s), ${creations.length} pending token-creation(s), ${nftMints.length} pending NFT mint(s), and ${nftPurchases.length} pending NFT purchase(s) from before this restart`
+      );
     }
   } catch (err) {
     app.log.error(err, "failed to resume watching pending payments after restart");
@@ -1059,6 +1157,315 @@ app.get("/api/admin/orders-by-amount", async (req, reply) => {
 // him explicitly asking for automatic payouts back -- it's disabled for
 // fund-safety reasons, not by oversight.
 // startFeeDistributor(sendPayout, MAX_PAYOUT_ZEC, app.log);
+
+// ---------- NFT marketplace ----------
+// Brai, 2026-09-18: "necesito habilitar el mercado NFT" -- reference:
+// zecbit.net/collection/zecbit-genesis. See the big design comment on this
+// section in schema.prisma. Deliberately reachable only at /nft on the
+// frontend (unlinked from the main nav/homepage while this is being built
+// -- see HeaderBar.tsx/page.tsx), and nothing here is mintable until
+// seedNftCollection.ts has actually been run with real numbers/art (see
+// its own big comment) -- until then every route below just reports "not
+// configured" instead of a collection.
+
+const listNftItemsQuerySchema = z.object({
+  status: z.enum(["listed", "all"]).optional(),
+  ownerWalletId: z.string().optional(),
+  sort: z.enum(["price_asc", "price_desc", "edition"]).optional(),
+  page: z.coerce.number().int().positive().optional(),
+});
+
+async function serializeNftCollection(c: store.NftCollectionView) {
+  const stats = await store.getNftCollectionStats(c.id);
+  return {
+    slug: c.slug,
+    name: c.name,
+    description: c.description,
+    currency: c.currency,
+    totalSupply: c.totalSupply,
+    mintPriceZec: c.mintPriceZec,
+    coverImageDataUrl: c.coverImageDataUrl,
+    mintedCount: c.mintedCount,
+    remaining: Math.max(0, c.totalSupply - c.mintedCount),
+    soldOut: c.mintedCount >= c.totalSupply,
+    createdAt: c.createdAt,
+    ...stats,
+  };
+}
+
+app.get("/api/nft/collections/:slug", async (req, reply) => {
+  const { slug } = req.params as { slug: string };
+  const collection = await store.getNftCollectionBySlug(slug);
+  if (!collection) return reply.code(404).send({ error: "collection not found" });
+  return reply.send(await serializeNftCollection(collection));
+});
+
+app.get("/api/nft/collections/:slug/items", async (req, reply) => {
+  const { slug } = req.params as { slug: string };
+  const collection = await store.getNftCollectionBySlug(slug);
+  if (!collection) return reply.code(404).send({ error: "collection not found" });
+  const q = listNftItemsQuerySchema.parse(req.query);
+  const { items, total } = await store.listNftItems(collection.id, q);
+  return reply.send({ items, total, page: q.page ?? 1 });
+});
+
+app.get("/api/nft/collections/:slug/items/:editionNumber", async (req, reply) => {
+  const { slug, editionNumber } = req.params as { slug: string; editionNumber: string };
+  const collection = await store.getNftCollectionBySlug(slug);
+  if (!collection) return reply.code(404).send({ error: "collection not found" });
+  const item = await store.getNftItemByEdition(collection.id, Number(editionNumber));
+  if (!item) return reply.code(404).send({ error: "item not found" });
+  return reply.send({ collection: { slug: collection.slug, name: collection.name, currency: collection.currency }, item });
+});
+
+app.get("/api/wallets/:id/nfts", async (req, reply) => {
+  const { id } = req.params as { id: string };
+  const wallet = await store.getWallet(id);
+  if (!wallet) return reply.code(404).send({ error: "wallet not found" });
+  return reply.send(await store.getWalletNfts(id));
+});
+
+// ---------- NFT: mint ----------
+// Same model as a token-creation fee: the minter pays a fixed price to a
+// one-time address, and a piece only actually gets assigned once that
+// payment is detected (see handleNftMintPayment below).
+
+const nftMintSchema = z.object({
+  walletId: z.string(),
+  collectionSlug: z.string(),
+});
+
+app.post("/api/nft/mint", async (req, reply) => {
+  const body = nftMintSchema.parse(req.body);
+  const rl = checkOrderRateLimit(body.walletId);
+  if (!rl.allowed) return reply.code(429).send({ error: rl.message });
+  const wallet = await store.getWallet(body.walletId);
+  if (!wallet) return reply.code(400).send({ error: "invalid wallet" });
+  const collection = await store.getNftCollectionBySlug(body.collectionSlug);
+  if (!collection) return reply.code(404).send({ error: "collection not found" });
+  if (collection.mintedCount >= collection.totalSupply) {
+    return reply.code(409).send({ error: "sold out" });
+  }
+  const walletService = walletServiceFor(collection.currency);
+
+  const pending = await store.createPendingNftMint({
+    collectionId: collection.id,
+    internalWalletId: wallet.id,
+    currency: collection.currency,
+    expectedZecAmount: collection.mintPriceZec,
+  });
+
+  let zecAddress: string;
+  let zecAmount: number;
+  let saplingDiversifierHex: string | null = null;
+  let orchardDiversifierHex: string | null = null;
+  try {
+    const res = await walletService.generateOrderAddress(pending.id, collection.mintPriceZec);
+    zecAddress = res.address;
+    zecAmount = res.expectedZecAmount;
+    saplingDiversifierHex = (res as { saplingDiversifierHex?: string | null }).saplingDiversifierHex ?? null;
+    orchardDiversifierHex = (res as { orchardDiversifierHex?: string | null }).orchardDiversifierHex ?? null;
+  } catch (err) {
+    app.log.error(err, `couldn't generate a mint address for pending NFT mint ${pending.id}`);
+    await store.failPendingNftMint(pending.id).catch(() => {});
+    return reply.code(502).send({ error: "couldn't generate a payment address, try again" });
+  }
+  await store.setPendingNftMintAddress(pending.id, zecAddress, zecAmount, saplingDiversifierHex, orchardDiversifierHex);
+
+  return reply.send({
+    mintId: pending.id,
+    currency: collection.currency,
+    zecAddress,
+    zecAmount,
+    memo: walletService.buildPaymentMemoBase64(pending.id),
+    status: "PENDING",
+  });
+});
+
+app.get("/api/nft/mints/:id", async (req, reply) => {
+  const { id } = req.params as { id: string };
+  const pending = await store.getPendingNftMint(id);
+  if (!pending) return reply.code(404).send({ error: "not found" });
+  if (pending.status === "CREATED" && pending.resultItemId) {
+    const item = await store.getNftItemById(pending.resultItemId);
+    return reply.send({ ...pending, resultItem: item });
+  }
+  return reply.send(pending);
+});
+
+// ---------- NFT: list / unlist / buy (secondary market, no offers) ----------
+
+const nftListSchema = z.object({
+  walletId: z.string(),
+  priceZec: z.number().positive(),
+  payoutAddress: z
+    .string()
+    .trim()
+    .min(10)
+    .refine(isShieldedAddress, "payout address must be shielded (starts with u1 or zs1 for Zcash, ys1 for Ycash)"),
+});
+
+app.post("/api/nft/items/:id/list", async (req, reply) => {
+  const { id } = req.params as { id: string };
+  const body = nftListSchema.parse(req.body);
+  const item = await store.getNftItemById(id);
+  if (!item) return reply.code(404).send({ error: "item not found" });
+  const collection = await store.getNftCollectionById(item.collectionId);
+  if (!collection) return reply.code(404).send({ error: "collection not found" });
+  if (item.ownerInternalWalletId !== body.walletId) return reply.code(403).send({ error: "you don't own this piece" });
+  if (!addressMatchesCurrency(body.payoutAddress, collection.currency)) {
+    return reply.code(400).send({ error: `payout address doesn't look like a ${collection.currency} address` });
+  }
+  // Same reasoning as computeSellerPayout for token sells: a listing has to
+  // clear the real network-fee cost of the eventual payout, checked here
+  // (at list time) rather than after a buyer has already paid, so this can
+  // never happen post-payment -- see fillNftPurchase/handleNftPurchasePayment.
+  if (body.priceZec <= NETWORK_FEE_ZEC) {
+    return reply.code(400).send({ error: `list price must be greater than the ~${NETWORK_FEE_ZEC} ${collection.currency} network fee` });
+  }
+  const updated = await store.listNftForSale(id, body.walletId, body.priceZec, body.payoutAddress);
+  if (!updated) return reply.code(403).send({ error: "you don't own this piece" });
+  return reply.send(updated);
+});
+
+const nftUnlistSchema = z.object({ walletId: z.string() });
+app.post("/api/nft/items/:id/unlist", async (req, reply) => {
+  const { id } = req.params as { id: string };
+  const body = nftUnlistSchema.parse(req.body);
+  const updated = await store.unlistNft(id, body.walletId);
+  if (!updated) return reply.code(403).send({ error: "you don't own this piece, or it isn't listed" });
+  return reply.send(updated);
+});
+
+const nftBuySchema = z.object({ walletId: z.string() });
+app.post("/api/nft/items/:id/buy", async (req, reply) => {
+  const { id } = req.params as { id: string };
+  const body = nftBuySchema.parse(req.body);
+  const rl = checkOrderRateLimit(body.walletId);
+  if (!rl.allowed) return reply.code(429).send({ error: rl.message });
+  const buyer = await store.getWallet(body.walletId);
+  if (!buyer) return reply.code(400).send({ error: "invalid wallet" });
+  const item = await store.getNftItemById(id);
+  if (!item) return reply.code(404).send({ error: "item not found" });
+  if (item.listedPriceZec == null || !item.ownerInternalWalletId) {
+    return reply.code(409).send({ error: "this piece isn't listed for sale" });
+  }
+  if (item.ownerInternalWalletId === body.walletId) {
+    return reply.code(400).send({ error: "you already own this piece" });
+  }
+  const collection = await store.getNftCollectionById(item.collectionId);
+  if (!collection) return reply.code(404).send({ error: "collection not found" });
+  if (!item.listedPayoutAddress) return reply.code(409).send({ error: "this piece isn't listed for sale" });
+  const walletService = walletServiceFor(collection.currency);
+
+  const purchase = await store.createNftPurchaseOrder({
+    itemId: id,
+    buyerInternalWalletId: body.walletId,
+    sellerInternalWalletId: item.ownerInternalWalletId,
+    currency: collection.currency,
+    payoutAddress: item.listedPayoutAddress,
+    expectedZecAmount: item.listedPriceZec,
+  });
+
+  let zecAddress: string;
+  let zecAmount: number;
+  let saplingDiversifierHex: string | null = null;
+  let orchardDiversifierHex: string | null = null;
+  try {
+    const res = await walletService.generateOrderAddress(purchase.id, item.listedPriceZec);
+    zecAddress = res.address;
+    zecAmount = res.expectedZecAmount;
+    saplingDiversifierHex = (res as { saplingDiversifierHex?: string | null }).saplingDiversifierHex ?? null;
+    orchardDiversifierHex = (res as { orchardDiversifierHex?: string | null }).orchardDiversifierHex ?? null;
+  } catch (err) {
+    app.log.error(err, `couldn't generate a purchase address for NFT purchase ${purchase.id}`);
+    await store.failNftPurchaseOrder(purchase.id).catch(() => {});
+    return reply.code(502).send({ error: "couldn't generate a payment address, try again" });
+  }
+  await store.setNftPurchaseOrderAddress(purchase.id, zecAddress, zecAmount, saplingDiversifierHex, orchardDiversifierHex);
+
+  return reply.send({
+    purchaseId: purchase.id,
+    currency: collection.currency,
+    zecAddress,
+    zecAmount,
+    memo: walletService.buildPaymentMemoBase64(purchase.id),
+    status: "PENDING",
+  });
+});
+
+app.get("/api/nft/purchases/:id", async (req, reply) => {
+  const { id } = req.params as { id: string };
+  const purchase = await store.getNftPurchaseOrder(id);
+  if (!purchase) return reply.code(404).send({ error: "not found" });
+  return reply.send(purchase);
+});
+
+// Payment for a mint confirmed -- see completePendingNftMint's comment in
+// store.ts for the atomic random-claim mechanics and the sold-out race.
+async function handleNftMintPayment(pending: store.PendingNftMintView, confirmedZecAmount: number, txid: string, isRepeat: boolean) {
+  if (isRepeat || pending.status !== "PENDING") {
+    if (isRepeat) app.log.warn(`repeat payment of ${confirmedZecAmount} ${pending.currency} landed on NFT mint ${pending.id} after it already ${pending.status} -- left unclaimed (txid ${txid})`);
+    return;
+  }
+  try {
+    const result = await store.completePendingNftMint(pending.id, txid);
+    if (!result) {
+      // Sold out by the time this payment confirmed -- the money is real
+      // and already in the platform wallet, but there's no piece left to
+      // hand over. Loud log for Brai to manually refund/resolve; mirrors
+      // every other "payment landed, nothing to credit it to" case above.
+      await store.failPendingNftMint(pending.id).catch(() => {});
+      app.log.error(`NFT mint ${pending.id} paid ${confirmedZecAmount} ${pending.currency} (txid ${txid}) but the collection was already sold out -- needs manual admin refund`);
+      return;
+    }
+    app.log.info(`NFT mint ${pending.id}: wallet ${pending.internalWalletId} paid ${confirmedZecAmount} ${pending.currency} -> ${result.collectionSlug} #${result.editionNumber} (txid ${txid})`);
+  } catch (err) {
+    await store.failPendingNftMint(pending.id).catch(() => {});
+    app.log.error(err, `NFT mint ${pending.id} failed to finalize`);
+  }
+}
+
+// Payment for a secondary-market purchase confirmed -- transfers ownership
+// (if the race in fillNftPurchase is won) and then relays the real payout
+// to the seller. Ownership transfer happens BEFORE the payout attempt,
+// deliberately: the buyer's payment already confirmed on-chain and is not
+// meaningfully refundable, so they get the piece even if the payout relay
+// to the seller has a hiccup -- that becomes a "needs manual admin payout"
+// case (loud log below), not something that should ever strand a buyer
+// who already paid.
+async function handleNftPurchasePayment(purchase: store.NftPurchaseOrderView, confirmedZecAmount: number, txid: string, isRepeat: boolean) {
+  if (isRepeat || purchase.status !== "PENDING") {
+    if (isRepeat) app.log.warn(`repeat payment of ${confirmedZecAmount} ${purchase.currency} landed on NFT purchase ${purchase.id} after it already ${purchase.status} -- left unclaimed (txid ${txid})`);
+    return;
+  }
+  try {
+    const item = await store.fillNftPurchase(purchase.id, purchase.itemId, purchase.sellerInternalWalletId, purchase.buyerInternalWalletId, txid);
+    if (!item) {
+      // Lost the race (or the seller delisted in between) -- the buyer's
+      // payment is real and already in the platform wallet, but the piece
+      // is no longer this seller's to transfer. Needs manual admin
+      // resolution (refund the buyer, most likely).
+      await store.failNftPurchaseOrder(purchase.id).catch(() => {});
+      app.log.error(`NFT purchase ${purchase.id} paid ${confirmedZecAmount} ${purchase.currency} (txid ${txid}) but lost the ownership race -- needs manual admin resolution`);
+      return;
+    }
+    const walletService = walletServiceFor(purchase.currency);
+    try {
+      const { sellerPayout, blocked } = computeSellerPayout(confirmedZecAmount);
+      if (blocked) {
+        app.log.error(`NFT purchase ${purchase.id} filled but payout would be <= 0 after the network fee -- needs manual admin payout to ${purchase.payoutAddress}`);
+      } else {
+        const { txid: payoutTxid } = await walletService.sendPayout(purchase.payoutAddress, sellerPayout);
+        app.log.info(`NFT purchase ${purchase.id} filled: ${confirmedZecAmount} ${purchase.currency} -> item ${item.id} to wallet ${purchase.buyerInternalWalletId}, payout ${sellerPayout} ${purchase.currency} -> ${purchase.payoutAddress} (buy txid ${txid}, payout txid ${payoutTxid})`);
+      }
+    } catch (err) {
+      app.log.error(err, `NFT purchase ${purchase.id} filled and ownership transferred, but the payout to the seller (${purchase.payoutAddress}) failed -- needs manual admin payout`);
+    }
+  } catch (err) {
+    app.log.error(err, `NFT purchase ${purchase.id} failed to finalize`);
+  }
+}
 
 const port = Number(process.env.PORT ?? 8787);
 app.listen({ port, host: "0.0.0.0" }).then(() => {

@@ -15,17 +15,44 @@ datasource db {
 model InternalWallet {
   id            String   @id @default(cuid())
   walletTag     String   @unique // ej. "5310f1ce", parte visible corta
-  seedHashHex   String   // hash de las 12 palabras, nunca la frase en claro
+  // hash de las 12 palabras, nunca la frase en claro. Null para una wallet
+  // conectada por Noir (ver noirAddress abajo): esa wallet no tiene frase
+  // de 12 palabras en absoluto, su "login" es la extension misma.
+  seedHashHex   String?
   createdAt     DateTime @default(now())
   // Last real Zcash address used to receive a sell payout from this
   // wallet -- remembered so the Sell modal can pre-fill it instead of
   // asking the payer to paste it in again for every token (Brai,
   // 2026-09-07: "cuando toco SELL ya me queda asociada... asi no tengo
-  // que pegar cada vez que voy a pagar un token diferente").
+  // que pegar cada vez que voy a pagar un token diferente"). Para una
+  // wallet conectada por Noir, esto se llena automaticamente con la
+  // direccion shielded que devuelve zcash.connect() -- ver noirAddress.
   defaultRefundAddress String?
+
+  // Brai, 2026-09-18: "cuando conectas la wallet no creas una wallet con 10
+  // palabras sino que conectas la extension de la wallet NOIR para
+  // navegador y ya te asocia tu wallet ... eso tenemos que integrar a la
+  // pagina" -- segunda forma de "iniciar sesion" ademas de crear/importar
+  // por 12 palabras: conectar la extension del navegador Noir Wallet
+  // (@noir-wallet/sdk). Guardamos la direccion TRANSPARENTE (no la
+  // shielded) porque es la que Noir puede firmar mensajes con
+  // zcash.signMessage() -- ver POST /api/wallets/connect-noir en
+  // server.ts, que verifica esa firma contra un challenge de un solo uso
+  // (NoirAuthChallenge) antes de crear o reconocer esta wallet. Esto es lo
+  // que hace que reconectar la MISMA extension en otra sesion/dispositivo
+  // te devuelva la MISMA InternalWallet en vez de crear una nueva cada vez.
+  noirAddress   String?  @unique
 
   balances Balance[]
   orders   Order[]
+  // Brai, 2026-09-18: "necesito habilitar el mercado NFT" -- same idea as
+  // balances/orders above but for NFT pieces (see NftItem and friends
+  // below). A wallet owns zero or more NftItem rows directly (no
+  // Balance-style amount -- each NFT is 1-of-1, not fungible).
+  nftItems             NftItem[]          @relation("NftOwner")
+  nftMints             PendingNftMint[]
+  nftPurchasesAsBuyer  NftPurchaseOrder[] @relation("NftBuyer")
+  nftPurchasesAsSeller NftPurchaseOrder[] @relation("NftSeller")
 }
 
 // Brai, 2026-09-11: "quiero que puedas trabajar con Ycash y Zcash" -- each
@@ -273,4 +300,202 @@ model Order {
 
   @@index([status])
   @@index([zecAddress])
+}
+
+// ---------- NFT marketplace ----------
+// Brai, 2026-09-18: "necesito habilitar el mercado NFT... la idea es que
+// cada wallet envie y pague nfts, los nfts quedan como si fueran tokens
+// nomas que son nfts, fotitos que quedan en cada wallet en su perfil,
+// donde pueden LISTAR o no listar" -- reference to copy: zecbit.net
+// (collection/zecbit-genesis). Same off-chain-ledger philosophy as
+// Token/Order above (no smart contract -- this table IS the source of
+// truth for who owns which piece), reusing the exact same real-ZEC payment
+// machinery (generateOrderAddress/onPaymentDetected/sendPayout in
+// zcashReal.ts / zcashMock.ts / ycashMock.ts) that already moves money for
+// token creation and buy/sell orders. No "make offer" (Brai: "obviemos la
+// parte de que la gente pueda ofertar asi no la complicamos, solo listar,
+// comprar y vender").
+//
+// Lives behind /nft on the frontend, deliberately unlinked from the main
+// nav/homepage while this is being built (see HeaderBar.tsx/page.tsx) --
+// Brai, 2026-09-18: "podemos trabajar estos cambios sobre la otra pagina,
+// no la principal de zodd.fun, asi la gente no ve lo que estamos haciendo".
+
+enum NftMintStatus {
+  PENDING // esperando que el minter mande el pago a zecAddress
+  CREATED // pago detectado, se le asignó una pieza al azar (resultItemId)
+  EXPIRED
+  FAILED
+}
+
+enum NftOrderStatus {
+  PENDING // esperando que el comprador pague el precio listado
+  FILLED
+  EXPIRED
+  FAILED
+}
+
+// Brai, 2026-09-18: "por ahora haya solo una unica coleccion que voy a
+// hacer" -- el modelo soporta más de una a futuro, pero hoy solo existe
+// (o no) esta primera. totalSupply/mintPriceZec son placeholders: "todavia
+// no tengo la cantidad ni el numero y precio, arranca y deja todo en X" --
+// no hay ninguna fila de esta tabla todavía; seedNftCollection.ts es lo
+// que la va a crear (junto con sus NftItem) una vez que Brai mande el
+// arte y los números reales. Hasta entonces /api/nft/* devuelve "not
+// configured", nada es minteable con números inventados.
+model NftCollection {
+  id                String   @id @default(cuid())
+  slug              String   @unique // parte de la URL, ej. "zodd-genesis"
+  name              String
+  description       String?  @db.Text
+  currency          Currency @default(ZEC)
+  totalSupply       Int // cantidad total de piezas -- X, TODO(Brai): número real
+  mintPriceZec      Decimal  @db.Decimal(20, 8) // precio fijo de mint -- X, TODO(Brai): número real
+  coverImageDataUrl String?  @db.Text
+  // Igual que Token.hidden: reservado para cuando exista un índice público
+  // de colecciones (hoy hay una sola, alcanzada directo por slug, así que
+  // esto todavía no filtra nada en las rutas -- ver server.ts).
+  hidden            Boolean  @default(true)
+  mintedCount       Int      @default(0) // contador denormalizado, evita un COUNT(*) en cada lectura
+  createdAt         DateTime @default(now())
+
+  items NftItem[]
+  mints PendingNftMint[]
+
+  @@index([hidden])
+}
+
+// Una fila por pieza, todas sembradas de una sola vez para todo el
+// totalSupply (ver seedNftCollection.ts) con ownerInternalWalletId null --
+// "todavía no minteada, en poder del pool de la colección". Mintear
+// (PendingNftMint abajo) solo le asigna al azar una fila YA EXISTENTE a
+// quien pagó; nunca crea filas al vuelo, así que "cuántas quedan" es un
+// COUNT plano.
+model NftItem {
+  id             String    @id @default(cuid())
+  collectionId   String
+  editionNumber  Int // 1..totalSupply, identidad estable de la pieza
+  name           String? // ej. "ZODD #61" -- opcional, si falta se muestra "#<editionNumber>"
+  imageDataUrl   String?   @db.Text
+  traits         Json? // mapa opcional {trait: valor}, se muestra en la página del item si existe
+  mintedAt       DateTime?
+  mintPaymentTxid String? // txid real que pagó el mint
+
+  ownerInternalWalletId String? // null = todavía no minteada
+
+  // Listing del mercado secundario -- precio null = no listada. No hay una
+  // tabla "Listing" aparte: como mucho hay un listing activo por pieza, así
+  // que son campos directos del item (Brai: "pueden LISTAR o no listar",
+  // sin ofertas).
+  listedPriceZec Decimal? @db.Decimal(20, 8)
+  listedAt       DateTime?
+  // A dónde va la plata de una venta -- se toma al momento de listar
+  // (igual que Token.creatorPayoutAddress), no se reusa
+  // InternalWallet.defaultRefundAddress, así un listing siempre paga a la
+  // dirección que su dueño quiso decir cuando listó, aunque después cambie
+  // su dirección por defecto en otro lado.
+  listedPayoutAddress String?
+
+  collection          NftCollection      @relation(fields: [collectionId], references: [id])
+  ownerInternalWallet InternalWallet?    @relation("NftOwner", fields: [ownerInternalWalletId], references: [id])
+  purchases           NftPurchaseOrder[]
+
+  @@unique([collectionId, editionNumber])
+  @@index([collectionId, ownerInternalWalletId])
+  @@index([collectionId, listedPriceZec])
+}
+
+// Mismo mecanismo que PendingTokenCreation: se paga una dirección real de
+// un solo uso, y el mint recién sucede de verdad cuando ese pago se
+// detecta (ver el handler de pagos en server.ts). resultItemId se elige AL
+// AZAR entre las NftItem sin mintear de esta colección en ese momento
+// (claim atómico -- ver claimRandomUnmintedNftItem en store.ts).
+model PendingNftMint {
+  id                       String        @id @default(cuid())
+  collectionId             String
+  internalWalletId         String
+  currency                 Currency      @default(ZEC)
+  zecAddress               String?
+  zecSaplingDiversifierHex String?
+  zecOrchardDiversifierHex String?
+  expectedZecAmount        Decimal       @db.Decimal(20, 8)
+  status                   NftMintStatus @default(PENDING)
+  resultItemId             String?
+  createdAt                DateTime      @default(now())
+  completedAt              DateTime?
+
+  collection     NftCollection  @relation(fields: [collectionId], references: [id])
+  internalWallet InternalWallet @relation(fields: [internalWalletId], references: [id])
+
+  @@index([status])
+  @@index([zecAddress])
+}
+
+// Comprar una pieza LISTADA en el mercado secundario -- mismo mecanismo de
+// dirección-por-orden que un Order de compra de token, pero el payout va
+// al DUEÑO ACTUAL, no a la plataforma (la plataforma solo hace de relay:
+// el comprador paga a una dirección real de un solo uso de la plataforma,
+// y al detectarse el pago la plataforma le manda un sendPayout real al
+// vendedor -- ver handleNftPurchasePayment en server.ts). Sin "make offer"
+// (Brai: "obviemos la parte de que la gente pueda ofertar"): el comprador
+// siempre paga exactamente el precio listado. Sin fee de mercado por ahora
+// -- el 100% del precio (menos el fee de red real, ver NETWORK_FEE_ZEC en
+// fees.ts) le llega al vendedor.
+model NftPurchaseOrder {
+  id                       String         @id @default(cuid())
+  itemId                   String
+  buyerInternalWalletId    String
+  sellerInternalWalletId   String
+  currency                 Currency       @default(ZEC)
+  zecAddress               String?
+  zecSaplingDiversifierHex String?
+  zecOrchardDiversifierHex String?
+  // Dirección del vendedor al momento en que se abrió esta compra --
+  // copiada de NftItem.listedPayoutAddress, no leída de nuevo al llenarse
+  // (si el vendedor deslistó/relistó mientras tanto, esta compra sigue
+  // pagando a donde el vendedor dijo cuando el comprador la inició).
+  payoutAddress            String
+  expectedZecAmount        Decimal        @db.Decimal(20, 8)
+  status                   NftOrderStatus @default(PENDING)
+  executionTxid            String?
+  createdAt                DateTime       @default(now())
+  filledAt                 DateTime?
+
+  item                 NftItem        @relation(fields: [itemId], references: [id])
+  buyerInternalWallet  InternalWallet @relation("NftBuyer", fields: [buyerInternalWalletId], references: [id])
+  sellerInternalWallet InternalWallet @relation("NftSeller", fields: [sellerInternalWalletId], references: [id])
+
+  @@index([status])
+  @@index([zecAddress])
+}
+
+// Brai, 2026-09-18 (integracion Noir): challenge de un solo uso para el
+// flujo "Sign-In con wallet" -- el mismo patron que MetaMask/WalletConnect
+// usan para probar que el que dice ser dueño de una direccion realmente
+// tiene la clave privada, sin que la plataforma jamas vea ni toque esa
+// clave. Flujo completo (ver POST /api/wallets/noir-challenge y
+// /api/wallets/connect-noir en server.ts):
+//   1. El frontend pide un challenge nuevo -> creamos esta fila con un
+//      nonce al azar y guardamos el mensaje EXACTO que se va a firmar
+//      (no lo reconstruimos despues, para no depender de que el reloj o
+//      el codigo no hayan cambiado un caracter entremedio).
+//   2. El frontend le pide a la extension Noir que firme ESE mensaje con
+//      zcash.signMessage() (firma la direccion transparente).
+//   3. El backend verifica la firma con verifyMessageSignature() del
+//      propio SDK de Noir (@noir-wallet/sdk) contra el mensaje que
+//      guardamos -- no contra uno que mande el cliente, así nadie puede
+//      mandar un mensaje distinto para intentar reusar una firma vieja.
+//   4. consumeNoirChallenge() en store.ts borra la fila al verificarla
+//      (o si expiró) -- de un solo uso, no se puede reproducir la misma
+//      firma dos veces para "iniciar sesión" de nuevo.
+// Sin esto, cualquiera podría mandar CUALQUIER dirección Zcash ajena como
+// si fuera suya y quedarse con el InternalWallet (y el saldo) que ya
+// estuviera asociado a esa dirección -- por eso esto no es opcional.
+model NoirAuthChallenge {
+  id        String   @id @default(cuid())
+  nonce     String   @unique
+  message   String
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
 }

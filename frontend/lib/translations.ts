@@ -157,6 +157,18 @@ export const translations = {
     en: "Copies just the address shown above. Scan the QR instead if your wallet supports it — it also fills in the amount for you.",
     zh: "只会复制上方显示的地址。如果你的钱包支持，建议扫描二维码——还会自动填好金额。",
   },
+  // Brai, 2026-09-18: "el metodo de pago de tokens lo dejamos igual, o
+  // envias por noir o por QR" -- one-click alternative to scanning/pasting,
+  // via the Noir extension's own sendTransaction(). Same deposit address
+  // and memo as the QR right below it, so either path is detected the
+  // same way.
+  "payment.noir.payButton": { en: "Pay with Noir Wallet", zh: "用 Noir 钱包支付" },
+  "payment.noir.sending": { en: "Confirm in Noir…", zh: "请在 Noir 中确认…" },
+  "payment.noir.sent": { en: "Sent via Noir — waiting for it to confirm below.", zh: "已通过 Noir 发送——正在等待下方确认。" },
+  "payment.noir.orScan": { en: "or scan the QR below with any wallet", zh: "或用任意钱包扫描下方二维码" },
+  "payment.noir.notInstalled": { en: "Noir Wallet isn't installed — scan the QR below instead.", zh: "未安装 Noir 钱包——请改用下方二维码。" },
+  "payment.noir.rejected": { en: "Payment was closed before approving in Noir.", zh: "付款在 Noir 中批准前被关闭。" },
+  "payment.noir.failed": { en: "Couldn't send from Noir — scan the QR below instead.", zh: "无法从 Noir 发送——请改用下方二维码。" },
   // Brai, 2026-09-07: tried a Noir-specific banner (first a quiet 2-line
   // copy button, then a big bronze "GOT NOIR" box copying address+memo
   // together) across a few rounds, but it still didn't work reliably for
@@ -259,6 +271,15 @@ export const translations = {
   "onboard.error.generic": { en: "something went wrong, close this and try again", zh: "出了点问题，请关闭后重试" },
   "onboard.error.wrongWords": { en: "those aren't words 5, 6 and 7. Check the copy you made.", zh: "这不是第 5、6、7 个词。请检查你记下的内容。" },
   "onboard.back": { en: "← Back", zh: "← 返回" },
+  // Brai, 2026-09-18: "conectas la extension de la wallet NOIR para
+  // navegador y ya te asocia tu wallet" -- third onboarding option.
+  "onboard.noir.connectButton": { en: "Connect Noir Wallet", zh: "连接 Noir 钱包" },
+  "onboard.noir.connecting": { en: "Connecting…", zh: "连接中…" },
+  "onboard.noir.notInstalled": {
+    en: "Noir Wallet isn't installed. Get the extension from the Chrome Web Store, then try again.",
+    zh: "未安装 Noir 钱包。请从 Chrome 网上应用店安装扩展程序后重试。",
+  },
+  "onboard.noir.rejected": { en: "Connection request was closed before approving — try again when you're ready.", zh: "连接请求在批准前被关闭——准备好后请重试。" },
 
   // ---------- Wallet detail modal ----------
   "detail.badge": { en: "ZODD WALLET", zh: "ZODD 钱包" },

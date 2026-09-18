@@ -6,6 +6,7 @@ import { api, formatUsd, formatZec, type Currency } from "@/lib/api";
 import { useLanguage } from "@/lib/i18n";
 import { useZecUsdPrice } from "@/lib/zecPrice";
 import { fileToSquareDataUrl } from "@/lib/imageResize";
+import { getNoirWallet, isNoirWalletInstalled } from "@noir-wallet/sdk";
 
 type Phase = "form" | "waiting" | "created" | "failed";
 
@@ -54,6 +55,14 @@ export default function CreatePage() {
   // plain zecAddress instead; see the comment on copyAddress() for why.
   const [paymentUri, setPaymentUri] = useState<string | null>(null);
   const [createdSymbol, setCreatedSymbol] = useState<string | null>(null);
+  // Brai, 2026-09-18: "aplica a todo el sitio" -- same "Pay with Noir"
+  // shortcut as BuyModal.tsx, now for the create-fee (+ optional bundled
+  // first-buy) payment too. Same deposit address/memo either way, so the
+  // existing poll below doesn't care which path the ZEC came from.
+  const [memo, setMemo] = useState<string | null>(null);
+  const [noirSending, setNoirSending] = useState(false);
+  const [noirTxid, setNoirTxid] = useState<string | null>(null);
+  const [noirError, setNoirError] = useState<string | null>(null);
 
   useEffect(() => {
     api
@@ -123,10 +132,46 @@ export default function CreatePage() {
       const scheme = res.currency === "YEC" ? "ycash" : "zcash";
       const uri = `${scheme}:${res.zecAddress}?amount=${res.zecAmount}${res.memo ? `&memo=${res.memo}` : ""}`;
       setPaymentUri(uri);
+      setMemo(res.memo ?? null);
       setQr(await QRCode.toDataURL(uri, { margin: 1, width: 220 }));
       setPhase("waiting");
     } catch (e: any) {
       setError(e.message);
+    }
+  }
+
+  // Brai, 2026-09-18: same one-click alternative as BuyModal.tsx's
+  // payWithNoir() -- see that comment for the full reasoning, identical
+  // here except it pays the create-fee (+ optional bundled first-buy)
+  // amount instead of a token purchase.
+  async function payWithNoir() {
+    setNoirError(null);
+    if (!zecAddress || zecAmount == null) return;
+    if (!isNoirWalletInstalled()) {
+      setNoirError(t("payment.noir.notInstalled"));
+      return;
+    }
+    const noirWallet = getNoirWallet();
+    if (!noirWallet) {
+      setNoirError(t("payment.noir.notInstalled"));
+      return;
+    }
+    setNoirSending(true);
+    try {
+      const zcash = noirWallet.zcash;
+      const existing = await zcash.getAccounts();
+      if (!existing) await zcash.connect();
+      const txid = await zcash.sendTransaction({
+        to: zecAddress,
+        amount: String(zecAmount),
+        memo: memo ?? undefined,
+        fundingSource: "shielded",
+      });
+      setNoirTxid(txid);
+    } catch (e: any) {
+      setNoirError(e?.code === 4001 ? t("payment.noir.rejected") : e?.message ?? t("payment.noir.failed"));
+    } finally {
+      setNoirSending(false);
     }
   }
 
@@ -206,6 +251,19 @@ export default function CreatePage() {
                 <span>{t("create.breakdown.send")}</span>
                 <span>{zecAmount != null ? formatZec(zecAmount) : ""} {currency}</span>
               </div>
+            </div>
+          )}
+          {currency === "ZEC" && isRealMode && (
+            <div style={{ margin: "12px 0" }}>
+              {noirTxid ? (
+                <p style={{ color: "var(--green)", fontSize: 12, textAlign: "center" }}>{t("payment.noir.sent")}</p>
+              ) : (
+                <button className="btn btn-outline" style={{ width: "100%" }} disabled={noirSending} onClick={payWithNoir}>
+                  {noirSending ? t("payment.noir.sending") : t("payment.noir.payButton")}
+                </button>
+              )}
+              {noirError && <p style={{ color: "var(--red)", fontSize: 12, textAlign: "center", marginTop: 6 }}>{noirError}</p>}
+              <p className="muted" style={{ fontSize: 11, textAlign: "center", margin: "8px 0" }}>{t("payment.noir.orScan")}</p>
             </div>
           )}
           {qr && (

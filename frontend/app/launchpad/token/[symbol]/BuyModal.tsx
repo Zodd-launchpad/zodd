@@ -4,6 +4,7 @@ import QRCode from "qrcode";
 import { api, formatUsd, formatZec, type Currency } from "@/lib/api";
 import { useLanguage } from "@/lib/i18n";
 import { useZecUsdPrice } from "@/lib/zecPrice";
+import { getNoirWallet, isNoirWalletInstalled } from "@noir-wallet/sdk";
 
 type Phase = "amount" | "waiting" | "filled" | "failed";
 
@@ -63,6 +64,16 @@ export default function BuyModal({
   const [error, setError] = useState<string | null>(null);
   const [isRealMode, setIsRealMode] = useState(false);
   const [copied, setCopied] = useState(false);
+  // Brai, 2026-09-18: "el metodo de pago de tokens lo dejamos igual, o
+  // envias por noir o por QR" -- same order, same deposit address, same
+  // polling below; this just lets the extension originate the payment
+  // directly instead of the payer scanning/pasting it by hand. Needs the
+  // bare memo (not baked into paymentUri) since sendTransaction() takes it
+  // as its own field.
+  const [memo, setMemo] = useState<string | null>(null);
+  const [noirSending, setNoirSending] = useState(false);
+  const [noirTxid, setNoirTxid] = useState<string | null>(null);
+  const [noirError, setNoirError] = useState<string | null>(null);
 
   // Brai, 2026-09-07: "esa wallet que te aparece ahi para pagar cualquier
   // compra tiene que ser un boton que si lo clickeas se auto copia" -- the
@@ -129,10 +140,48 @@ export default function BuyModal({
       const scheme = order.currency === "YEC" ? "ycash" : "zcash";
       const uri = `${scheme}:${order.zecAddress}?amount=${order.zecAmount}${order.memo ? `&memo=${order.memo}` : ""}`;
       setPaymentUri(uri);
+      setMemo(order.memo ?? null);
       setQr(await QRCode.toDataURL(uri, { margin: 1, width: 220 }));
       setPhase("waiting");
     } catch (e: any) {
       setError(e.message);
+    }
+  }
+
+  // Brai, 2026-09-18: "o envias por noir o por QR" -- alternative to
+  // scanning/pasting: ask the connected (or freshly connected) Noir
+  // extension to send this exact order's amount+memo straight to the
+  // deposit address. Same address, same memo as the QR above, so the
+  // existing 1s poll below picks it up exactly the same way regardless of
+  // how the ZEC actually got sent.
+  async function payWithNoir() {
+    setNoirError(null);
+    if (!address || exactZecAmount == null) return;
+    if (!isNoirWalletInstalled()) {
+      setNoirError(t("payment.noir.notInstalled"));
+      return;
+    }
+    const noirWallet = getNoirWallet();
+    if (!noirWallet) {
+      setNoirError(t("payment.noir.notInstalled"));
+      return;
+    }
+    setNoirSending(true);
+    try {
+      const zcash = noirWallet.zcash;
+      const existing = await zcash.getAccounts();
+      if (!existing) await zcash.connect();
+      const txid = await zcash.sendTransaction({
+        to: address,
+        amount: String(exactZecAmount),
+        memo: memo ?? undefined,
+        fundingSource: "shielded",
+      });
+      setNoirTxid(txid);
+    } catch (e: any) {
+      setNoirError(e?.code === 4001 ? t("payment.noir.rejected") : e?.message ?? t("payment.noir.failed"));
+    } finally {
+      setNoirSending(false);
     }
   }
 
@@ -192,6 +241,19 @@ export default function BuyModal({
             <p className="muted" style={{ textAlign: "center" }}>
               {t("buy.sendAtLeast", { amount: exactZecAmount != null ? formatZec(exactZecAmount) : zecAmount, currency })}
             </p>
+            {currency === "ZEC" && isRealMode && (
+              <div style={{ margin: "12px 0" }}>
+                {noirTxid ? (
+                  <p style={{ color: "var(--green)", fontSize: 12, textAlign: "center" }}>{t("payment.noir.sent")}</p>
+                ) : (
+                  <button className="btn btn-outline" style={{ width: "100%" }} disabled={noirSending} onClick={payWithNoir}>
+                    {noirSending ? t("payment.noir.sending") : t("payment.noir.payButton")}
+                  </button>
+                )}
+                {noirError && <p style={{ color: "var(--red)", fontSize: 12, textAlign: "center", marginTop: 6 }}>{noirError}</p>}
+                <p className="muted" style={{ fontSize: 11, textAlign: "center", margin: "8px 0" }}>{t("payment.noir.orScan")}</p>
+              </div>
+            )}
             {qr && (
               <div style={{ background: "#fff", padding: 12, borderRadius: 6, display: "flex", justifyContent: "center", margin: "12px 0" }}>
                 <img src={qr} alt="qr" />

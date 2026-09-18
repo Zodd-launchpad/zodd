@@ -69,6 +69,71 @@ export async function findWalletBySeedWords(words: string[]) {
   return wallet ? { id: wallet.id, walletTag: wallet.walletTag, createdAt: wallet.createdAt.toISOString() } : null;
 }
 
+// ---------- Noir Wallet connect ----------
+// Brai, 2026-09-18: "conectas la extension de la wallet NOIR para
+// navegador y ya te asocia tu wallet" -- a second way in, alongside
+// create/import above. See the big comment on InternalWallet.noirAddress
+// and NoirAuthChallenge in schema.prisma for the full design/why.
+
+const NOIR_CHALLENGE_TTL_MS = 5 * 60 * 1000; // 5 minutos para firmar y volver
+
+/** Step 1 of connect-with-Noir: a fresh one-time nonce + the EXACT message
+ * text the frontend must have Noir sign. We store the message ourselves
+ * (not just the nonce) so verification always checks against what we
+ * actually issued, never something reconstructed after the fact. */
+export async function createNoirChallenge() {
+  const nonce = randomUUID().replace(/-/g, "");
+  const message = `Sign in to zodd.fun\n\nNonce: ${nonce}\nIssued: ${new Date().toISOString()}`;
+  await prisma.noirAuthChallenge.create({ data: { nonce, message } });
+  return { nonce, message };
+}
+
+/** Step 3: one-time consume. Deletes the row so the same signature can
+ * never be replayed to "log in" twice -- returns null (and still deletes,
+ * if found) when the nonce doesn't exist or is past NOIR_CHALLENGE_TTL_MS,
+ * so an old tab left open overnight can't be used the next morning. */
+export async function consumeNoirChallenge(nonce: string): Promise<{ message: string } | null> {
+  let row;
+  try {
+    row = await prisma.noirAuthChallenge.delete({ where: { nonce } });
+  } catch {
+    return null; // ya consumido, o nunca existió
+  }
+  if (Date.now() - row.createdAt.getTime() > NOIR_CHALLENGE_TTL_MS) return null;
+  return { message: row.message };
+}
+
+export async function findWalletByNoirAddress(noirAddress: string) {
+  const wallet = await prisma.internalWallet.findUnique({ where: { noirAddress } });
+  return wallet ? { id: wallet.id, walletTag: wallet.walletTag, createdAt: wallet.createdAt.toISOString() } : null;
+}
+
+/** Step 4: after the signature over the challenge verifies, either return
+ * the existing wallet already linked to this transparent address (so
+ * reconnecting the same Noir account always lands you back on the same
+ * balances -- the whole point of this being a login mechanism) or create a
+ * brand new one. `shieldedAddress` is stashed as defaultRefundAddress so
+ * Sell/payout flows pre-fill it immediately, same as any other wallet that
+ * has sold before (see setDefaultRefundAddress above) -- always refreshed
+ * to whatever Noir just reported, in case the user's primary account in
+ * the extension changed. A Noir-connected wallet has no seed phrase at all
+ * (seedHashHex null): reconnecting Noir IS the recovery mechanism, there's
+ * no 12 words to lose or need to re-enter. */
+export async function connectOrCreateNoirWallet(transparentAddress: string, shieldedAddress: string) {
+  const existing = await prisma.internalWallet.findUnique({ where: { noirAddress: transparentAddress } });
+  if (existing) {
+    const updated = await prisma.internalWallet.update({
+      where: { id: existing.id },
+      data: { defaultRefundAddress: shieldedAddress },
+    });
+    return { id: updated.id, walletTag: updated.walletTag, createdAt: updated.createdAt.toISOString() };
+  }
+  const created = await prisma.internalWallet.create({
+    data: { walletTag: newWalletTag(), seedHashHex: null, noirAddress: transparentAddress, defaultRefundAddress: shieldedAddress },
+  });
+  return { id: created.id, walletTag: created.walletTag, createdAt: created.createdAt.toISOString() };
+}
+
 // ---------- Tokens ----------
 
 export interface TokenWithCurve {
@@ -781,13 +846,20 @@ export async function getPendingOrdersAwaitingPayment(): Promise<OrderView[]> {
  * call site in server.ts) closes that gap across restarts, on top of the
  * same-process tracking the poll loop already does. */
 export async function getAllKnownPaymentTxids(): Promise<string[]> {
-  const [tokens, orders] = await Promise.all([
+  const [tokens, orders, nftMints, nftPurchases] = await Promise.all([
     prisma.token.findMany({ where: { genesisMemoTxid: { not: null } }, select: { genesisMemoTxid: true } }),
     prisma.order.findMany({ where: { executionTxid: { not: null } }, select: { executionTxid: true } }),
+    // Brai, 2026-09-18: NFT mint/purchase payments need the exact same
+    // de-dupe protection as everything else here -- see the big comment
+    // above and zcashReal.ts's seedConsumedTxids.
+    prisma.nftItem.findMany({ where: { mintPaymentTxid: { not: null } }, select: { mintPaymentTxid: true } }),
+    prisma.nftPurchaseOrder.findMany({ where: { executionTxid: { not: null } }, select: { executionTxid: true } }),
   ]);
   const txids = [
     ...tokens.map((t) => t.genesisMemoTxid),
     ...orders.map((o) => o.executionTxid),
+    ...nftMints.map((n) => n.mintPaymentTxid),
+    ...nftPurchases.map((n) => n.executionTxid),
   ].filter((t): t is string => !!t);
   return txids;
 }
@@ -1121,4 +1193,521 @@ export async function recomputeCurveFromOrders(tokenId: string): Promise<{ befor
   });
 
   return { before, after: state, ordersReplayed: orders.length };
+}
+
+// ---------- NFT marketplace ----------
+// See the big comment block on this section in schema.prisma for the
+// overall design. Mirrors the Token/Order/PendingTokenCreation shapes and
+// patterns above on purpose -- same real-ZEC payment machinery, same kind
+// of view/create/complete functions.
+
+export type NftMintStatus = "PENDING" | "CREATED" | "EXPIRED" | "FAILED";
+export type NftOrderStatus = "PENDING" | "FILLED" | "EXPIRED" | "FAILED";
+
+export interface NftCollectionView {
+  id: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  currency: Currency;
+  totalSupply: number;
+  mintPriceZec: number;
+  coverImageDataUrl: string | null;
+  mintedCount: number;
+  createdAt: string;
+}
+
+function toNftCollectionView(c: {
+  id: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  currency: string;
+  totalSupply: number;
+  mintPriceZec: unknown;
+  coverImageDataUrl: string | null;
+  mintedCount: number;
+  createdAt: Date;
+}): NftCollectionView {
+  return {
+    id: c.id,
+    slug: c.slug,
+    name: c.name,
+    description: c.description,
+    currency: c.currency as Currency,
+    totalSupply: c.totalSupply,
+    mintPriceZec: num(c.mintPriceZec),
+    coverImageDataUrl: c.coverImageDataUrl,
+    mintedCount: c.mintedCount,
+    createdAt: c.createdAt.toISOString(),
+  };
+}
+
+export async function getNftCollectionBySlug(slug: string): Promise<NftCollectionView | null> {
+  const c = await prisma.nftCollection.findUnique({ where: { slug } });
+  return c ? toNftCollectionView(c) : null;
+}
+
+export async function getNftCollectionById(id: string): Promise<NftCollectionView | null> {
+  const c = await prisma.nftCollection.findUnique({ where: { id } });
+  return c ? toNftCollectionView(c) : null;
+}
+
+/** Read-only stats for the collection header (floor/listed/sales/volume),
+ * same idea as zecbit.net's collection banner. All computed on the fly --
+ * cheap, since this is one hand-curated collection (at most totalSupply
+ * rows), not millions. */
+export async function getNftCollectionStats(collectionId: string): Promise<{
+  floorZec: number | null;
+  listedCount: number;
+  salesCount: number;
+  volumeZec: number;
+}> {
+  const [floor, listedCount, sales] = await Promise.all([
+    prisma.nftItem.aggregate({
+      where: { collectionId, listedPriceZec: { not: null } },
+      _min: { listedPriceZec: true },
+    }),
+    prisma.nftItem.count({ where: { collectionId, listedPriceZec: { not: null } } }),
+    prisma.nftPurchaseOrder.aggregate({
+      where: { status: "FILLED", item: { collectionId } },
+      _sum: { expectedZecAmount: true },
+      _count: true,
+    }),
+  ]);
+  return {
+    floorZec: floor._min.listedPriceZec != null ? num(floor._min.listedPriceZec) : null,
+    listedCount,
+    salesCount: sales._count,
+    volumeZec: num(sales._sum.expectedZecAmount ?? 0),
+  };
+}
+
+export interface NftItemView {
+  id: string;
+  collectionId: string;
+  editionNumber: number;
+  name: string | null;
+  imageDataUrl: string | null;
+  traits: unknown;
+  mintedAt: string | null;
+  mintPaymentTxid: string | null;
+  ownerInternalWalletId: string | null;
+  ownerWalletTag: string | null;
+  listedPriceZec: number | null;
+  listedAt: string | null;
+  // Brai, 2026-09-11-style precedent: Token.creatorPayoutAddress is already
+  // shown publicly (see serializeToken's fee object), so exposing a
+  // listing's payout address here too is consistent, not a new kind of
+  // disclosure -- shielded addresses don't leak balance, only "this wallet
+  // is selling this piece". Needed by the buy route (server.ts) without a
+  // second lookup.
+  listedPayoutAddress: string | null;
+}
+
+function toNftItemView(i: {
+  id: string;
+  collectionId: string;
+  editionNumber: number;
+  name: string | null;
+  imageDataUrl: string | null;
+  traits: unknown;
+  mintedAt: Date | null;
+  mintPaymentTxid: string | null;
+  ownerInternalWalletId: string | null;
+  ownerInternalWallet?: { walletTag: string } | null;
+  listedPriceZec: unknown;
+  listedAt: Date | null;
+  listedPayoutAddress: string | null;
+}): NftItemView {
+  return {
+    id: i.id,
+    collectionId: i.collectionId,
+    editionNumber: i.editionNumber,
+    name: i.name,
+    imageDataUrl: i.imageDataUrl,
+    traits: i.traits ?? null,
+    mintedAt: i.mintedAt ? i.mintedAt.toISOString() : null,
+    mintPaymentTxid: i.mintPaymentTxid,
+    ownerInternalWalletId: i.ownerInternalWalletId,
+    ownerWalletTag: i.ownerInternalWallet?.walletTag ?? null,
+    listedPriceZec: i.listedPriceZec != null ? num(i.listedPriceZec) : null,
+    listedAt: i.listedAt ? i.listedAt.toISOString() : null,
+    listedPayoutAddress: i.listedPayoutAddress,
+  };
+}
+
+export async function listNftItems(
+  collectionId: string,
+  opts: {
+    status?: "listed" | "all";
+    ownerWalletId?: string;
+    sort?: "price_asc" | "price_desc" | "edition";
+    page?: number;
+    pageSize?: number;
+  } = {}
+): Promise<{ items: NftItemView[]; total: number }> {
+  const pageSize = Math.min(opts.pageSize ?? 48, 100);
+  const page = Math.max(opts.page ?? 1, 1);
+  const where: Record<string, unknown> = { collectionId };
+  if (opts.status === "listed") where.listedPriceZec = { not: null };
+  if (opts.ownerWalletId) where.ownerInternalWalletId = opts.ownerWalletId;
+  const orderBy =
+    opts.sort === "price_desc"
+      ? [{ listedPriceZec: "desc" as const }]
+      : opts.sort === "price_asc"
+        ? [{ listedPriceZec: "asc" as const }]
+        : [{ editionNumber: "asc" as const }];
+  const [rows, total] = await Promise.all([
+    prisma.nftItem.findMany({
+      where,
+      orderBy,
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+      include: { ownerInternalWallet: { select: { walletTag: true } } },
+    }),
+    prisma.nftItem.count({ where }),
+  ]);
+  return { items: rows.map(toNftItemView), total };
+}
+
+export async function getNftItemByEdition(collectionId: string, editionNumber: number): Promise<NftItemView | null> {
+  const i = await prisma.nftItem.findUnique({
+    where: { collectionId_editionNumber: { collectionId, editionNumber } },
+    include: { ownerInternalWallet: { select: { walletTag: true } } },
+  });
+  return i ? toNftItemView(i) : null;
+}
+
+export async function getNftItemById(id: string): Promise<NftItemView | null> {
+  const i = await prisma.nftItem.findUnique({
+    where: { id },
+    include: { ownerInternalWallet: { select: { walletTag: true } } },
+  });
+  return i ? toNftItemView(i) : null;
+}
+
+export async function getWalletNfts(walletId: string): Promise<NftItemView[]> {
+  const rows = await prisma.nftItem.findMany({
+    where: { ownerInternalWalletId: walletId },
+    orderBy: { mintedAt: "desc" },
+    include: { ownerInternalWallet: { select: { walletTag: true } } },
+  });
+  return rows.map(toNftItemView);
+}
+
+/** Owner-checked list/unlist -- both are a plain conditional UPDATE (WHERE
+ * id AND ownerInternalWalletId = walletId), so a wallet can never list or
+ * unlist a piece it doesn't own, and there's no separate read-then-write
+ * race to worry about. */
+export async function listNftForSale(
+  itemId: string,
+  walletId: string,
+  priceZec: number,
+  payoutAddress: string
+): Promise<NftItemView | null> {
+  const result = await prisma.nftItem.updateMany({
+    where: { id: itemId, ownerInternalWalletId: walletId },
+    data: { listedPriceZec: priceZec, listedAt: new Date(), listedPayoutAddress: payoutAddress },
+  });
+  if (result.count === 0) return null;
+  return getNftItemById(itemId);
+}
+
+export async function unlistNft(itemId: string, walletId: string): Promise<NftItemView | null> {
+  const result = await prisma.nftItem.updateMany({
+    where: { id: itemId, ownerInternalWalletId: walletId },
+    data: { listedPriceZec: null, listedAt: null, listedPayoutAddress: null },
+  });
+  if (result.count === 0) return null;
+  return getNftItemById(itemId);
+}
+
+// ---------- Pending NFT mints ----------
+// The minter pays a fixed price to a one-time address, same mechanism as a
+// token-creation fee -- the piece is only actually assigned once that
+// payment is detected (see completePendingNftMint below and the payment
+// handler in server.ts).
+
+export interface PendingNftMintView {
+  id: string;
+  collectionId: string;
+  internalWalletId: string;
+  currency: Currency;
+  zecAddress: string | null;
+  zecSaplingDiversifierHex?: string | null;
+  zecOrchardDiversifierHex?: string | null;
+  expectedZecAmount: number;
+  status: NftMintStatus;
+  resultItemId: string | null;
+  createdAt: string;
+}
+
+function toPendingNftMintView(p: {
+  id: string;
+  collectionId: string;
+  internalWalletId: string;
+  currency: string;
+  zecAddress: string | null;
+  zecSaplingDiversifierHex?: string | null;
+  zecOrchardDiversifierHex?: string | null;
+  expectedZecAmount: unknown;
+  status: string;
+  resultItemId: string | null;
+  createdAt: Date;
+}): PendingNftMintView {
+  return {
+    id: p.id,
+    collectionId: p.collectionId,
+    internalWalletId: p.internalWalletId,
+    currency: p.currency as Currency,
+    zecAddress: p.zecAddress,
+    zecSaplingDiversifierHex: p.zecSaplingDiversifierHex ?? null,
+    zecOrchardDiversifierHex: p.zecOrchardDiversifierHex ?? null,
+    expectedZecAmount: num(p.expectedZecAmount),
+    status: p.status as NftMintStatus,
+    resultItemId: p.resultItemId,
+    createdAt: p.createdAt.toISOString(),
+  };
+}
+
+export async function createPendingNftMint(input: {
+  collectionId: string;
+  internalWalletId: string;
+  currency?: Currency;
+  expectedZecAmount: number;
+}) {
+  const p = await prisma.pendingNftMint.create({
+    data: {
+      collectionId: input.collectionId,
+      internalWalletId: input.internalWalletId,
+      currency: input.currency ?? "ZEC",
+      expectedZecAmount: input.expectedZecAmount,
+    },
+  });
+  return toPendingNftMintView(p);
+}
+
+export async function setPendingNftMintAddress(
+  id: string,
+  zecAddress: string,
+  expectedZecAmount?: number,
+  zecSaplingDiversifierHex?: string | null,
+  zecOrchardDiversifierHex?: string | null
+) {
+  const p = await prisma.pendingNftMint.update({
+    where: { id },
+    data: {
+      zecAddress,
+      ...(expectedZecAmount !== undefined ? { expectedZecAmount } : {}),
+      zecSaplingDiversifierHex: zecSaplingDiversifierHex ?? null,
+      zecOrchardDiversifierHex: zecOrchardDiversifierHex ?? null,
+    },
+  });
+  return toPendingNftMintView(p);
+}
+
+export async function getPendingNftMint(id: string): Promise<PendingNftMintView | null> {
+  const p = await prisma.pendingNftMint.findUnique({ where: { id } });
+  return p ? toPendingNftMintView(p) : null;
+}
+
+/** Same restart-recovery need as getPendingTokenCreationsAwaitingPayment --
+ * see its comment. */
+export async function getPendingNftMintsAwaitingPayment(): Promise<PendingNftMintView[]> {
+  const rows = await prisma.pendingNftMint.findMany({ where: { status: "PENDING", zecAddress: { not: null } } });
+  return rows.map(toPendingNftMintView);
+}
+
+export async function failPendingNftMint(id: string) {
+  const p = await prisma.pendingNftMint.update({ where: { id }, data: { status: "FAILED" } });
+  return toPendingNftMintView(p);
+}
+
+/** Atomically claims one random still-unminted NftItem for this collection
+ * and assigns it to `walletId`. Postgres' FOR UPDATE SKIP LOCKED inside a
+ * CTE makes this safe under concurrency: two mint payments confirming in
+ * the same moment race for different rows instead of ever both landing on
+ * the same piece (a plain read-then-write from application code would have
+ * an obvious TOCTOU gap here). Returns null if nothing is left unminted
+ * (sold out). */
+async function claimRandomUnmintedNftItem(collectionId: string, walletId: string, txid: string): Promise<string | null> {
+  const rows = await prisma.$queryRaw<Array<{ id: string }>>`
+    WITH picked AS (
+      SELECT id FROM "NftItem"
+      WHERE "collectionId" = ${collectionId} AND "ownerInternalWalletId" IS NULL
+      ORDER BY random()
+      LIMIT 1
+      FOR UPDATE SKIP LOCKED
+    )
+    UPDATE "NftItem" AS n
+    SET "ownerInternalWalletId" = ${walletId}, "mintedAt" = now(), "mintPaymentTxid" = ${txid}
+    FROM picked
+    WHERE n.id = picked.id
+    RETURNING n.id
+  `;
+  return rows[0]?.id ?? null;
+}
+
+/** Payment for a mint confirmed: claims a random unminted piece and marks
+ * the reservation CREATED. Returns null if the collection was already sold
+ * out by the time this payment landed (an unlucky simultaneous-mint race)
+ * -- the payment still arrived for real in that case, so the caller
+ * (server.ts) treats that as an admin-recovery case, same philosophy as
+ * every other forensics case in this file, rather than silently losing
+ * track of it. */
+export async function completePendingNftMint(
+  id: string,
+  txid: string
+): Promise<{ collectionSlug: string; itemId: string; editionNumber: number } | null> {
+  const p = await prisma.pendingNftMint.findUnique({ where: { id } });
+  if (!p || p.status !== "PENDING") return null;
+
+  const itemId = await claimRandomUnmintedNftItem(p.collectionId, p.internalWalletId, txid);
+  if (!itemId) return null;
+
+  const [item] = await prisma.$transaction([
+    prisma.nftItem.findUniqueOrThrow({ where: { id: itemId } }),
+    prisma.nftCollection.update({ where: { id: p.collectionId }, data: { mintedCount: { increment: 1 } } }),
+    prisma.pendingNftMint.update({ where: { id }, data: { status: "CREATED", resultItemId: itemId, completedAt: new Date() } }),
+  ]);
+  const collection = await prisma.nftCollection.findUniqueOrThrow({ where: { id: p.collectionId }, select: { slug: true } });
+  return { collectionSlug: collection.slug, itemId: item.id, editionNumber: item.editionNumber };
+}
+
+// ---------- NFT secondary-market purchases ----------
+// Buying a LISTED piece -- same address-per-order mechanism as a token buy
+// order, but the platform relays the payout to the CURRENT OWNER instead
+// of keeping it (see handleNftPurchasePayment in server.ts).
+
+export interface NftPurchaseOrderView {
+  id: string;
+  itemId: string;
+  buyerInternalWalletId: string;
+  sellerInternalWalletId: string;
+  currency: Currency;
+  zecAddress: string | null;
+  zecSaplingDiversifierHex?: string | null;
+  zecOrchardDiversifierHex?: string | null;
+  payoutAddress: string;
+  expectedZecAmount: number;
+  status: NftOrderStatus;
+  executionTxid: string | null;
+  createdAt: string;
+  filledAt: string | null;
+}
+
+function toNftPurchaseOrderView(o: {
+  id: string;
+  itemId: string;
+  buyerInternalWalletId: string;
+  sellerInternalWalletId: string;
+  currency: string;
+  zecAddress: string | null;
+  zecSaplingDiversifierHex?: string | null;
+  zecOrchardDiversifierHex?: string | null;
+  payoutAddress: string;
+  expectedZecAmount: unknown;
+  status: string;
+  executionTxid: string | null;
+  createdAt: Date;
+  filledAt: Date | null;
+}): NftPurchaseOrderView {
+  return {
+    id: o.id,
+    itemId: o.itemId,
+    buyerInternalWalletId: o.buyerInternalWalletId,
+    sellerInternalWalletId: o.sellerInternalWalletId,
+    currency: o.currency as Currency,
+    zecAddress: o.zecAddress,
+    zecSaplingDiversifierHex: o.zecSaplingDiversifierHex ?? null,
+    zecOrchardDiversifierHex: o.zecOrchardDiversifierHex ?? null,
+    payoutAddress: o.payoutAddress,
+    expectedZecAmount: num(o.expectedZecAmount),
+    status: o.status as NftOrderStatus,
+    executionTxid: o.executionTxid,
+    createdAt: o.createdAt.toISOString(),
+    filledAt: o.filledAt ? o.filledAt.toISOString() : null,
+  };
+}
+
+export async function createNftPurchaseOrder(input: {
+  itemId: string;
+  buyerInternalWalletId: string;
+  sellerInternalWalletId: string;
+  currency?: Currency;
+  payoutAddress: string;
+  expectedZecAmount: number;
+}) {
+  const o = await prisma.nftPurchaseOrder.create({
+    data: {
+      itemId: input.itemId,
+      buyerInternalWalletId: input.buyerInternalWalletId,
+      sellerInternalWalletId: input.sellerInternalWalletId,
+      currency: input.currency ?? "ZEC",
+      payoutAddress: input.payoutAddress,
+      expectedZecAmount: input.expectedZecAmount,
+    },
+  });
+  return toNftPurchaseOrderView(o);
+}
+
+export async function setNftPurchaseOrderAddress(
+  id: string,
+  zecAddress: string,
+  expectedZecAmount?: number,
+  zecSaplingDiversifierHex?: string | null,
+  zecOrchardDiversifierHex?: string | null
+) {
+  const o = await prisma.nftPurchaseOrder.update({
+    where: { id },
+    data: {
+      zecAddress,
+      ...(expectedZecAmount !== undefined ? { expectedZecAmount } : {}),
+      zecSaplingDiversifierHex: zecSaplingDiversifierHex ?? null,
+      zecOrchardDiversifierHex: zecOrchardDiversifierHex ?? null,
+    },
+  });
+  return toNftPurchaseOrderView(o);
+}
+
+export async function getNftPurchaseOrder(id: string): Promise<NftPurchaseOrderView | null> {
+  const o = await prisma.nftPurchaseOrder.findUnique({ where: { id } });
+  return o ? toNftPurchaseOrderView(o) : null;
+}
+
+/** Same restart-recovery need as getPendingOrdersAwaitingPayment -- see its
+ * comment. */
+export async function getPendingNftPurchasesAwaitingPayment(): Promise<NftPurchaseOrderView[]> {
+  const rows = await prisma.nftPurchaseOrder.findMany({ where: { status: "PENDING", zecAddress: { not: null } } });
+  return rows.map(toNftPurchaseOrderView);
+}
+
+export async function failNftPurchaseOrder(id: string) {
+  const o = await prisma.nftPurchaseOrder.update({ where: { id }, data: { status: "FAILED" } });
+  return toNftPurchaseOrderView(o);
+}
+
+/** Payment for a secondary-market purchase confirmed: atomically transfers
+ * ownership from seller to buyer, but ONLY if the item is still owned by
+ * that exact seller and still listed -- a single conditional UPDATE, which
+ * is what makes this race-safe against two buyers paying for the same
+ * listing around the same time (whoever's payment lands first here wins
+ * the item). Returns null when that race is lost; the caller treats the
+ * loser's payment as an admin-recovery case, same philosophy as every
+ * other forensics case in this file, since it arrived for real. */
+export async function fillNftPurchase(
+  purchaseId: string,
+  itemId: string,
+  sellerWalletId: string,
+  buyerWalletId: string,
+  txid: string
+): Promise<NftItemView | null> {
+  const result = await prisma.nftItem.updateMany({
+    where: { id: itemId, ownerInternalWalletId: sellerWalletId, listedPriceZec: { not: null } },
+    data: { ownerInternalWalletId: buyerWalletId, listedPriceZec: null, listedAt: null, listedPayoutAddress: null },
+  });
+  if (result.count === 0) return null;
+  await prisma.nftPurchaseOrder.update({ where: { id: purchaseId }, data: { status: "FILLED", executionTxid: txid, filledAt: new Date() } });
+  return getNftItemById(itemId);
 }

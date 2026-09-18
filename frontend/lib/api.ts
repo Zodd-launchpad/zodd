@@ -135,6 +135,21 @@ export const api = {
   createWallet: () => req("/api/wallets", { method: "POST" }),
   importWallet: (words: string[]): Promise<{ walletId: string; walletTag: string }> =>
     req("/api/wallets/import", { method: "POST", body: JSON.stringify({ words }) }),
+  // Brai, 2026-09-18: "conectas la extension de la wallet NOIR" -- 2-step
+  // sign-in-with-wallet flow. getNoirChallenge() gets a one-time message
+  // to have the extension sign; connectNoir() sends that signature back so
+  // the backend can verify it and return/create the matching wallet. See
+  // POST /api/wallets/noir-challenge and /connect-noir in server.ts.
+  getNoirChallenge: (): Promise<{ nonce: string; message: string }> =>
+    req("/api/wallets/noir-challenge", { method: "POST" }),
+  connectNoir: (data: {
+    nonce: string;
+    signature: string;
+    pubkey: string;
+    transparentAddress: string;
+    shieldedAddress: string;
+  }): Promise<{ walletId: string; walletTag: string; noirAddress: string }> =>
+    req("/api/wallets/connect-noir", { method: "POST", body: JSON.stringify(data) }),
   // Cached for the life of the page load: this never changes mid-session,
   // and every "is this simulated?" note (and the create-fee display) needs it.
   getMode: (): Promise<ModeResponse> => {
