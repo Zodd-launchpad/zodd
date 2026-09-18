@@ -68,6 +68,21 @@ import { useLanguage } from "@/lib/i18n";
 // del gato tambien, la idea es que sea publicidad" -- the ZODD mascot
 // image is baked into that server-rendered card (see route.tsx) so every
 // share doubles as branded advertising.
+//
+// Brai, 2026-09-18 (v12, URGENT): "ahora me están conectando cualquier
+// handle y se están haciendo pasar por otra persona y ponen su wallet ...
+// necesito que cuando haces clic te revise que seas ese handle con
+// Twitter, que se conecte a Twitter" -- step 1's free-text handle field is
+// GONE. It's replaced by real "Sign in with X" (OAuth 2.0 + PKCE, see
+// app/api/auth/twitter/*): clicking CONNECT WITH X sends the browser to
+// X's own login/consent screen, and the handle used for the rest of the
+// wizard comes back from X itself in a signed, httpOnly cookie -- nothing
+// about "who you are" is ever taken from something the client typed or
+// could edit. submit() below now calls /api/nft/whitelist/submit (a
+// same-origin proxy) instead of hitting the backend directly, since only
+// that proxy can read the verified-handle cookie; the backend's own
+// POST /api/nft/whitelist is locked down separately (WHITELIST_INTERNAL_TOKEN)
+// so it can no longer be called directly with a made-up handle either.
 const ADDRESS_STORAGE_KEY = "zodd-nft-whitelist-address";
 const TOTAL_STEPS = 4;
 
@@ -84,13 +99,19 @@ export default function NftWhitelistPage() {
   // render entry.walletAddress from this shared state for that reason.
   const [entry, setEntry] = useState<NftWhitelistEntry | NftWhitelistPublicStatus | null | undefined>(undefined); // undefined = still loading
   const [step, setStep] = useState(1);
-  const [handleInput, setHandleInput] = useState("");
+  // Brai, 2026-09-18 (v12, URGENT): replaces handleInput. undefined = still
+  // checking with the server whether this browser already has a verified X
+  // session; null = not connected yet (show the CONNECT WITH X button);
+  // a string = the real handle X confirmed, straight from the signed
+  // VERIFIED_COOKIE -- never editable, never typed.
+  const [verifiedHandle, setVerifiedHandle] = useState<string | null | undefined>(undefined);
+  const [xConfigured, setXConfigured] = useState(true);
+  const [oauthError, setOauthError] = useState(false);
   const [addressInput, setAddressInput] = useState("");
   const [tasks, setTasks] = useState<Tasks>({ follow: false, likeRepost: false, quote: false });
   const [noirBusy, setNoirBusy] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [checkingHandle, setCheckingHandle] = useState(false);
 
   useEffect(() => {
     api
@@ -114,15 +135,52 @@ export default function NftWhitelistPage() {
       .getNftWhitelistStatus(saved)
       .then((r) => {
         setEntry(r.entry);
-        if (r.entry) {
-          setAddressInput(saved);
-          setHandleInput(r.entry.twitterHandle);
-        }
+        if (r.entry) setAddressInput(saved);
       })
       .catch(() => setEntry(null));
   }, []);
 
-  const handleValid = /^[a-zA-Z0-9_]{1,15}$/.test(handleInput.trim());
+  // Brai, 2026-09-18 (v12, URGENT): checks whether this browser already has
+  // a verified X session (either from a previous visit, or right after the
+  // OAuth redirect lands back here with ?verified=1). Runs once on mount.
+  useEffect(() => {
+    if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("oauthError")) {
+      setOauthError(true);
+    }
+    fetch("/api/auth/twitter/session")
+      .then((r) => r.json())
+      .then((body: { handle: string | null; configured: boolean }) => {
+        setXConfigured(body.configured);
+        setVerifiedHandle(body.handle);
+      })
+      .catch(() => setVerifiedHandle(null));
+  }, []);
+
+  // Brai, 2026-09-18 (v8, carried into v12): "si pones tu HANDLE y ya
+  // suscribiste te vaya a la 4ta directamente" -- once X verification comes
+  // back with a real handle (and the address-based check above has already
+  // come up empty), look that handle up the same way as before; an
+  // existing entry jumps straight to the status screen, otherwise the
+  // wizard advances to step 2. Guarded on entry === null so this never
+  // races with the address-based lookup above.
+  useEffect(() => {
+    if (entry !== null || !verifiedHandle) return;
+    let cancelled = false;
+    api
+      .getNftWhitelistStatusByHandle(verifiedHandle)
+      .then((r) => {
+        if (cancelled) return;
+        if (r.entry) setEntry(r.entry);
+        else setStep(2);
+      })
+      .catch(() => {
+        if (!cancelled) setStep(2);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [entry, verifiedHandle]);
+
   const addressValid = addressInput.trim().length >= 8;
   // Brai, 2026-09-18 (v6): "tenes que hacer que en el paso 3, hasta que no
   // esta tildado, follow, like y repost y quote it... no te deje poner
@@ -133,34 +191,6 @@ export default function NftWhitelistPage() {
   // intentional now, not a bug.
   const tasksAllDone = tasks.follow && tasks.likeRepost && tasks.quote;
   const tasksLeftCount = [!tasks.follow, !tasks.likeRepost, !tasks.quote].filter(Boolean).length;
-
-  // Brai, 2026-09-18 (v8): "si pones tu HANDLE y ya suscribiste te vaya a
-  // la 4ta directamente" -- called from step 1's Continue (and Enter).
-  // Looks the typed handle up on the server first; if it already has an
-  // entry, jump straight to the big status screen instead of stepping
-  // through the wizard again. A lookup failure (network hiccup) doesn't
-  // block anyone -- it just falls through to the normal step 2.
-  async function continueFromStep1() {
-    if (!handleValid) return;
-    setError(null);
-    setCheckingHandle(true);
-    try {
-      const r = await api.getNftWhitelistStatusByHandle(handleInput.trim());
-      if (r.entry) {
-        // Brai, 2026-09-18 (v9, URGENT PRIVACY FIX): this lookup is
-        // unauthenticated (no proof the typed handle belongs to whoever
-        // is typing), so the response has no walletAddress at all --
-        // nothing to prefill here anymore, on purpose.
-        setEntry(r.entry);
-      } else {
-        setStep(2);
-      }
-    } catch {
-      setStep(2);
-    } finally {
-      setCheckingHandle(false);
-    }
-  }
 
   function shareStatus() {
     if (!entry) return;
@@ -201,12 +231,24 @@ export default function NftWhitelistPage() {
     }
   }
 
+  // Brai, 2026-09-18 (v12, URGENT): posts to the frontend's own
+  // /api/nft/whitelist/submit proxy instead of the backend directly -- no
+  // twitterHandle in this request at all, the proxy supplies it itself
+  // from the signed VERIFIED_COOKIE (see that route). If the X session
+  // expired mid-wizard, the proxy 401s and the message below tells them to
+  // reconnect rather than silently failing.
   async function submit() {
     setError(null);
     setSubmitting(true);
     try {
-      const result = await api.submitNftWhitelist({ walletAddress: addressInput.trim(), twitterHandle: handleInput.trim() });
-      setEntry(result);
+      const res = await fetch("/api/nft/whitelist/submit", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ walletAddress: addressInput.trim() }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body?.error ?? `error ${res.status}`);
+      setEntry(body);
       try {
         localStorage.setItem(ADDRESS_STORAGE_KEY, addressInput.trim());
       } catch {
@@ -311,19 +353,31 @@ export default function NftWhitelistPage() {
                 <div className="zw-step-label">01 &middot; {t("nftWhitelist.wizard.step1Label")}</div>
                 <h2 className="zw-heading">{t("nftWhitelist.wizard.step1Heading")}</h2>
                 <p className="muted">{t("nftWhitelist.wizard.step1Body")}</p>
-                <div className="field">
-                  <label>{t("nftWhitelist.handleLabel")}</label>
-                  <input
-                    value={handleInput}
-                    onChange={(e) => setHandleInput(e.target.value.replace(/^@/, ""))}
-                    placeholder="yourhandle"
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && handleValid && !checkingHandle) continueFromStep1();
-                    }}
-                  />
-                </div>
-                {handleValid && (
-                  <p className="zw-connected mono">&gt; {t("nftWhitelist.wizard.step1Set", { handle: handleInput.trim() })}</p>
+                {verifiedHandle === undefined ? (
+                  <p className="muted" style={{ fontSize: 13, marginTop: 12 }}>{t("nftWhitelist.wizard.checkingX")}</p>
+                ) : verifiedHandle ? (
+                  <p className="zw-connected mono">&gt; {t("nftWhitelist.wizard.xConnected", { handle: verifiedHandle })}</p>
+                ) : (
+                  <>
+                    {oauthError && (
+                      <p style={{ color: "var(--red)", fontSize: 13, marginTop: 8 }}>{t("nftWhitelist.wizard.xError")}</p>
+                    )}
+                    {!xConfigured && (
+                      <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>{t("nftWhitelist.wizard.xNotConfigured")}</p>
+                    )}
+                    <a
+                      className="btn btn-gold"
+                      href="/api/auth/twitter/start"
+                      style={{
+                        display: "inline-block",
+                        marginTop: 12,
+                        pointerEvents: xConfigured ? "auto" : "none",
+                        opacity: xConfigured ? 1 : 0.5,
+                      }}
+                    >
+                      {t("nftWhitelist.wizard.connectX")}
+                    </a>
+                  </>
                 )}
               </>
             )}
@@ -385,7 +439,7 @@ export default function NftWhitelistPage() {
                 <p className="muted">{t("nftWhitelist.wizard.step4Body")}</p>
                 <div className="zw-review-row">
                   <span className="zw-review-key">{t("nftWhitelist.wizard.reviewHandle")}</span>
-                  <span className="zw-review-val">@{handleInput.trim()}</span>
+                  <span className="zw-review-val">@{verifiedHandle}</span>
                 </div>
                 <div className="zw-review-row">
                   <span className="zw-review-key">{t("nftWhitelist.wizard.reviewAddress")}</span>
@@ -413,17 +467,17 @@ export default function NftWhitelistPage() {
                   <span key={i} className={i < step ? "zw-dot zw-dot-filled" : "zw-dot"} />
                 ))}
               </div>
-              {step < TOTAL_STEPS && (
+              {/* Brai, 2026-09-18 (v12, URGENT): step 1 no longer has a
+                  Continue button here -- CONNECT WITH X is the only action,
+                  and the wizard advances itself once X verification comes
+                  back (see the useEffect keyed on verifiedHandle above). */}
+              {step > 1 && step < TOTAL_STEPS && (
                 <button
                   className="btn btn-gold"
-                  disabled={
-                    (step === 1 && (!handleValid || checkingHandle)) ||
-                    (step === 2 && !addressValid) ||
-                    (step === 3 && !tasksAllDone)
-                  }
-                  onClick={() => (step === 1 ? continueFromStep1() : setStep(step + 1))}
+                  disabled={(step === 2 && !addressValid) || (step === 3 && !tasksAllDone)}
+                  onClick={() => setStep(step + 1)}
                 >
-                  {step === 1 && checkingHandle ? t("nftWhitelist.wizard.checking") : t("nftWhitelist.wizard.continue")}
+                  {t("nftWhitelist.wizard.continue")}
                 </button>
               )}
               {step === TOTAL_STEPS && (

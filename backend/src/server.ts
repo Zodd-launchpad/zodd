@@ -1384,12 +1384,39 @@ app.get("/api/nft/whitelist/config", async (_req, reply) => {
 // Brai, 2026-09-18 (v2): "no se necesita conectar la wallet para agregar,
 // solo hay que poner la wallet y el handle" -- no walletId/requireWallet
 // here on purpose, this route is reachable with no wallet at all.
+//
+// Brai, 2026-09-18 (v12, URGENT): "ahora me están conectando cualquier
+// handle y se están haciendo pasar por otra persona" -- a free-text handle
+// field can never be trusted, so this endpoint is being retired as a
+// public one. The frontend now verifies the handle for real via Twitter/X
+// OAuth (see frontend/app/api/auth/twitter/*) and relays the submission
+// through its own /api/nft/whitelist/submit proxy, which is the only
+// caller allowed to reach THIS route -- enforced by WHITELIST_INTERNAL_TOKEN
+// below, a secret shared only between the frontend and backend services (set
+// via Railway variables, never in git). Hitting this route directly with
+// an arbitrary twitterHandle -- exactly the exploit Brai's reporting --
+// stops working the moment that token is configured. Until then (var
+// unset) it stays open exactly as before, so this ships without breaking
+// the current, unverified flow -- it only locks down once WHITELIST_INTERNAL_TOKEN
+// is actually set, which happens in lockstep with deploying the new OAuth
+// frontend (see that commit).
+const WHITELIST_INTERNAL_TOKEN = process.env.WHITELIST_INTERNAL_TOKEN ?? null;
+let warnedWhitelistOpen = false;
+
 const nftWhitelistSubmitSchema = z.object({
   walletAddress: z.string().trim().min(1).max(200),
   twitterHandle: z.string().trim().min(1).max(20),
 });
 
 app.post("/api/nft/whitelist", async (req, reply) => {
+  if (WHITELIST_INTERNAL_TOKEN) {
+    if (req.headers["x-internal-token"] !== WHITELIST_INTERNAL_TOKEN) {
+      return reply.code(401).send({ error: "this endpoint requires going through the whitelist wizard" });
+    }
+  } else if (!warnedWhitelistOpen) {
+    warnedWhitelistOpen = true;
+    app.log.warn("WHITELIST_INTERNAL_TOKEN is not set -- /api/nft/whitelist accepts unverified handles from anyone");
+  }
   const body = nftWhitelistSubmitSchema.parse(req.body);
   const result = await store.submitNftWhitelistEntry(body.walletAddress, body.twitterHandle);
   if ("error" in result) return reply.code(400).send({ error: result.error });

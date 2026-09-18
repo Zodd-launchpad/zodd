@@ -231,11 +231,14 @@ export const api = {
   // to Twitter/X directly; it's a submit-and-wait-for-Brai queue.
   getNftWhitelistConfig: (): Promise<{ tweetUrl: string | null; twitterHandle: string | null; quoteCaption: string }> =>
     req("/api/nft/whitelist/config"),
-  // Brai, 2026-09-18 (v2): "no se necesita conectar la wallet para agregar,
-  // solo hay que poner la wallet y el handle" -- no wallet connection, just
-  // a pasted-in address.
-  submitNftWhitelist: (data: { walletAddress: string; twitterHandle: string }): Promise<NftWhitelistEntry> =>
-    req("/api/nft/whitelist", { method: "POST", body: JSON.stringify(data) }),
+  // Brai, 2026-09-18 (v12, URGENT, REMOVED): there used to be a
+  // submitNftWhitelist(walletAddress, twitterHandle) here that hit the
+  // backend directly with a client-supplied handle -- exactly the "type
+  // any handle you want" hole Brai reported people abusing. The wizard now
+  // posts to the frontend's own /api/nft/whitelist/submit route (see
+  // app/nft/whitelist/page.tsx submit()), which supplies the handle itself
+  // from a signed cookie set only by a real X OAuth login. Do not re-add a
+  // client-facing helper that takes a raw twitterHandle string.
   getNftWhitelistStatus: (walletAddress: string): Promise<{ entry: NftWhitelistEntry | null }> =>
     req(`/api/nft/whitelist/status/${encodeURIComponent(walletAddress)}`),
   // Brai, 2026-09-18 (v8): "si pones tu HANDLE y ya suscribiste te vaya a

@@ -205,12 +205,26 @@ export const translations = {
   "nftWhitelist.wizard.log2": { en: "reviewed by hand", zh: "人工审核" },
   "nftWhitelist.wizard.log3": { en: "waiting on you", zh: "等待你的操作" },
   "nftWhitelist.wizard.step1Label": { en: "X account", zh: "X 账号" },
-  "nftWhitelist.wizard.step1Heading": { en: "Your X handle", zh: "你的 X 账号" },
+  "nftWhitelist.wizard.step1Heading": { en: "Verify your X account", zh: "验证你的 X 账号" },
+  // Brai, 2026-09-18 (v12, URGENT): "me están conectando cualquier handle y
+  // se están haciendo pasar por otra persona ... que se conecte a Twitter"
+  // -- step 1 no longer accepts a typed handle at all. It has to be a real
+  // X login now, so the handle can never be someone else's.
   "nftWhitelist.wizard.step1Body": {
-    en: "Type your X (Twitter) handle — just the name, no @ needed, no login required.",
-    zh: "输入你的 X（推特）账号——只需用户名，不用加 @，也不需要登录。",
+    en: "Connect your X (Twitter) account so we can confirm the handle is really yours — no more typing it in by hand.",
+    zh: "连接你的 X（推特）账号，以便我们确认这确实是你本人的账号——不再需要手动输入。",
   },
-  "nftWhitelist.wizard.step1Set": { en: "@{handle} set", zh: "@{handle} 已设置" },
+  "nftWhitelist.wizard.connectX": { en: "CONNECT WITH X", zh: "连接 X 账号" },
+  "nftWhitelist.wizard.checkingX": { en: "Checking your X connection…", zh: "正在检查 X 连接状态…" },
+  "nftWhitelist.wizard.xConnected": { en: "Verified as @{handle}", zh: "已验证为 @{handle}" },
+  "nftWhitelist.wizard.xNotConfigured": {
+    en: "X verification isn't switched on yet — check back soon.",
+    zh: "X 验证功能尚未开启——请稍后再来查看。",
+  },
+  "nftWhitelist.wizard.xError": {
+    en: "Couldn't verify your X account. Try connecting again.",
+    zh: "无法验证你的 X 账号。请重新尝试连接。",
+  },
   "nftWhitelist.wizard.change": { en: "change", zh: "修改" },
   "nftWhitelist.wizard.step2Label": { en: "Wallet address", zh: "钱包地址" },
   "nftWhitelist.wizard.step2Heading": { en: "Your Zcash wallet address", zh: "你的 Zcash 钱包地址" },
