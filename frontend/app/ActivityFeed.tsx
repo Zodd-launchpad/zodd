@@ -7,6 +7,14 @@ import { useLanguage } from "@/lib/i18n";
 const POLL_MS = 4000;
 const MAX_ROWS = 18;
 
+// Brai, 2026-09-18 (v2, URGENT): "sacame del live activity todo lo
+// relacionado a NFT mientras probemos" -- NFT mint/list/sale events are
+// pulled out of the merged feed below while the collection is still being
+// tested (0.000001 ZEC test mint price etc). Token trades keep showing as
+// before. Flip this back to true to bring NFT rows back into Live Activity
+// once testing is done -- nothing else needs to change.
+const SHOW_NFT_IN_ACTIVITY = false;
+
 // Brai, 2026-09-08: "necsito movimiento en la pagina sino parece que nadie
 // esta comprando y vendiendo... hazme un panel a la izquierda que aprezca
 // las compras y ventas... como '0.01 zec to ZOOKCAT'. Compras en verdes
@@ -36,7 +44,7 @@ export default function ActivityFeed() {
       try {
         const [trades, nftRows] = await Promise.all([
           api.getRecentTradesGlobal(),
-          api.getNftActivity().catch(() => [] as NftActivity[]),
+          SHOW_NFT_IN_ACTIVITY ? api.getNftActivity().catch(() => [] as NftActivity[]) : Promise.resolve([] as NftActivity[]),
         ]);
         if (stopRef.current) return;
         const merged: Row[] = [

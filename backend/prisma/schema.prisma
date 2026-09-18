@@ -558,3 +558,23 @@ model NftWhitelistEntry {
   @@index([status])
   @@index([twitterHandle])
 }
+
+// Brai, 2026-09-18 (v10): "si te doy una lista para whitelistear aunque no
+// hayan hecho el whitelist... cuando entran completan todo y ponen
+// continue hasta el final al final le dice aprovedd directamente" -- a
+// standing list of handles (KOLs, giveaway winners, whatever list Brai
+// hands over) that skip manual review entirely. Deliberately a separate
+// table from NftWhitelistEntry rather than a pre-created row: at the time
+// Brai gives the list, none of these people have a wallet address on file
+// yet -- they still have to go through the wizard themselves to supply
+// one. submitNftWhitelistEntry checks this table by normalized handle and,
+// if present, creates the entry as APPROVED instead of PENDING.
+model NftWhitelistPreapproved {
+  id            String   @id @default(cuid())
+  // Same normalizeTwitterHandle() convention as NftWhitelistEntry.
+  twitterHandle String   @unique
+  // Free-text tag for which batch/list this came from (e.g. "KOL list
+  // 2026-09-18") -- purely for Brai's own bookkeeping, never shown to users.
+  note          String?
+  createdAt     DateTime @default(now())
+}

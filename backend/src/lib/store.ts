@@ -1845,12 +1845,59 @@ export async function submitNftWhitelistEntry(
   if (takenByAnotherAddress) {
     return { error: "that X/Twitter handle is already registered with another wallet address" };
   }
+  // Brai, 2026-09-18 (v10): "si te doy una lista para whitelistear... al
+  // final le dice aprovedd directamente" -- a handle on the standing
+  // pre-approved list (see NftWhitelistPreapproved) skips manual review:
+  // it goes straight to APPROVED the moment they finish the wizard and
+  // submit their wallet address, same as if Brai had reviewed it himself.
+  const preapproved = await prisma.nftWhitelistPreapproved.findUnique({ where: { twitterHandle: handle } });
+  const data = preapproved
+    ? { twitterHandle: handle, status: "APPROVED" as const, reviewedAt: new Date(), reviewNote: "pre-approved list" }
+    : { twitterHandle: handle, status: "PENDING" as const, reviewedAt: null, reviewNote: null };
   const entry = await prisma.nftWhitelistEntry.upsert({
     where: { walletAddress: address },
-    create: { walletAddress: address, twitterHandle: handle, status: "PENDING" },
-    update: { twitterHandle: handle, status: "PENDING", reviewedAt: null, reviewNote: null },
+    create: { walletAddress: address, ...data },
+    update: data,
   });
   return toNftWhitelistEntryView(entry);
+}
+
+/** Bulk-adds handles to the standing pre-approval list (see
+ * NftWhitelistPreapproved above). Idempotent -- re-adding an already
+ * pre-approved handle just updates its note. Returns the normalized
+ * handles that were (already) added, so the caller can sanity-check the
+ * count against the list they pasted in. */
+export async function preapproveNftWhitelistHandles(
+  rawHandles: string[],
+  note?: string
+): Promise<{ handle: string; alreadyEntered: boolean }[]> {
+  const results: { handle: string; alreadyEntered: boolean }[] = [];
+  for (const raw of rawHandles) {
+    const handle = normalizeTwitterHandle(raw);
+    if (!/^[a-z0-9_]{1,15}$/.test(handle)) continue;
+    await prisma.nftWhitelistPreapproved.upsert({
+      where: { twitterHandle: handle },
+      create: { twitterHandle: handle, note: note ?? null },
+      update: { note: note ?? null },
+    });
+    // If they already have a PENDING/REJECTED entry (submitted before Brai
+    // handed over the list), flip it to APPROVED right now too -- otherwise
+    // someone who already applied would be stuck waiting even though
+    // they're on the list.
+    const existing = await prisma.nftWhitelistEntry.findFirst({ where: { twitterHandle: handle } });
+    let alreadyEntered = false;
+    if (existing && existing.status !== "APPROVED") {
+      await prisma.nftWhitelistEntry.update({
+        where: { id: existing.id },
+        data: { status: "APPROVED", reviewedAt: new Date(), reviewNote: "pre-approved list" },
+      });
+      alreadyEntered = true;
+    } else if (existing) {
+      alreadyEntered = true;
+    }
+    results.push({ handle, alreadyEntered });
+  }
+  return results;
 }
 
 export async function getNftWhitelistEntry(walletAddress: string): Promise<NftWhitelistEntryView | null> {

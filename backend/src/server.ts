@@ -1440,6 +1440,25 @@ app.post("/api/admin/nft-whitelist/:id/review", async (req, reply) => {
   return reply.send(entry);
 });
 
+// Brai, 2026-09-18 (v10): "si te doy una lista para whitelistear aunque no
+// hayan hecho el whitelist... al final le dice aprovedd directamente" --
+// bulk pre-approve a list of handles (KOLs, giveaway winners, etc). They
+// still have to go through the wizard themselves to supply a wallet
+// address; submitNftWhitelistEntry checks this list and skips straight to
+// APPROVED for anyone on it.
+const nftWhitelistPreapproveSchema = z.object({
+  handles: z.array(z.string().trim().min(1).max(20)).min(1).max(2000),
+  note: z.string().max(200).optional(),
+});
+
+app.post("/api/admin/nft-whitelist/preapprove", async (req, reply) => {
+  if (!ADMIN_TOKEN) return reply.code(503).send({ error: "ADMIN_TOKEN is not configured" });
+  if (req.headers["x-admin-token"] !== ADMIN_TOKEN) return reply.code(401).send({ error: "unauthorized" });
+  const body = nftWhitelistPreapproveSchema.parse(req.body);
+  const results = await store.preapproveNftWhitelistHandles(body.handles, body.note);
+  return reply.send({ count: results.length, results });
+});
+
 // ---------- NFT: list / unlist / buy (secondary market, no offers) ----------
 
 const nftListSchema = z.object({
