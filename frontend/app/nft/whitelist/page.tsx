@@ -384,12 +384,13 @@ export default function NftWhitelistPage() {
           padding: 48px 16px;
           display: flex;
           justify-content: center;
+          align-items: flex-start;
         }
         .zw-layout {
           width: 100%;
           max-width: 900px;
           display: flex;
-          align-items: flex-start;
+          align-items: stretch;
           justify-content: center;
           gap: 24px;
         }
@@ -397,12 +398,9 @@ export default function NftWhitelistPage() {
           position: relative;
           width: 100%;
           max-width: 620px;
-          height: fit-content;
           box-shadow: 0 0 30px var(--glow-soft);
         }
         .zw-video-col {
-          position: sticky;
-          top: 48px;
           display: flex;
           flex-direction: column;
           gap: 12px;
@@ -410,6 +408,8 @@ export default function NftWhitelistPage() {
         }
         .zw-video-wrap {
           width: 190px;
+          flex: 1;
+          min-height: 0;
           flex-shrink: 0;
           border-radius: 10px;
           overflow: hidden;
@@ -419,7 +419,8 @@ export default function NftWhitelistPage() {
         .zw-video {
           display: block;
           width: 100%;
-          height: auto;
+          height: 100%;
+          object-fit: cover;
         }
         @media (max-width: 860px) {
           .zw-layout {
@@ -427,7 +428,6 @@ export default function NftWhitelistPage() {
             align-items: center;
           }
           .zw-video-col {
-            position: static;
             flex-direction: row;
             width: 100%;
             max-width: 620px;
@@ -435,6 +435,8 @@ export default function NftWhitelistPage() {
           }
           .zw-video-wrap {
             width: calc(33.333% - 8px);
+            flex: none;
+            aspect-ratio: 1 / 1;
           }
         }
         .zw-tick {
