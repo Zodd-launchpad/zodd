@@ -36,6 +36,13 @@ import { useLanguage } from "@/lib/i18n";
 // buttons, labels) is the site's normal chrome/sans-serif look, and the
 // reference's bracket-button "[ LIKE THIS ]" styling is gone in favor of
 // the site's real .btn-gold/.btn-outline pill buttons.
+//
+// Brai, 2026-09-18 (v5 bugfix): "pongo gordo_cripto y no me deja tocar
+// continue de handle" -- step 1 used to require pressing Enter to "lock"
+// the handle before Continue would enable, with no visible button for
+// that lock -- an invisible requirement, not a real step. Continue is now
+// gated on the typed handle being valid, full stop; the separate
+// locked/unlocked confirmation UI is gone.
 const ADDRESS_STORAGE_KEY = "zodd-nft-whitelist-address";
 const TOTAL_STEPS = 4;
 
@@ -47,7 +54,6 @@ export default function NftWhitelistPage() {
   const [entry, setEntry] = useState<NftWhitelistEntry | null | undefined>(undefined); // undefined = still loading
   const [step, setStep] = useState(1);
   const [handleInput, setHandleInput] = useState("");
-  const [handleLocked, setHandleLocked] = useState(false);
   const [addressInput, setAddressInput] = useState("");
   const [tasks, setTasks] = useState<Tasks>({ follow: false, likeRepost: false, quote: false });
   const [noirBusy, setNoirBusy] = useState(false);
@@ -79,7 +85,6 @@ export default function NftWhitelistPage() {
         if (r.entry) {
           setAddressInput(saved);
           setHandleInput(r.entry.twitterHandle);
-          setHandleLocked(true);
         }
       })
       .catch(() => setEntry(null));
@@ -148,7 +153,6 @@ export default function NftWhitelistPage() {
 
   function applyAgain() {
     setEntry(null);
-    setHandleLocked(false);
     setTasks({ follow: false, likeRepost: false, quote: false });
     setStep(1);
     setError(null);
@@ -222,25 +226,19 @@ export default function NftWhitelistPage() {
                 <div className="zw-step-label">01 &middot; {t("nftWhitelist.wizard.step1Label")}</div>
                 <h2 className="zw-heading">{t("nftWhitelist.wizard.step1Heading")}</h2>
                 <p className="muted">{t("nftWhitelist.wizard.step1Body")}</p>
-                {handleLocked ? (
-                  <p className="zw-connected mono">
-                    &gt; {t("nftWhitelist.wizard.step1Set", { handle: handleInput.trim() })}{" "}
-                    <button className="zw-link" onClick={() => setHandleLocked(false)}>
-                      {t("nftWhitelist.wizard.change")}
-                    </button>
-                  </p>
-                ) : (
-                  <div className="field">
-                    <label>{t("nftWhitelist.handleLabel")}</label>
-                    <input
-                      value={handleInput}
-                      onChange={(e) => setHandleInput(e.target.value.replace(/^@/, ""))}
-                      placeholder="yourhandle"
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && handleValid) setHandleLocked(true);
-                      }}
-                    />
-                  </div>
+                <div className="field">
+                  <label>{t("nftWhitelist.handleLabel")}</label>
+                  <input
+                    value={handleInput}
+                    onChange={(e) => setHandleInput(e.target.value.replace(/^@/, ""))}
+                    placeholder="yourhandle"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && handleValid) setStep(2);
+                    }}
+                  />
+                </div>
+                {handleValid && (
+                  <p className="zw-connected mono">&gt; {t("nftWhitelist.wizard.step1Set", { handle: handleInput.trim() })}</p>
                 )}
               </>
             )}
@@ -333,7 +331,7 @@ export default function NftWhitelistPage() {
               {step < TOTAL_STEPS && (
                 <button
                   className="btn btn-gold"
-                  disabled={(step === 1 && !(handleLocked && handleValid)) || (step === 2 && !addressValid) || (step === 3 && !tasksAllDone)}
+                  disabled={(step === 1 && !handleValid) || (step === 2 && !addressValid) || (step === 3 && !tasksAllDone)}
                   onClick={() => setStep(step + 1)}
                 >
                   {t("nftWhitelist.wizard.continue")}
