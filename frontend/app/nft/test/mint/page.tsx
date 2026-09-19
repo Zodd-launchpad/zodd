@@ -71,7 +71,11 @@ export default function NftMintPage() {
   // 5 segundos en aparecer... quiero que haya un cartel que diga WAIT" --
   // startMint below awaits the mint order + QR generation before flipping
   // phase to "waiting".
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  // Brai, 2026-09-19: "dice que soy elegible pero me dice que me va a
+  // cobrar los mints ... hacer dos botones, uno FREE MINT (solo 5, gratis)
+  // y otro BUY (compra normal)" -- tracks which of the two buttons is
+  // in flight, since they're now separate actions instead of one.
+  const [submitting, setSubmitting] = useState<"free" | "buy" | null>(null);
 
   useEffect(() => {
     api.getMode().then((m) => setIsRealMode(m.currencies.ZEC.mode === "real")).catch(() => {});
@@ -129,6 +133,11 @@ export default function NftMintPage() {
 
   const freeRemaining =
     whitelistEntry && collection ? Math.max(0, collection.whitelistFreeMintLimit - whitelistEntry.claimedCount) : null;
+  // Brai, 2026-09-19: how many the FREE MINT button actually grabs -- capped
+  // by whatever's left of the wallet's 5 free claims, the overall
+  // per-wallet cap, and remaining supply. No stepper for this one on
+  // purpose (Brai: "solo te deje mintear 5") -- it just claims all of it.
+  const freeMintQuantity = Math.max(0, Math.min(freeRemaining ?? 0, remainingWalletAllowance, remainingSupply));
 
   const unitPriceZec = collection?.mintPriceZec ?? 0;
   const totalPriceZec = unitPriceZec * quantity;
@@ -144,12 +153,12 @@ export default function NftMintPage() {
     }
   }
 
-  async function startMint() {
-    if (!wallet) return;
+  async function startMint(mintQuantity: number, which: "free" | "buy") {
+    if (!wallet || mintQuantity < 1) return;
     setError(null);
-    setIsSubmitting(true);
+    setSubmitting(which);
     try {
-      const result = await api.mintNft({ walletId: wallet.walletId, collectionSlug: COLLECTION_SLUG, quantity });
+      const result = await api.mintNft({ walletId: wallet.walletId, collectionSlug: COLLECTION_SLUG, quantity: mintQuantity });
       if ("free" in result) {
         // free whitelist/owner mint -- assigned immediately, nothing to pay
         const items = await Promise.all(
@@ -171,7 +180,7 @@ export default function NftMintPage() {
     } catch (e: any) {
       setError(e.message);
     } finally {
-      setIsSubmitting(false);
+      setSubmitting(null);
     }
   }
 
@@ -336,6 +345,17 @@ export default function NftMintPage() {
                     </p>
                   )}
 
+                  {freeMintQuantity > 0 && (
+                    <button
+                      className="btn btn-gold"
+                      style={{ width: "100%", marginBottom: 12 }}
+                      onClick={() => startMint(freeMintQuantity, "free")}
+                      disabled={submitting !== null}
+                    >
+                      {submitting === "free" ? t("common.wait") : t("nftMint.freeMintButton", { count: freeMintQuantity })}
+                    </button>
+                  )}
+
                   <div className="nft-mintpage-qty-row">
                     <span className="nft-mintpage-stage-label">{t("nftMint.quantity.label")}</span>
                     <div className="nft-mintpage-stepper">
@@ -385,8 +405,13 @@ export default function NftMintPage() {
                   </div>
 
                   {error && <p style={{ color: "var(--red)", fontSize: 13 }}>{error}</p>}
-                  <button className="btn btn-gold" style={{ width: "100%", marginTop: 10 }} onClick={startMint} disabled={isSubmitting}>
-                    {isSubmitting ? t("common.wait") : t("nftMint.confirmButton")}
+                  <button
+                    className="btn btn-outline"
+                    style={{ width: "100%", marginTop: 10 }}
+                    onClick={() => startMint(quantity, "buy")}
+                    disabled={submitting !== null}
+                  >
+                    {submitting === "buy" ? t("common.wait") : t("nftMint.buyButton")}
                   </button>
                 </>
               )}

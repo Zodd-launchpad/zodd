@@ -416,6 +416,16 @@ export const translations = {
   "nftMint.title": { en: "Mint · {name}", zh: "铸造 · {name}" },
   "nftMint.body": { en: "{remaining} of {total} left. You'll get a random piece from the collection.", zh: "剩余 {remaining} / {total} 件。你将随机获得系列中的一件作品。" },
   "nftMint.confirmButton": { en: "Mint now", zh: "立即铸造" },
+  // Brai, 2026-09-19: "hacer dos botones, uno que se habilite cuando el
+  // handled es positivo para pre aprobed y solo te deje mintear 5 y otro
+  // que sea para comprar normal ... como que digan, FREE MINT / y el otro
+  // BUY" -- the total price row used to always show the full paid price
+  // even for a whitelist-eligible wallet with free claims left, which read
+  // as "it's charging me" despite the backend actually giving those free.
+  // Split into two explicit buttons instead of one ambiguous one.
+  "nftMint.freeMintButton": { en: "FREE MINT ({count})", zh: "免费铸造（{count}）" },
+  "nftMint.buyButton": { en: "BUY", zh: "购买" },
+  "nftMint.total.free": { en: "FREE", zh: "免费" },
   "nftMint.waitingBody": { en: "Send the exact amount below. Your piece is revealed automatically once payment is detected.", zh: "请发送下方准确金额。检测到付款后将自动为你揭示作品。" },
   "nftMint.revealed.badge": { en: "YOU MINTED", zh: "铸造成功" },
   "nftMint.revealed.viewItem": { en: "View piece", zh: "查看作品" },
