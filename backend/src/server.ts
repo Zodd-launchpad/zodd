@@ -2,7 +2,7 @@ import Fastify from "fastify";
 import { z } from "zod";
 import * as store from "./lib/store.js";
 import { generateTwelveWords } from "./lib/wordlist.js";
-import { quoteBuy, quoteSell, currentPrice, marketCapZec, isGraduated } from "./lib/bondingCurve.js";
+import { quoteBuy, quoteSell, currentPrice, marketCapZec } from "./lib/bondingCurve.js";
 import { simulatedInscriptionFor } from "./lib/simulatedChain.js";
 import { splitFee, TRADE_FEE_BPS, CREATOR_FEE_BPS, TOKEN_CREATE_FEE_ZEC, TOKEN_CREATE_FEE_YEC, createFeeFor, computeSellerPayout, NETWORK_FEE_ZEC, MAX_FIRST_BUY_ZEC, splitNftFee } from "./lib/fees.js";
 import { startFeeDistributor, runFeeDistributionOnce } from "./lib/feeDistributor.js";
@@ -246,6 +246,11 @@ const createTokenSchema = z.object({
   // no bundled buy, exactly today's behavior. See the cap check in the
   // route below for why this can't be as large as the reference launchpad's.
   firstBuyZec: z.number().min(0).optional(),
+  // Brai, 2026-09-19: "LA PIRAMIDE" -- only settable by a wallet that
+  // currently holds at least 1 reliquia (checked in the route below via
+  // store.walletOwnsReliquia). Sets a 3 ZEC graduation threshold instead
+  // of the normal default -- see graduationThresholdFor in store.ts.
+  isPyramidToken: z.boolean().optional(),
 });
 
 /** Accepts "@handle", "handle", or a full URL and normalizes to a full
@@ -288,6 +293,15 @@ app.post("/api/tokens", async (req, reply) => {
   const creatorWallet = await store.getWallet(body.creatorWalletId);
   if (!creatorWallet) {
     return reply.code(400).send({ error: "invalid creatorWalletId" });
+  }
+  // Brai, 2026-09-19: "tener la reliquia hace que tengas el privilegio de
+  // entrar" a LA PIRAMIDE -- checked here, at creation time, not just on
+  // the frontend, so this can never be bypassed by calling the API
+  // directly. Live ownership check (see walletOwnsReliquia's comment):
+  // holding zero reliquias right now blocks it even if this wallet held
+  // one yesterday.
+  if (body.isPyramidToken && !(await store.walletOwnsReliquia(body.creatorWalletId))) {
+    return reply.code(403).send({ error: "you need to own a reliquia to create a token in LA PIRAMIDE" });
   }
   const currency = body.currency;
   // Brai, 2026-09-11: creatorPayoutAddress must actually belong to the
@@ -341,6 +355,7 @@ app.post("/api/tokens", async (req, reply) => {
     websiteUrl: normalizeWebsite(body.websiteUrl),
     expectedZecAmount: totalZec,
     firstBuyZec,
+    isPyramidToken: body.isPyramidToken ?? false,
   });
 
   let zecAddress: string;
@@ -383,6 +398,17 @@ app.post("/api/tokens", async (req, reply) => {
     memo: wallet.buildPaymentMemoBase64(pending.id),
     status: "PENDING",
   });
+});
+
+// Brai, 2026-09-19: "tener la reliquia hace que tengas el privilegio de
+// entrar a esa pestaña" -- LA PIRAMIDE's own frontend gate check (the real
+// enforcement is server-side, in POST /api/tokens above; this is just so
+// the UI can show/hide the tab without guessing from a full NFT fetch).
+app.get("/api/pyramid/access", async (req, reply) => {
+  const q = z.object({ walletId: z.string() }).safeParse(req.query);
+  if (!q.success) return reply.code(400).send({ error: "expected ?walletId=" });
+  const hasAccess = await store.walletOwnsReliquia(q.data.walletId);
+  return reply.send({ hasAccess });
 });
 
 app.get("/api/token-creations/:id", async (req, reply) => {
@@ -431,6 +457,9 @@ app.get("/api/trades", async (req, reply) => {
 
 async function serializeToken(t: store.TokenWithCurve) {
   const priceZec = currentPrice(t.curve);
+  // Brai, 2026-09-19: LA PIRAMIDE -- a pyramid token graduates at its own
+  // (lower) threshold, see graduationThresholdFor in store.ts.
+  const graduationThresholdZec = store.graduationThresholdFor(t);
   return {
     symbol: t.symbol,
     name: t.name,
@@ -442,8 +471,9 @@ async function serializeToken(t: store.TokenWithCurve) {
     marketCapZec: marketCapZec(t.curve, t.totalSupply),
     realZecReserves: t.curve.realZecReserves,
     tokensSold: t.curve.tokensSold,
-    graduated: isGraduated(t.curve),
-    graduationThresholdZec: store.DEFAULT_CURVE_CONFIG.graduationZecThreshold,
+    graduated: t.curve.realZecReserves >= graduationThresholdZec,
+    graduationThresholdZec,
+    isPyramidToken: t.isPyramidToken,
     createdAt: t.createdAt,
     logoDataUrl: t.logoDataUrl,
     description: t.description,
@@ -633,7 +663,7 @@ async function handlePaymentDetected(orderId: string, confirmedZecAmount: number
               await withTokenLock(token.id, async () => {
                 const { net, creatorFee, platformFee } = splitFee(actualFirstBuyZec);
                 const { tokensOut, newState } = quoteBuy(token.curve, net);
-                await store.updateTokenCurve(token.id, newState);
+                await store.updateTokenCurve(token.id, newState, store.graduationThresholdFor(token));
                 await store.recordPricePoint(token.id, newState, token.totalSupply);
                 await store.creditBalance(token.creatorWalletId, token.id, tokensOut);
                 await store.accrueFees(token.id, creatorFee, platformFee);
@@ -704,7 +734,7 @@ async function handlePaymentDetected(orderId: string, confirmedZecAmount: number
       // as any DEX-style fee-on-top model).
       const { net, creatorFee, platformFee } = splitFee(confirmedZecAmount);
       const { tokensOut, newState } = quoteBuy(token.curve, net);
-      await store.updateTokenCurve(token.id, newState);
+      await store.updateTokenCurve(token.id, newState, store.graduationThresholdFor(token));
       await store.recordPricePoint(token.id, newState, token.totalSupply);
       await store.creditBalance(order.internalWalletId, token.id, tokensOut);
       await store.accrueFees(token.id, creatorFee, platformFee);
@@ -884,7 +914,7 @@ app.post("/api/orders/sell", async (req, reply) => {
 
       const { txid } = await walletService.sendPayout(body.refundAddress, sellerPayout);
 
-      await store.updateTokenCurve(token.id, newState);
+      await store.updateTokenCurve(token.id, newState, store.graduationThresholdFor(token));
       await store.recordPricePoint(token.id, newState, token.totalSupply);
       await store.debitBalance(wallet.id, token.id, body.tokenAmount);
       await store.accrueFees(token.id, creatorFee, platformFee);
@@ -1223,6 +1253,38 @@ app.get("/api/nft/collections/:slug/traits", async (req, reply) => {
   if (!collection) return reply.code(404).send({ error: "collection not found" });
   const traits = await store.getNftTraitCounts(collection.id);
   return reply.send({ traits });
+});
+
+// ---------- Forge: papiros -> fragmentos -> reliquias ----------
+// Brai, 2026-09-19: "genera una solapa que sea como la forja" -- see
+// store.ts's FORGE_RECIPES/forgeCraft for the actual burn+mint mechanics.
+app.get("/api/nft/collections/:slug/forge", async (req, reply) => {
+  const { slug } = req.params as { slug: string };
+  const q = z.object({ walletId: z.string() }).safeParse(req.query);
+  if (!q.success) return reply.code(400).send({ error: "expected ?walletId=" });
+  const collection = await store.getNftCollectionBySlug(slug);
+  if (!collection) return reply.code(404).send({ error: "collection not found" });
+  const inventory = await store.getForgeInventory(q.data.walletId, collection.id);
+  return reply.send({ inventory, recipes: store.FORGE_RECIPES });
+});
+
+const nftForgeCraftSchema = z.object({
+  walletId: z.string(),
+  fromTier: z.enum(["PAPIRO", "FRAGMENTO"]),
+});
+app.post("/api/nft/collections/:slug/forge/craft", async (req, reply) => {
+  const { slug } = req.params as { slug: string };
+  const body = nftForgeCraftSchema.parse(req.body);
+  const collection = await store.getNftCollectionBySlug(slug);
+  if (!collection) return reply.code(404).send({ error: "collection not found" });
+  const wallet = await store.getWallet(body.walletId);
+  if (!wallet) return reply.code(400).send({ error: "invalid wallet" });
+  const result = await store.forgeCraft(body.walletId, collection.id, body.fromTier);
+  if (!result) {
+    const need = store.FORGE_RECIPES[body.fromTier].count;
+    return reply.code(409).send({ error: `you need ${need} unlisted ${body.fromTier.toLowerCase()}(s) to craft this` });
+  }
+  return reply.send(result);
 });
 
 app.get("/api/nft/collections/:slug/items/:editionNumber", async (req, reply) => {

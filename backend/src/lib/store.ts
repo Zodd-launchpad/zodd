@@ -157,6 +157,10 @@ export interface TokenWithCurve {
   description: string | null;
   twitterUrl: string | null;
   websiteUrl: string | null;
+  // Brai, 2026-09-19: LA PIRAMIDE -- see graduationThresholdFor below and
+  // Token.isPyramidToken/graduationZecThresholdOverride in schema.prisma.
+  isPyramidToken: boolean;
+  graduationZecThresholdOverride: number | null;
 }
 
 function toTokenWithCurve(t: {
@@ -179,6 +183,8 @@ function toTokenWithCurve(t: {
   description: string | null;
   twitterUrl: string | null;
   websiteUrl: string | null;
+  isPyramidToken?: boolean;
+  graduationZecThresholdOverride?: unknown;
 }): TokenWithCurve {
   return {
     id: t.id,
@@ -199,7 +205,18 @@ function toTokenWithCurve(t: {
     description: t.description,
     twitterUrl: t.twitterUrl,
     websiteUrl: t.websiteUrl,
+    isPyramidToken: t.isPyramidToken ?? false,
+    graduationZecThresholdOverride: t.graduationZecThresholdOverride != null ? num(t.graduationZecThresholdOverride) : null,
   };
+}
+
+/** The real graduation threshold to use for this token's curve -- 3 ZEC
+ * for a Pyramid token (Brai, 2026-09-19: "una curva que a los 3 ZEC
+ * bondean"), otherwise the normal DEFAULT_CURVE_CONFIG default. The curve
+ * SHAPE (virtualZecReserves/virtualTokenReserves, so price impact per
+ * trade) never changes per-token -- only this one number does. */
+export function graduationThresholdFor(token: { graduationZecThresholdOverride: number | null }): number {
+  return token.graduationZecThresholdOverride ?? DEFAULT_CURVE_CONFIG.graduationZecThreshold;
 }
 
 export async function createToken(input: {
@@ -224,6 +241,11 @@ export async function createToken(input: {
   description?: string;
   twitterUrl?: string;
   websiteUrl?: string;
+  /** Brai, 2026-09-19: "LA PIRAMIDE" -- true only for a token created
+   * through the reliquia-gated flow (checked by the caller via
+   * walletOwnsReliquia before this ever runs). Sets a 3 ZEC graduation
+   * threshold instead of the normal default -- see graduationThresholdFor. */
+  isPyramidToken?: boolean;
 }): Promise<TokenWithCurve> {
   const t = await prisma.token.create({
     data: {
@@ -240,6 +262,8 @@ export async function createToken(input: {
       description: input.description ?? null,
       twitterUrl: input.twitterUrl ?? null,
       websiteUrl: input.websiteUrl ?? null,
+      isPyramidToken: input.isPyramidToken ?? false,
+      graduationZecThresholdOverride: input.isPyramidToken ? 3 : null,
     },
   });
   const token = toTokenWithCurve(t);
@@ -280,8 +304,8 @@ export async function setTokensHidden(symbols: string[], hidden: boolean): Promi
   return { updated, notFound };
 }
 
-export async function updateTokenCurve(tokenId: string, curve: CurveState) {
-  const graduated = curve.realZecReserves >= DEFAULT_CURVE_CONFIG.graduationZecThreshold;
+export async function updateTokenCurve(tokenId: string, curve: CurveState, graduationZecThreshold: number = DEFAULT_CURVE_CONFIG.graduationZecThreshold) {
+  const graduated = curve.realZecReserves >= graduationZecThreshold;
   await prisma.token.update({
     where: { id: tokenId },
     data: {
@@ -1125,6 +1149,10 @@ export async function createPendingTokenCreation(input: {
   /** Bundled first-buy portion of expectedZecAmount -- see the schema
    * comment on PendingTokenCreation. Defaults to 0 (no bundled buy). */
   firstBuyZec?: number;
+  /** Brai, 2026-09-19: "LA PIRAMIDE" -- caller already ran
+   * walletOwnsReliquia before reserving this. Carried through the payment
+   * wait so completePendingTokenCreation can set it on the real Token. */
+  isPyramidToken?: boolean;
 }) {
   const p = await prisma.pendingTokenCreation.create({
     data: {
@@ -1138,6 +1166,7 @@ export async function createPendingTokenCreation(input: {
       description: input.description ?? null,
       twitterUrl: input.twitterUrl ?? null,
       websiteUrl: input.websiteUrl ?? null,
+      isPyramidToken: input.isPyramidToken ?? false,
       expectedZecAmount: input.expectedZecAmount,
       firstBuyZec: input.firstBuyZec ?? 0,
     },
@@ -1210,6 +1239,7 @@ export async function completePendingTokenCreation(id: string, genesisMemoTxid: 
     description: p.description ?? undefined,
     twitterUrl: p.twitterUrl ?? undefined,
     websiteUrl: p.websiteUrl ?? undefined,
+    isPyramidToken: p.isPyramidToken,
   });
 
   await prisma.pendingTokenCreation.update({
@@ -1268,7 +1298,7 @@ export async function recomputeCurveFromOrders(tokenId: string): Promise<{ befor
     }
   }
 
-  const graduated = state.realZecReserves >= DEFAULT_CURVE_CONFIG.graduationZecThreshold;
+  const graduated = state.realZecReserves >= graduationThresholdFor({ graduationZecThresholdOverride: token.graduationZecThresholdOverride != null ? num(token.graduationZecThresholdOverride) : null });
   await prisma.token.update({
     where: { id: tokenId },
     data: {
@@ -1390,6 +1420,8 @@ export interface NftItemView {
   // is selling this piece". Needed by the buy route (server.ts) without a
   // second lookup.
   listedPayoutAddress: string | null;
+  // Brai, 2026-09-19: forge tiers -- see NftTier's comment in schema.prisma.
+  tier: "PAPIRO" | "FRAGMENTO" | "RELIQUIA";
 }
 
 function toNftItemView(i: {
@@ -1406,6 +1438,7 @@ function toNftItemView(i: {
   listedPriceZec: unknown;
   listedAt: Date | null;
   listedPayoutAddress: string | null;
+  tier: string;
 }): NftItemView {
   return {
     id: i.id,
@@ -1421,6 +1454,7 @@ function toNftItemView(i: {
     listedPriceZec: i.listedPriceZec != null ? num(i.listedPriceZec) : null,
     listedAt: i.listedAt ? i.listedAt.toISOString() : null,
     listedPayoutAddress: i.listedPayoutAddress,
+    tier: i.tier as NftItemView["tier"],
   };
 }
 
@@ -1436,7 +1470,10 @@ export async function listNftItems(
 ): Promise<{ items: NftItemView[]; total: number }> {
   const pageSize = Math.min(opts.pageSize ?? 48, 100);
   const page = Math.max(opts.page ?? 1, 1);
-  const where: Record<string, unknown> = { collectionId };
+  // Brai, 2026-09-19: a burned piece (fed into the forge, see forgeCraft)
+  // never shows up in the marketplace again, same as Token.hidden dropping
+  // a token out of every public listing while keeping its row for history.
+  const where: Record<string, unknown> = { collectionId, burnedAt: null };
   if (opts.status === "listed") where.listedPriceZec = { not: null };
   // Brai, 2026-09-19 (v14): "Not listed" chip on the Items tab (copying
   // zecbit.net) -- deliberately includes not-yet-minted pieces too, same as
@@ -1504,7 +1541,7 @@ export async function getNftItemById(id: string): Promise<NftItemView | null> {
 
 export async function getWalletNfts(walletId: string): Promise<NftItemView[]> {
   const rows = await prisma.nftItem.findMany({
-    where: { ownerInternalWalletId: walletId },
+    where: { ownerInternalWalletId: walletId, burnedAt: null },
     orderBy: { mintedAt: "desc" },
     include: { ownerInternalWallet: { select: { walletTag: true } } },
   });
@@ -1522,7 +1559,9 @@ export async function listNftForSale(
   payoutAddress: string
 ): Promise<NftItemView | null> {
   const result = await prisma.nftItem.updateMany({
-    where: { id: itemId, ownerInternalWalletId: walletId },
+    // burnedAt: null -- a piece fed into the forge (see forgeCraft) can
+    // never be re-listed, even though its row (and its owner) still exist.
+    where: { id: itemId, ownerInternalWalletId: walletId, burnedAt: null },
     data: { listedPriceZec: priceZec, listedAt: new Date(), listedPayoutAddress: payoutAddress },
   });
   if (result.count === 0) return null;
@@ -1536,6 +1575,106 @@ export async function unlistNft(itemId: string, walletId: string): Promise<NftIt
   });
   if (result.count === 0) return null;
   return getNftItemById(itemId);
+}
+
+// ---------- Forge: papiros -> fragmentos -> reliquias ----------
+// Brai, 2026-09-19: "si tenes 5 papiros podes crear 1 fragmento, si tenes 3
+// fragmentos podes crear una reliquia". Only PAPIRO pieces are ever minted
+// directly from a collection's pool (claimRandomUnmintedNftItem) --
+// FRAGMENTO and RELIQUIA only ever come from crafting here.
+export const FORGE_RECIPES: Record<"PAPIRO" | "FRAGMENTO", { toTier: "FRAGMENTO" | "RELIQUIA"; count: number }> = {
+  PAPIRO: { toTier: "FRAGMENTO", count: 5 },
+  FRAGMENTO: { toTier: "RELIQUIA", count: 3 },
+};
+
+/** How many not-listed, already-minted pieces of each tier this wallet
+ * actually has available to feed into the forge, in this collection.
+ * Deliberately excludes listed pieces (see forgeCraft's comment) and
+ * burned ones (already spent). */
+export async function getForgeInventory(walletId: string, collectionId: string): Promise<{ papiro: number; fragmento: number; reliquia: number }> {
+  const rows = await prisma.nftItem.groupBy({
+    by: ["tier"],
+    where: { collectionId, ownerInternalWalletId: walletId, burnedAt: null, listedPriceZec: null, mintedAt: { not: null } },
+    _count: { _all: true },
+  });
+  const counts = { papiro: 0, fragmento: 0, reliquia: 0 };
+  for (const r of rows as { tier: string; _count: { _all: number } }[]) {
+    if (r.tier === "PAPIRO") counts.papiro = r._count._all;
+    else if (r.tier === "FRAGMENTO") counts.fragmento = r._count._all;
+    else if (r.tier === "RELIQUIA") counts.reliquia = r._count._all;
+  }
+  return counts;
+}
+
+/**
+ * Burns FORGE_RECIPES[fromTier].count pieces of fromTier owned by this
+ * wallet (unlisted, already-minted, not already burned) and mints exactly
+ * one brand-new piece of the next tier up, owned by the same wallet.
+ * Returns null when the wallet doesn't have enough eligible pieces right
+ * now (same "didn't work, nothing changed" convention as
+ * listNftForSale/unlistNft returning null on a failed owner check).
+ *
+ * Race-safe the same way fillNftPurchase is: the burn is a single
+ * conditional UPDATE (WHERE id IN (...) AND burnedAt IS NULL) inside a
+ * transaction, so if two requests somehow raced for the exact same rows,
+ * whichever commits first wins and the loser's updateMany.count comes back
+ * short -- caught below and turned into a clean rollback + null, instead of
+ * ever burning fewer than the full recipe count or minting without a full
+ * burn to back it.
+ */
+export async function forgeCraft(walletId: string, collectionId: string, fromTier: "PAPIRO" | "FRAGMENTO"): Promise<NftItemView | null> {
+  const recipe = FORGE_RECIPES[fromTier];
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const candidates = await tx.nftItem.findMany({
+        where: { collectionId, ownerInternalWalletId: walletId, tier: fromTier, burnedAt: null, listedPriceZec: null, mintedAt: { not: null } },
+        take: recipe.count,
+        select: { id: true },
+      });
+      if (candidates.length < recipe.count) return null;
+      const ids = candidates.map((c) => c.id);
+      const burned = await tx.nftItem.updateMany({
+        where: { id: { in: ids }, ownerInternalWalletId: walletId, burnedAt: null },
+        data: { burnedAt: new Date() },
+      });
+      if (burned.count !== recipe.count) {
+        throw new Error("__forge_race_lost__");
+      }
+      // Crafted pieces aren't part of the collection's pre-seeded pool (see
+      // NftItem.editionNumber's comment), so they get their own edition
+      // number continuing past whatever the pool's highest number is.
+      const agg = await tx.nftItem.aggregate({ where: { collectionId }, _max: { editionNumber: true } });
+      const nextEdition = (agg._max.editionNumber ?? 0) + 1;
+      const created = await tx.nftItem.create({
+        data: {
+          collectionId,
+          editionNumber: nextEdition,
+          name: `${recipe.toTier === "FRAGMENTO" ? "Fragmento" : "Reliquia"} #${nextEdition}`,
+          tier: recipe.toTier,
+          mintedAt: new Date(),
+          mintPaymentTxid: "FORGED",
+          ownerInternalWalletId: walletId,
+        },
+        include: { ownerInternalWallet: { select: { walletTag: true } } },
+      });
+      return toNftItemView(created);
+    });
+  } catch (err) {
+    if (err instanceof Error && err.message === "__forge_race_lost__") return null;
+    throw err;
+  }
+}
+
+/** Gate for LA PIRAMIDE (see createPendingTokenCreation's isPyramidToken):
+ * "tener la reliquia hace que tengas el privilegio de entrar" -- checked
+ * live off current ownership, not a one-time unlock, so selling your only
+ * reliquia closes the door again (per Brai's choice on this). */
+export async function walletOwnsReliquia(walletId: string): Promise<boolean> {
+  const found = await prisma.nftItem.findFirst({
+    where: { ownerInternalWalletId: walletId, tier: "RELIQUIA", burnedAt: null },
+    select: { id: true },
+  });
+  return found != null;
 }
 
 // Brai, 2026-09-18 (NFT marketplace launch): "empeza a deployar la pagina"

@@ -98,6 +98,15 @@ model Token {
   curveSoldTokens   BigInt   @default(0)        // tokens ya vendidos por la curva
   graduated         Boolean  @default(false)
   graduatedAt       DateTime?
+  // Brai, 2026-09-19: "LA PIRAMIDE... estos tokens, tienen una curva que a
+  // los 3 ZEC bondean, luego pasan al general" -- un token de la pirámide
+  // (solo creable teniendo 1 reliquia, ver walletOwnsReliquia) gradúa a los
+  // 3 ZEC en vez de los DEFAULT_CURVE_CONFIG.graduationZecThreshold
+  // normales; null = usa el default de siempre (todo token no-pirámide).
+  // La forma de la curva (precio, virtualZecReserves/virtualTokenReserves)
+  // no cambia -- solo este umbral, ver graduationThresholdFor en store.ts.
+  graduationZecThresholdOverride Decimal? @db.Decimal(20, 8)
+  isPyramidToken                 Boolean  @default(false)
 
   // Fee de trading (ver lib/fees.ts): 3% por operación, de los cuales 1
   // punto porcentual se acumula acá y se reparte al creador cada 24hs;
@@ -246,6 +255,12 @@ model PendingTokenCreation {
   // through the bonding curve once the token exists. 0 (the default) means
   // no bundled buy -- exactly today's behavior.
   firstBuyZec          Decimal             @default(0) @db.Decimal(20, 8)
+  // Brai, 2026-09-19: "LA PIRAMIDE" -- reservado al momento del POST
+  // /api/tokens (donde ya se verificó walletOwnsReliquia), sobrevive la
+  // espera del pago, y completePendingTokenCreation lo usa para marcar el
+  // Token resultante como isPyramidToken con graduationZecThresholdOverride
+  // = 3 en vez del default normal.
+  isPyramidToken       Boolean             @default(false)
   status               TokenCreationStatus @default(PENDING)
   resultTokenId        String?
   createdAt            DateTime            @default(now())
@@ -371,15 +386,35 @@ model NftCollection {
 // (PendingNftMint abajo) solo le asigna al azar una fila YA EXISTENTE a
 // quien pagó; nunca crea filas al vuelo, así que "cuántas quedan" es un
 // COUNT plano.
+// Brai, 2026-09-19: "habra 3 tipos de nfts.. los papiros, los fragmentos y
+// las reliquias" -- la forja (ver forgeCraft en store.ts): 5 PAPIRO ->
+// 1 FRAGMENTO, 3 FRAGMENTO -> 1 RELIQUIA. Toda pieza minteada del pool
+// normal nace PAPIRO (ver claimRandomUnmintedNftItem); FRAGMENTO y
+// RELIQUIA solo nacen por crafteo, nunca por mint directo.
+enum NftTier {
+  PAPIRO
+  FRAGMENTO
+  RELIQUIA
+}
+
 model NftItem {
   id             String    @id @default(cuid())
   collectionId   String
-  editionNumber  Int // 1..totalSupply, identidad estable de la pieza
+  editionNumber  Int // 1..totalSupply para el pool sembrado; las piezas crafteadas (ver forgeCraft) toman números por encima de eso, asignados on-the-fly
   name           String? // ej. "ZODD #61" -- opcional, si falta se muestra "#<editionNumber>"
   imageDataUrl   String?   @db.Text
   traits         Json? // mapa opcional {trait: valor}, se muestra en la página del item si existe
   mintedAt       DateTime?
-  mintPaymentTxid String? // txid real que pagó el mint
+  mintPaymentTxid String? // txid real que pagó el mint, o "FORGED" si esta pieza nació de un crafteo en la forja (ver forgeCraft)
+
+  tier NftTier @default(PAPIRO)
+  // Brai, 2026-09-19: "los papiros... podes crear 1 fragmento" -- crafteo
+  // consume (quema) N piezas del tier inferior para crear 1 del tier
+  // superior. Una pieza quemada nunca se borra (mismo espíritu que
+  // Token.hidden: se conserva el historial) -- simplemente queda excluida
+  // de todo lo demás (inventario del dueño, listado del mercado, conteos)
+  // por tener burnedAt no-null. Ver forgeCraft en store.ts.
+  burnedAt DateTime?
 
   ownerInternalWalletId String? // null = todavía no minteada
 
@@ -403,6 +438,7 @@ model NftItem {
   @@unique([collectionId, editionNumber])
   @@index([collectionId, ownerInternalWalletId])
   @@index([collectionId, listedPriceZec])
+  @@index([ownerInternalWalletId, tier, burnedAt])
 }
 
 // Mismo mecanismo que PendingTokenCreation: se paga una dirección real de
