@@ -28,6 +28,13 @@ type AccessState = "checking" | "locked" | "unlocked";
 // back to true when it's ready for real users.
 const PYRAMID_OPEN = false;
 
+// Brai, 2026-09-19: "cuando tocas ir a forjar que no te mande a el minteo de
+// test que estamos haciendo" -- the Forge/mint flow is still closed (see
+// MINT_OPEN in nft/test/mint/page.tsx), so don't send anyone from here to
+// /nft/test yet. Flip back to true together with MINT_OPEN once minting is
+// actually open to the public.
+const FORGE_LINK_OPEN = false;
+
 export default function PyramidCreatePage() {
   const { wallet } = useWallet();
   const { t } = useLanguage();
@@ -242,9 +249,11 @@ export default function PyramidCreatePage() {
         <div className="card nft-forge-reliquia-note" style={{ textAlign: "center" }}>
           <h3 style={{ marginTop: 0 }}>{t("pyramid.locked.title")}</h3>
           <p className="muted">{t("pyramid.locked.body")}</p>
-          <Link href="/nft/test" className="btn btn-gold" style={{ display: "block", marginTop: 12 }}>
-            {t("pyramid.locked.goToForge")}
-          </Link>
+          {FORGE_LINK_OPEN && (
+            <Link href="/nft/test" className="btn btn-gold" style={{ display: "block", marginTop: 12 }}>
+              {t("pyramid.locked.goToForge")}
+            </Link>
+          )}
         </div>
       </div>
     );
