@@ -49,6 +49,7 @@ export default function NftItemPage() {
   const [listing, setListing] = useState(false);
 
   // Buy flow (non-owner, listed piece)
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [buyPhase, setBuyPhase] = useState<BuyPhase>("idle");
   const [purchaseId, setPurchaseId] = useState<string | null>(null);
   const [address, setAddress] = useState<string | null>(null);
@@ -131,6 +132,7 @@ export default function NftItemPage() {
   async function startBuy() {
     if (!wallet || !item) return;
     setError(null);
+    setIsSubmitting(true);
     try {
       const result = await api.buyNftItem(item.id, wallet.walletId);
       setPurchaseId(result.purchaseId);
@@ -142,6 +144,8 @@ export default function NftItemPage() {
       setBuyPhase("waiting");
     } catch (e: any) {
       setError(e.message);
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
@@ -260,8 +264,8 @@ export default function NftItemPage() {
                   {!wallet ? (
                     <p className="muted">{t("portfolio.connectFirst")}</p>
                   ) : (
-                    <button className="btn btn-gold" style={{ width: "100%" }} onClick={startBuy}>
-                      {t("nftItem.buyButton")}
+                    <button className="btn btn-gold" style={{ width: "100%" }} onClick={startBuy} disabled={isSubmitting}>
+                      {isSubmitting ? t("common.wait") : t("nftItem.buyButton")}
                     </button>
                   )}
                 </>
