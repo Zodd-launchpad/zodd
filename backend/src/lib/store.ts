@@ -1939,6 +1939,41 @@ export async function seedTieredNftCollection(
   return { collectionId: collection.id, totalSupply, wipedItems };
 }
 
+// Brai, 2026-09-19: "la foto se ve toda dañada en colores raros" -- the
+// tiered reseed above went through a manual relay step to get the base64
+// image data into the deploy pipeline, and that step silently corrupted a
+// few characters of two of the three images (confirmed: production length
+// didn't match the source file length for PAPIRO and RELIQUIA). Rather than
+// re-run the full wipe+reseed (which would also discard the one piece
+// that's already been minted), this updates just the three tier-image
+// fields in place -- items and everything else are untouched. expectedMd5
+// is optional but should always be sent: it's an md5 of the imageDataUrl
+// string computed on the source side, checked against the same hash
+// computed here, so a corrupted relay fails loudly instead of writing bad
+// data again.
+export async function updateNftCollectionTierImage(
+  slug: string,
+  tier: "PAPIRO" | "FRAGMENTO" | "RELIQUIA",
+  imageDataUrl: string,
+  expectedMd5?: string
+): Promise<{ collectionId: string; tier: string; length: number; md5: string }> {
+  if (!imageDataUrl || !imageDataUrl.startsWith("data:image/")) {
+    throw new Error("imageDataUrl must be a data:image/... URL");
+  }
+  const md5 = createHash("md5").update(imageDataUrl).digest("hex");
+  if (expectedMd5 && expectedMd5 !== md5) {
+    throw new Error(`md5 mismatch: expected ${expectedMd5}, computed ${md5} (relay likely corrupted the data -- not writing it)`);
+  }
+  const collection = await prisma.nftCollection.findUnique({ where: { slug } });
+  if (!collection) throw new Error(`collection ${slug} not found`);
+
+  const field =
+    tier === "PAPIRO" ? "papiroImageDataUrl" : tier === "FRAGMENTO" ? "fragmentoImageDataUrl" : "reliquiaImageDataUrl";
+  await prisma.nftCollection.update({ where: { id: collection.id }, data: { [field]: imageDataUrl } });
+
+  return { collectionId: collection.id, tier, length: imageDataUrl.length, md5 };
+}
+
 // ---------- Pending NFT mints ----------
 // The minter pays a fixed price to a one-time address, same mechanism as a
 // token-creation fee -- the piece is only actually assigned once that

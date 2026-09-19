@@ -57,7 +57,7 @@ export const translations = {
   },
   "launchpad.nav.market": { en: "Market", zh: "市场" },
   "launchpad.nav.create": { en: "Create", zh: "创建" },
-  "launchpad.nav.pyramid": { en: "LA PIRAMIDE", zh: "金字塔" },
+  "launchpad.nav.pyramid": { en: "THE PYRAMID", zh: "金字塔" },
   "launchpad.nav.portfolio": { en: "Portfolio", zh: "持仓" },
 
   // ---------- Market page ----------
@@ -376,22 +376,22 @@ export const translations = {
   "nftMarket.forge.craftButton": { en: "Craft (uses {count})", zh: "合成（消耗 {count} 个）" },
   "nftMarket.forge.crafting": { en: "Crafting…", zh: "合成中…" },
   "nftMarket.forge.crafted": { en: "Crafted {name}!", zh: "已合成 {name}！" },
-  "nftMarket.forge.reliquiaOwned": { en: "You own {count} TIER 3 piece(s) -- that unlocks LA PIRAMIDE.", zh: "你拥有 {count} 个三级藏品——已解锁金字塔（LA PIRAMIDE）。" },
-  "nftMarket.forge.goToPyramid": { en: "Go to LA PIRAMIDE →", zh: "前往金字塔 →" },
+  "nftMarket.forge.reliquiaOwned": { en: "You own {count} TIER 3 piece(s) -- that unlocks THE PYRAMID.", zh: "你拥有 {count} 个三级藏品——已解锁金字塔（LA PIRAMIDE）。" },
+  "nftMarket.forge.goToPyramid": { en: "Go to THE PYRAMID →", zh: "前往金字塔 →" },
 
   // Brai, 2026-09-19: "LA PIRAMIDE, que es de donde salen unos tokens
   // especiales, estos tokens, tienen una curva que a los 3 ZEC bondean,
   // luego pasan al general" -- reliquia-gated token launch flow, reusing
   // the normal /launchpad/create form under the hood with a lower
   // graduation threshold (see graduationThresholdFor in the backend).
-  "pyramid.title": { en: "LA PIRAMIDE", zh: "金字塔" },
+  "pyramid.title": { en: "THE PYRAMID", zh: "金字塔" },
   "pyramid.subtitle": {
     en: "Tokens launched here graduate to the general market at just 3 ZEC in the curve, instead of the normal threshold. Only TIER 3 holders can launch one.",
     zh: "在这里发行的代币只需在曲线中累积 3 ZEC 即可毕业进入公开市场，远低于普通门槛。只有拥有三级藏品的人才能在此发行代币。",
   },
   "pyramid.locked.title": { en: "You need a TIER 3 piece to enter", zh: "你需要拥有一个三级藏品才能进入" },
   "pyramid.locked.body": {
-    en: "Craft a TIER 3 in the Forge (3 TIER 2, made from 5 TIER 1 each) to unlock LA PIRAMIDE. Selling your only TIER 3 locks you back out.",
+    en: "Craft a TIER 3 in the Forge (3 TIER 2, made from 5 TIER 1 each) to unlock THE PYRAMID. Selling your only TIER 3 locks you back out.",
     zh: "在熔炉中合成一个三级藏品（需要 3 个二级，每个二级由 5 个一级合成）以解锁金字塔。如果卖掉你唯一的三级藏品，将重新失去访问权限。",
   },
   "pyramid.locked.goToForge": { en: "Go to the Forge →", zh: "前往熔炉 →" },

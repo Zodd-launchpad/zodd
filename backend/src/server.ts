@@ -1372,6 +1372,28 @@ app.post("/api/admin/nft-reseed-tiered", async (req, reply) => {
   }
 });
 
+// Brai, 2026-09-19: fixes the corrupted-image bug -- see
+// store.updateNftCollectionTierImage's comment. Same ADMIN_TOKEN gate,
+// updates one tier's shared image in place without touching items.
+const nftCollectionTierImageSchema = z.object({
+  slug: z.string().min(1),
+  tier: z.enum(["PAPIRO", "FRAGMENTO", "RELIQUIA"]),
+  imageDataUrl: z.string().min(1),
+  expectedMd5: z.string().optional(),
+});
+
+app.post("/api/admin/nft-collection-tier-image", async (req, reply) => {
+  if (!ADMIN_TOKEN) return reply.code(503).send({ error: "ADMIN_TOKEN is not configured" });
+  if (req.headers["x-admin-token"] !== ADMIN_TOKEN) return reply.code(401).send({ error: "unauthorized" });
+  const body = nftCollectionTierImageSchema.parse(req.body);
+  try {
+    const result = await store.updateNftCollectionTierImage(body.slug, body.tier, body.imageDataUrl, body.expectedMd5);
+    return reply.send(result);
+  } catch (err: any) {
+    return reply.code(400).send({ error: err?.message ?? "update failed" });
+  }
+});
+
 app.get("/api/wallets/:id/nfts", async (req, reply) => {
   const { id } = req.params as { id: string };
   const wallet = await store.getWallet(id);
