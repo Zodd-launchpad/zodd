@@ -484,6 +484,17 @@ model PendingNftMint {
   createdAt                DateTime      @default(now())
   completedAt              DateTime?
 
+  // Brai, 2026-09-19: "la posibilidad de subir la cantidad de nfts a
+  // mintear" -- one payment can now cover several pieces at once.
+  // expectedZecAmount is already quantity * unit price (computed by the
+  // caller before generating the address); on payment, completePendingNftMint
+  // claims `quantity` random pieces instead of always 1.
+  quantity      Int      @default(1)
+  // Every piece this payment claimed -- resultItemId keeps holding the
+  // first one (unchanged shape for anything still reading it directly),
+  // resultItemIds holds the full set for quantity > 1.
+  resultItemIds String[] @default([])
+
   collection     NftCollection  @relation(fields: [collectionId], references: [id])
   internalWallet InternalWallet @relation(fields: [internalWalletId], references: [id])
 

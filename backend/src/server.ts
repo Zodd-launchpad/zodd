@@ -4,7 +4,7 @@ import * as store from "./lib/store.js";
 import { generateTwelveWords } from "./lib/wordlist.js";
 import { quoteBuy, quoteSell, currentPrice, marketCapZec } from "./lib/bondingCurve.js";
 import { simulatedInscriptionFor } from "./lib/simulatedChain.js";
-import { splitFee, TRADE_FEE_BPS, CREATOR_FEE_BPS, TOKEN_CREATE_FEE_ZEC, TOKEN_CREATE_FEE_YEC, createFeeFor, computeSellerPayout, NETWORK_FEE_ZEC, MAX_FIRST_BUY_ZEC, splitNftFee, isOwnerNftWallet, nftMintPriceZecFor, NFT_MAX_MINTS_PER_WALLET } from "./lib/fees.js";
+import { splitFee, TRADE_FEE_BPS, CREATOR_FEE_BPS, TOKEN_CREATE_FEE_ZEC, TOKEN_CREATE_FEE_YEC, createFeeFor, computeSellerPayout, NETWORK_FEE_ZEC, MAX_FIRST_BUY_ZEC, splitNftFee, isOwnerNftWallet, nftMintPriceZecFor, NFT_MAX_MINTS_PER_WALLET, NFT_WHITELIST_FREE_MINT_LIMIT } from "./lib/fees.js";
 import { startFeeDistributor, runFeeDistributionOnce } from "./lib/feeDistributor.js";
 import { startZecPricePolling, getZecUsdPrice } from "./lib/zecPrice.js";
 import { withTokenLock } from "./lib/mutex.js";
@@ -1300,6 +1300,7 @@ async function serializeNftCollection(c: store.NftCollectionView) {
     publicStartsAt: c.publicStartsAt,
     mintPhase: c.mintPhase,
     maxMintsPerWallet: NFT_MAX_MINTS_PER_WALLET,
+    whitelistFreeMintLimit: NFT_WHITELIST_FREE_MINT_LIMIT,
     ...stats,
   };
 }
@@ -1527,6 +1528,10 @@ app.post("/api/admin/nft-collection-price", async (req, reply) => {
 const nftMintSchema = z.object({
   walletId: z.string(),
   collectionSlug: z.string(),
+  // Brai, 2026-09-19: "la posibilidad de subir la cantidad de nfts a
+  // mintear" -- how many pieces to mint in this one call. Optional,
+  // defaults to 1 so every pre-existing caller keeps working unchanged.
+  quantity: z.number().int().min(1).max(NFT_MAX_MINTS_PER_WALLET).optional(),
 });
 
 app.post("/api/nft/mint", async (req, reply) => {
@@ -1560,28 +1565,40 @@ app.post("/api/nft/mint", async (req, reply) => {
   // Brai, 2026-09-19: "pone un mensaje limite por cada wallet 10" -- flat
   // cap per wallet per collection, free + paid combined. Checked before
   // either the free-claim attempt or the paid flow below so it can't be
-  // bypassed by exhausting the free allowance first.
+  // bypassed by exhausting the free allowance first. With quantity minting,
+  // a request for more than what's left of the cap is silently clamped
+  // down to what's left rather than rejected outright -- "mint 10" from a
+  // wallet that already has 8 just mints the 2 it still can.
   const mintedSoFar = await store.getWalletNftMintCount(collection.id, wallet.id);
-  if (mintedSoFar >= NFT_MAX_MINTS_PER_WALLET) {
+  const remainingWalletAllowance = NFT_MAX_MINTS_PER_WALLET - mintedSoFar;
+  if (remainingWalletAllowance <= 0) {
     return reply.code(409).send({ error: `you've reached the limit of ${NFT_MAX_MINTS_PER_WALLET} per wallet for this collection` });
   }
+  const quantity = Math.min(body.quantity ?? 1, remainingWalletAllowance);
 
   // Brai, 2026-09-18: "les vamos a dar whitelist, o sea minteo gratis" --
   // an APPROVED whitelist entry with claims left (up to
   // NFT_WHITELIST_FREE_MINT_LIMIT, see fees.ts) skips the entire
-  // payment/deposit-address dance below. Anything other than a clean
-  // success here (not whitelisted, free allowance used up, sold out) just
-  // falls through to the normal paid flow -- "not approved" is by far the
-  // common case (most buyers never applied).
-  const freeMint = await store.claimFreeNftWhitelistMint(body.collectionSlug, wallet.id);
+  // payment/deposit-address dance below, for as much of `quantity` as the
+  // remaining free allowance covers. Anything other than a clean success
+  // here (not whitelisted, free allowance used up, sold out) just falls
+  // through to the normal paid flow -- "not approved" is by far the common
+  // case (most buyers never applied). Note: if the free allowance only
+  // covers part of `quantity`, this returns just those free pieces --
+  // minting the rest at full price is a separate call, same as hitting
+  // "mint" again after using up a free allowance today.
+  const freeMint = await store.claimFreeNftWhitelistMint(body.collectionSlug, wallet.id, quantity);
   if (freeMint.ok) {
-    app.log.info(`NFT free whitelist mint: wallet ${wallet.id} -> ${freeMint.collectionSlug} #${freeMint.editionNumber}`);
+    app.log.info(`NFT free whitelist mint: wallet ${wallet.id} -> ${freeMint.collectionSlug} x${freeMint.itemIds.length} (#${freeMint.editionNumbers.join(", #")})`);
     return reply.send({
       free: true,
       status: "CREATED",
       collectionSlug: freeMint.collectionSlug,
       itemId: freeMint.itemId,
       editionNumber: freeMint.editionNumber,
+      itemIds: freeMint.itemIds,
+      editionNumbers: freeMint.editionNumbers,
+      quantity: freeMint.itemIds.length,
     });
   }
 
@@ -1594,17 +1611,20 @@ app.post("/api/nft/mint", async (req, reply) => {
   // Brai, 2026-09-19: "mintea a precio 0" -- when an owner wallet's price
   // is actually 0, there's no real payment to wait for, so skip the
   // address/QR/poll flow entirely (same idea as the free whitelist claim
-  // above). See store.claimFreeOwnerNftMint's comment.
+  // above), for the full requested quantity. See store.claimFreeOwnerNftMint's comment.
   if (isOwner && mintPriceZec <= 0) {
-    const ownerFreeMint: Awaited<ReturnType<typeof store.claimFreeOwnerNftMint>> = await store.claimFreeOwnerNftMint(body.collectionSlug, wallet.id);
+    const ownerFreeMint: Awaited<ReturnType<typeof store.claimFreeOwnerNftMint>> = await store.claimFreeOwnerNftMint(body.collectionSlug, wallet.id, quantity);
     if (ownerFreeMint.ok === true) {
-      app.log.info(`NFT free OWNER mint: wallet ${wallet.id} -> ${ownerFreeMint.collectionSlug} #${ownerFreeMint.editionNumber}`);
+      app.log.info(`NFT free OWNER mint: wallet ${wallet.id} -> ${ownerFreeMint.collectionSlug} x${ownerFreeMint.itemIds.length} (#${ownerFreeMint.editionNumbers.join(", #")})`);
       return reply.send({
         free: true,
         status: "CREATED",
         collectionSlug: ownerFreeMint.collectionSlug,
         itemId: ownerFreeMint.itemId,
         editionNumber: ownerFreeMint.editionNumber,
+        itemIds: ownerFreeMint.itemIds,
+        editionNumbers: ownerFreeMint.editionNumbers,
+        quantity: ownerFreeMint.itemIds.length,
       });
     }
     if (ownerFreeMint.error === "sold_out") return reply.code(409).send({ error: "sold out" });
@@ -1617,7 +1637,8 @@ app.post("/api/nft/mint", async (req, reply) => {
     collectionId: collection.id,
     internalWalletId: wallet.id,
     currency: collection.currency,
-    expectedZecAmount: mintPriceZec,
+    expectedZecAmount: mintPriceZec * quantity,
+    quantity,
   });
 
   let zecAddress: string;
@@ -1625,7 +1646,7 @@ app.post("/api/nft/mint", async (req, reply) => {
   let saplingDiversifierHex: string | null = null;
   let orchardDiversifierHex: string | null = null;
   try {
-    const res = await walletService.generateOrderAddress(pending.id, mintPriceZec);
+    const res = await walletService.generateOrderAddress(pending.id, mintPriceZec * quantity);
     zecAddress = res.address;
     zecAmount = res.expectedZecAmount;
     saplingDiversifierHex = (res as { saplingDiversifierHex?: string | null }).saplingDiversifierHex ?? null;
@@ -1642,6 +1663,7 @@ app.post("/api/nft/mint", async (req, reply) => {
     currency: collection.currency,
     zecAddress,
     zecAmount,
+    quantity,
     memo: walletService.buildPaymentMemoBase64(pending.id),
     status: "PENDING",
   });
@@ -1651,11 +1673,30 @@ app.get("/api/nft/mints/:id", async (req, reply) => {
   const { id } = req.params as { id: string };
   const pending = await store.getPendingNftMint(id);
   if (!pending) return reply.code(404).send({ error: "not found" });
+  if (pending.status === "CREATED" && pending.resultItemIds.length > 0) {
+    const items = await Promise.all(pending.resultItemIds.map((itemId) => store.getNftItemById(itemId)));
+    const item = items[0] ?? null;
+    return reply.send({ ...pending, resultItem: item, resultItems: items.filter((it) => it !== null) });
+  }
   if (pending.status === "CREATED" && pending.resultItemId) {
+    // Backward compat for any row created before resultItemIds existed.
     const item = await store.getNftItemById(pending.resultItemId);
-    return reply.send({ ...pending, resultItem: item });
+    return reply.send({ ...pending, resultItem: item, resultItems: item ? [item] : [] });
   }
   return reply.send(pending);
+});
+
+// Brai, 2026-09-19: mint-page redesign -- lets the quantity stepper cap
+// itself at what this wallet actually has left of the 10-per-wallet limit
+// (rather than just showing the flat max and letting the mint call reject
+// it), same count getWalletNftMintCount computes and /api/nft/mint itself
+// enforces.
+app.get("/api/nft/mint-count/:collectionSlug/:walletId", async (req, reply) => {
+  const { collectionSlug, walletId } = req.params as { collectionSlug: string; walletId: string };
+  const collection = await store.getNftCollectionBySlug(collectionSlug);
+  if (!collection) return reply.code(404).send({ error: "collection not found" });
+  const count = await store.getWalletNftMintCount(collection.id, walletId);
+  return reply.send({ count });
 });
 
 // ---------- NFT whitelist (Twitter, manually reviewed by Brai) ----------
@@ -1735,6 +1776,19 @@ app.get("/api/nft/whitelist/status/:walletAddress", async (req, reply) => {
   const { walletAddress } = req.params as { walletAddress: string };
   const entry = await store.getNftWhitelistEntry(walletAddress);
   return reply.send({ entry }); // { entry: null } when they haven't applied
+});
+
+// Brai, 2026-09-19: mint-page redesign -- "que el boton se desbloquee al
+// horario que corresponde segun tu wallet (si el handled es aprobado o
+// no)" -- the mint page needs to know, for the CONNECTED wallet, whether
+// it's whitelist-approved and how many of its 5 free claims are left, to
+// show the right stage as ELIGIBLE/NOT ELIGIBLE. Keyed by walletId (not a
+// pasted address) so it's exactly the same match /api/nft/mint itself
+// gates on -- see findApprovedNftWhitelistEntryForWallet's comment.
+app.get("/api/nft/whitelist/status-by-wallet/:walletId", async (req, reply) => {
+  const { walletId } = req.params as { walletId: string };
+  const entry = await store.getNftWhitelistStatusForWallet(walletId);
+  return reply.send({ entry });
 });
 
 // Brai, 2026-09-18 (v8): "si pones tu HANDLE y ya suscribiste te vaya a la
@@ -1933,7 +1987,15 @@ async function handleNftMintPayment(pending: store.PendingNftMintView, confirmed
       app.log.error(`NFT mint ${pending.id} paid ${confirmedZecAmount} ${pending.currency} (txid ${txid}) but the collection was already sold out -- needs manual admin refund`);
       return;
     }
-    app.log.info(`NFT mint ${pending.id}: wallet ${pending.internalWalletId} paid ${confirmedZecAmount} ${pending.currency} -> ${result.collectionSlug} #${result.editionNumber} (txid ${txid})`);
+    app.log.info(`NFT mint ${pending.id}: wallet ${pending.internalWalletId} paid ${confirmedZecAmount} ${pending.currency} -> ${result.collectionSlug} x${result.itemIds.length} (#${result.editionNumbers.join(", #")}) (txid ${txid})`);
+    if (result.shortfall > 0) {
+      // Brai, 2026-09-19: quantity minting edge case -- the collection sold
+      // out partway through this one payment (paid for N, only got M < N).
+      // The buyer already has their M pieces; this is a loud flag for Brai
+      // to manually refund the shortfall, same philosophy as every other
+      // "payment landed, couldn't fully honor it" case in this file.
+      app.log.error(`NFT mint ${pending.id}: paid for ${pending.quantity}, only ${result.itemIds.length} left to claim (collection sold out mid-payment) -- needs manual admin refund for the ${result.shortfall} shortfall`);
+    }
   } catch (err) {
     await store.failPendingNftMint(pending.id).catch(() => {});
     app.log.error(err, `NFT mint ${pending.id} failed to finalize`);

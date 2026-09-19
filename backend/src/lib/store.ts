@@ -2243,6 +2243,13 @@ export interface PendingNftMintView {
   expectedZecAmount: number;
   status: NftMintStatus;
   resultItemId: string | null;
+  // Brai, 2026-09-19: "la posibilidad de subir la cantidad de nfts a
+  // mintear" -- how many pieces this one payment covers, and (once paid)
+  // every piece it actually claimed. quantity defaults to 1 so every
+  // pre-existing row (all created before this field existed) reads back
+  // correctly as a single-piece mint.
+  quantity: number;
+  resultItemIds: string[];
   createdAt: string;
 }
 
@@ -2257,6 +2264,8 @@ function toPendingNftMintView(p: {
   expectedZecAmount: unknown;
   status: string;
   resultItemId: string | null;
+  quantity: number;
+  resultItemIds: string[];
   createdAt: Date;
 }): PendingNftMintView {
   return {
@@ -2270,6 +2279,8 @@ function toPendingNftMintView(p: {
     expectedZecAmount: num(p.expectedZecAmount),
     status: p.status as NftMintStatus,
     resultItemId: p.resultItemId,
+    quantity: p.quantity,
+    resultItemIds: p.resultItemIds,
     createdAt: p.createdAt.toISOString(),
   };
 }
@@ -2279,6 +2290,7 @@ export async function createPendingNftMint(input: {
   internalWalletId: string;
   currency?: Currency;
   expectedZecAmount: number;
+  quantity?: number;
 }) {
   const p = await prisma.pendingNftMint.create({
     data: {
@@ -2286,6 +2298,7 @@ export async function createPendingNftMint(input: {
       internalWalletId: input.internalWalletId,
       currency: input.currency ?? "ZEC",
       expectedZecAmount: input.expectedZecAmount,
+      quantity: input.quantity ?? 1,
     },
   });
   return toPendingNftMintView(p);
@@ -2352,30 +2365,67 @@ async function claimRandomUnmintedNftItem(collectionId: string, walletId: string
   return rows[0]?.id ?? null;
 }
 
-/** Payment for a mint confirmed: claims a random unminted piece and marks
- * the reservation CREATED. Returns null if the collection was already sold
- * out by the time this payment landed (an unlucky simultaneous-mint race)
- * -- the payment still arrived for real in that case, so the caller
+/** Claims up to `count` random unminted pieces one at a time (each single
+ * claim is already race-safe -- see claimRandomUnmintedNftItem above), all
+ * tagged with the same `txid` since they're covered by the same payment or
+ * the same free-mint grant. Stops early and returns whatever it managed to
+ * claim (possibly fewer than `count`, possibly zero) if the collection
+ * sells out partway through -- callers decide what a partial or empty
+ * result means for them. */
+async function claimRandomUnmintedNftItems(
+  collectionId: string,
+  walletId: string,
+  txid: string,
+  count: number
+): Promise<string[]> {
+  const ids: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const id = await claimRandomUnmintedNftItem(collectionId, walletId, txid);
+    if (!id) break;
+    ids.push(id);
+  }
+  return ids;
+}
+
+/** Payment for a mint confirmed: claims `p.quantity` random unminted
+ * pieces (Brai, 2026-09-19: "la posibilidad de subir la cantidad de nfts a
+ * mintear") and marks the reservation CREATED. Returns null only if NOT
+ * EVEN ONE piece could be claimed (collection was already fully sold out
+ * by the time this payment landed -- an unlucky simultaneous-mint race);
+ * the payment still arrived for real in that case, so the caller
  * (server.ts) treats that as an admin-recovery case, same philosophy as
  * every other forensics case in this file, rather than silently losing
- * track of it. */
+ * track of it. A PARTIAL claim (paid for N, only M < N left) still
+ * completes with what it got and is logged loudly by the caller for a
+ * manual partial refund -- better than stranding the buyer entirely over
+ * an edge case this unlikely. */
 export async function completePendingNftMint(
   id: string,
   txid: string
-): Promise<{ collectionSlug: string; itemId: string; editionNumber: number } | null> {
+): Promise<{ collectionSlug: string; itemId: string; editionNumber: number; itemIds: string[]; editionNumbers: number[]; shortfall: number } | null> {
   const p = await prisma.pendingNftMint.findUnique({ where: { id } });
   if (!p || p.status !== "PENDING") return null;
 
-  const itemId = await claimRandomUnmintedNftItem(p.collectionId, p.internalWalletId, txid);
-  if (!itemId) return null;
+  const requestedQty = Math.max(1, p.quantity);
+  const itemIds = await claimRandomUnmintedNftItems(p.collectionId, p.internalWalletId, txid, requestedQty);
+  if (itemIds.length === 0) return null;
 
-  const [item] = await prisma.$transaction([
-    prisma.nftItem.findUniqueOrThrow({ where: { id: itemId } }),
-    prisma.nftCollection.update({ where: { id: p.collectionId }, data: { mintedCount: { increment: 1 } } }),
-    prisma.pendingNftMint.update({ where: { id }, data: { status: "CREATED", resultItemId: itemId, completedAt: new Date() } }),
-  ]);
+  const items = await prisma.nftItem.findMany({ where: { id: { in: itemIds } } });
+  await prisma.nftCollection.update({ where: { id: p.collectionId }, data: { mintedCount: { increment: itemIds.length } } });
+  await prisma.pendingNftMint.update({
+    where: { id },
+    data: { status: "CREATED", resultItemId: itemIds[0], resultItemIds: itemIds, completedAt: new Date() },
+  });
   const collection = await prisma.nftCollection.findUniqueOrThrow({ where: { id: p.collectionId }, select: { slug: true } });
-  return { collectionSlug: collection.slug, itemId: item.id, editionNumber: item.editionNumber };
+  const editionNumbers = itemIds.map((itemId) => items.find((it) => it.id === itemId)!.editionNumber);
+  return {
+    collectionSlug: collection.slug,
+    itemId: itemIds[0],
+    editionNumber: editionNumbers[0],
+    itemIds,
+    editionNumbers,
+    shortfall: requestedQty - itemIds.length,
+  };
 }
 
 // ---------- NFT whitelist (Twitter, manually reviewed) ----------
@@ -2396,6 +2446,11 @@ export interface NftWhitelistEntryView {
   reviewedAt: string | null;
   reviewNote: string | null;
   claimedAt: string | null;
+  // Brai, 2026-09-19: exposed so the mint page can show "X of 5 free mints
+  // used" and know whether this wallet's free allowance is exhausted,
+  // without guessing from claimedAt alone (see NFT_WHITELIST_FREE_MINT_LIMIT
+  // in fees.ts).
+  claimedCount: number;
 }
 
 function toNftWhitelistEntryView(e: {
@@ -2407,6 +2462,7 @@ function toNftWhitelistEntryView(e: {
   reviewedAt: Date | null;
   reviewNote: string | null;
   claimedAt: Date | null;
+  claimedCount: number;
 }): NftWhitelistEntryView {
   return {
     id: e.id,
@@ -2417,6 +2473,7 @@ function toNftWhitelistEntryView(e: {
     reviewedAt: e.reviewedAt ? e.reviewedAt.toISOString() : null,
     reviewNote: e.reviewNote,
     claimedAt: e.claimedAt ? e.claimedAt.toISOString() : null,
+    claimedCount: e.claimedCount,
   };
 }
 
@@ -2650,36 +2707,52 @@ export async function isWalletNftWhitelisted(walletId: string): Promise<boolean>
   return (await findApprovedNftWhitelistEntryForWallet(walletId)) !== null;
 }
 
+/** Same lookup as isWalletNftWhitelisted, but returns the full entry (so
+ * the mint page can show "X of 5 free mints used") instead of a plain
+ * boolean. Used by GET /api/nft/whitelist/status-by-wallet/:walletId --
+ * this is the one true source of "is this connected wallet whitelisted"
+ * the frontend can trust, since it's the exact same matching logic
+ * /api/nft/mint itself gates on (see the big comment above). */
+export async function getNftWhitelistStatusForWallet(walletId: string): Promise<NftWhitelistEntryView | null> {
+  const entry = await findApprovedNftWhitelistEntryForWallet(walletId);
+  return entry ? toNftWhitelistEntryView(entry) : null;
+}
+
 export async function claimFreeNftWhitelistMint(
   collectionSlug: string,
-  walletId: string
+  walletId: string,
+  quantity: number = 1
 ): Promise<
-  | { ok: true; collectionSlug: string; itemId: string; editionNumber: number }
+  | { ok: true; collectionSlug: string; itemId: string; editionNumber: number; itemIds: string[]; editionNumbers: number[] }
   | { ok: false; error: "not_approved" | "already_claimed" | "collection_not_found" | "sold_out" }
 > {
   const entry = await findApprovedNftWhitelistEntryForWallet(walletId);
   if (!entry) return { ok: false, error: "not_approved" };
   // Brai, 2026-09-19: "las wallets de los handle que estan aprobados
   // mintean gratis solo 5 nfts" -- up to NFT_WHITELIST_FREE_MINT_LIMIT free
-  // claims per entry (was a one-time-ever gate via claimedAt before).
-  if (entry.claimedCount >= NFT_WHITELIST_FREE_MINT_LIMIT) return { ok: false, error: "already_claimed" };
+  // claims per entry (was a one-time-ever gate via claimedAt before). A
+  // quantity request is clamped down to whatever's left of that allowance
+  // -- it never errors out just because someone asked for more than they
+  // have left; it just gives them the most it can.
+  const remaining = NFT_WHITELIST_FREE_MINT_LIMIT - entry.claimedCount;
+  if (remaining <= 0) return { ok: false, error: "already_claimed" };
+  const wantQty = Math.min(Math.max(1, quantity), remaining);
 
   const collection = await prisma.nftCollection.findUnique({ where: { slug: collectionSlug } });
   if (!collection) return { ok: false, error: "collection_not_found" };
 
   const txid = `whitelist-free-${walletId}-${Date.now()}`;
-  const itemId = await claimRandomUnmintedNftItem(collection.id, walletId, txid);
-  if (!itemId) return { ok: false, error: "sold_out" };
+  const itemIds = await claimRandomUnmintedNftItems(collection.id, walletId, txid, wantQty);
+  if (itemIds.length === 0) return { ok: false, error: "sold_out" };
 
-  const [item] = await prisma.$transaction([
-    prisma.nftItem.findUniqueOrThrow({ where: { id: itemId } }),
-    prisma.nftCollection.update({ where: { id: collection.id }, data: { mintedCount: { increment: 1 } } }),
-    prisma.nftWhitelistEntry.update({
-      where: { id: entry.id },
-      data: { claimedAt: entry.claimedAt ?? new Date(), claimedByWalletId: walletId, claimedCount: { increment: 1 } },
-    }),
-  ]);
-  return { ok: true, collectionSlug, itemId: item.id, editionNumber: item.editionNumber };
+  const items = await prisma.nftItem.findMany({ where: { id: { in: itemIds } } });
+  await prisma.nftCollection.update({ where: { id: collection.id }, data: { mintedCount: { increment: itemIds.length } } });
+  await prisma.nftWhitelistEntry.update({
+    where: { id: entry.id },
+    data: { claimedAt: entry.claimedAt ?? new Date(), claimedByWalletId: walletId, claimedCount: { increment: itemIds.length } },
+  });
+  const editionNumbers = itemIds.map((itemId) => items.find((it) => it.id === itemId)!.editionNumber);
+  return { ok: true, collectionSlug, itemId: itemIds[0], editionNumber: editionNumbers[0], itemIds, editionNumbers };
 }
 
 /** Brai, 2026-09-19: "ese es el id de wallet mio, del desarrollador, mintea
@@ -2692,23 +2765,23 @@ export async function claimFreeNftWhitelistMint(
  * an owner wallet is subject to. */
 export async function claimFreeOwnerNftMint(
   collectionSlug: string,
-  walletId: string
+  walletId: string,
+  quantity: number = 1
 ): Promise<
-  | { ok: true; collectionSlug: string; itemId: string; editionNumber: number }
+  | { ok: true; collectionSlug: string; itemId: string; editionNumber: number; itemIds: string[]; editionNumbers: number[] }
   | { ok: false; error: "collection_not_found" | "sold_out" }
 > {
   const collection = await prisma.nftCollection.findUnique({ where: { slug: collectionSlug } });
   if (!collection) return { ok: false, error: "collection_not_found" };
 
   const txid = `owner-free-${walletId}-${Date.now()}`;
-  const itemId = await claimRandomUnmintedNftItem(collection.id, walletId, txid);
-  if (!itemId) return { ok: false, error: "sold_out" };
+  const itemIds = await claimRandomUnmintedNftItems(collection.id, walletId, txid, Math.max(1, quantity));
+  if (itemIds.length === 0) return { ok: false, error: "sold_out" };
 
-  const [item] = await prisma.$transaction([
-    prisma.nftItem.findUniqueOrThrow({ where: { id: itemId } }),
-    prisma.nftCollection.update({ where: { id: collection.id }, data: { mintedCount: { increment: 1 } } }),
-  ]);
-  return { ok: true, collectionSlug, itemId: item.id, editionNumber: item.editionNumber };
+  const items = await prisma.nftItem.findMany({ where: { id: { in: itemIds } } });
+  await prisma.nftCollection.update({ where: { id: collection.id }, data: { mintedCount: { increment: itemIds.length } } });
+  const editionNumbers = itemIds.map((itemId) => items.find((it) => it.id === itemId)!.editionNumber);
+  return { ok: true, collectionSlug, itemId: itemIds[0], editionNumber: editionNumbers[0], itemIds, editionNumbers };
 }
 
 // ---------- NFT secondary-market purchases ----------

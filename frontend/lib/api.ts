@@ -247,6 +247,11 @@ export const api = {
   // app/nft/whitelist/page.tsx submit()), which supplies the handle itself
   // from a signed cookie set only by a real X OAuth login. Do not re-add a
   // client-facing helper that takes a raw twitterHandle string.
+  // Brai, 2026-09-19: mint page -- eligibility check for the CONNECTED
+  // wallet (by walletId, not a pasted address), same match the backend's
+  // /api/nft/mint gates on.
+  getNftWhitelistStatusByWallet: (walletId: string): Promise<{ entry: NftWhitelistEntry | null }> =>
+    req(`/api/nft/whitelist/status-by-wallet/${encodeURIComponent(walletId)}`),
   getNftWhitelistStatus: (walletAddress: string): Promise<{ entry: NftWhitelistEntry | null }> =>
     req(`/api/nft/whitelist/status/${encodeURIComponent(walletAddress)}`),
   // Brai, 2026-09-18 (v8): "si pones tu HANDLE y ya suscribiste te vaya a
@@ -302,9 +307,14 @@ export const api = {
   getNftItem: (slug: string, editionNumber: number): Promise<{ collection: { slug: string; name: string; currency: Currency }; item: NftItem }> =>
     req(`/api/nft/collections/${slug}/items/${editionNumber}`),
   getWalletNfts: (walletId: string): Promise<NftItem[]> => req(`/api/wallets/${walletId}/nfts`),
-  mintNft: (data: { walletId: string; collectionSlug: string }): Promise<NftMintResult> =>
+  mintNft: (data: { walletId: string; collectionSlug: string; quantity?: number }): Promise<NftMintResult> =>
     req("/api/nft/mint", { method: "POST", body: JSON.stringify(data) }),
   getNftMint: (id: string): Promise<NftPendingMint> => req(`/api/nft/mints/${id}`),
+  // Brai, 2026-09-19: mint page quantity stepper -- how many this wallet
+  // has already minted, so the stepper can cap itself at what's left of
+  // the 10-per-wallet limit.
+  getNftWalletMintCount: (collectionSlug: string, walletId: string): Promise<{ count: number }> =>
+    req(`/api/nft/mint-count/${collectionSlug}/${encodeURIComponent(walletId)}`),
   listNftItem: (itemId: string, data: { walletId: string; priceZec: number; payoutAddress: string }): Promise<NftItem> =>
     req(`/api/nft/items/${itemId}/list`, { method: "POST", body: JSON.stringify(data) }),
   unlistNftItem: (itemId: string, walletId: string): Promise<NftItem> =>
@@ -338,6 +348,7 @@ export interface NftWhitelistEntry {
   reviewedAt: string | null;
   reviewNote: string | null;
   claimedAt: string | null;
+  claimedCount: number;
 }
 
 // Brai, 2026-09-18 (v9, URGENT PRIVACY FIX): the by-handle lookup is
@@ -372,6 +383,7 @@ export interface NftCollection {
   publicStartsAt: string | null;
   mintPhase: "locked" | "whitelist" | "public";
   maxMintsPerWallet: number;
+  whitelistFreeMintLimit: number;
   floorZec: number | null;
   listedCount: number;
   salesCount: number;
@@ -420,8 +432,17 @@ export interface NftForgeRecipes {
 }
 
 export type NftMintResult =
-  | { free: true; status: "CREATED"; collectionSlug: string; itemId: string; editionNumber: number }
-  | { mintId: string; currency: Currency; zecAddress: string; zecAmount: number; memo: string; status: "PENDING" };
+  | {
+      free: true;
+      status: "CREATED";
+      collectionSlug: string;
+      itemId: string;
+      editionNumber: number;
+      itemIds: string[];
+      editionNumbers: number[];
+      quantity: number;
+    }
+  | { mintId: string; currency: Currency; zecAddress: string; zecAmount: number; quantity: number; memo: string; status: "PENDING" };
 
 export interface NftPendingMint {
   id: string;
@@ -432,8 +453,13 @@ export interface NftPendingMint {
   expectedZecAmount: number;
   status: "PENDING" | "CREATED" | "EXPIRED" | "FAILED";
   resultItemId: string | null;
+  // Brai, 2026-09-19: quantity minting -- how many pieces this payment
+  // covers, and (once CREATED) every piece it actually claimed.
+  quantity: number;
+  resultItemIds: string[];
   createdAt: string;
   resultItem?: NftItem;
+  resultItems?: NftItem[];
 }
 
 export interface NftPurchaseInit {
