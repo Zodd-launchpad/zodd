@@ -4,7 +4,7 @@ import * as store from "./lib/store.js";
 import { generateTwelveWords } from "./lib/wordlist.js";
 import { quoteBuy, quoteSell, currentPrice, marketCapZec } from "./lib/bondingCurve.js";
 import { simulatedInscriptionFor } from "./lib/simulatedChain.js";
-import { splitFee, TRADE_FEE_BPS, CREATOR_FEE_BPS, TOKEN_CREATE_FEE_ZEC, TOKEN_CREATE_FEE_YEC, createFeeFor, computeSellerPayout, NETWORK_FEE_ZEC, MAX_FIRST_BUY_ZEC, splitNftFee } from "./lib/fees.js";
+import { splitFee, TRADE_FEE_BPS, CREATOR_FEE_BPS, TOKEN_CREATE_FEE_ZEC, TOKEN_CREATE_FEE_YEC, createFeeFor, computeSellerPayout, NETWORK_FEE_ZEC, MAX_FIRST_BUY_ZEC, splitNftFee, isOwnerNftWallet, nftMintPriceZecFor, NFT_MAX_MINTS_PER_WALLET } from "./lib/fees.js";
 import { startFeeDistributor, runFeeDistributionOnce } from "./lib/feeDistributor.js";
 import { startZecPricePolling, getZecUsdPrice } from "./lib/zecPrice.js";
 import { withTokenLock } from "./lib/mutex.js";
@@ -1296,6 +1296,10 @@ async function serializeNftCollection(c: store.NftCollectionView) {
     remaining: Math.max(0, c.totalSupply - c.mintedCount),
     soldOut: c.mintedCount >= c.totalSupply,
     createdAt: c.createdAt,
+    whitelistStartsAt: c.whitelistStartsAt,
+    publicStartsAt: c.publicStartsAt,
+    mintPhase: c.mintPhase,
+    maxMintsPerWallet: NFT_MAX_MINTS_PER_WALLET,
     ...stats,
   };
 }
@@ -1473,6 +1477,48 @@ app.get("/api/wallets/:id/nfts", async (req, reply) => {
   return reply.send(await store.getWalletNfts(id));
 });
 
+// Brai, 2026-09-19: "la whitelist le activa en cierto horario y la publica
+// a partir de cierto horario" -- sets/updates the two presale gates on
+// NftCollection (see mintPhaseAt in store.ts and the schema comment) so
+// the schedule can change without a redeploy. Pass either field as null to
+// clear that gate, or omit it to leave it as-is. Same ADMIN_TOKEN gate as
+// every other admin mutation.
+const nftCollectionScheduleSchema = z.object({
+  slug: z.string().min(1),
+  whitelistStartsAt: z.string().datetime().nullable().optional(),
+  publicStartsAt: z.string().datetime().nullable().optional(),
+});
+app.post("/api/admin/nft-collection-schedule", async (req, reply) => {
+  if (!ADMIN_TOKEN) return reply.code(503).send({ error: "ADMIN_TOKEN is not configured" });
+  if (req.headers["x-admin-token"] !== ADMIN_TOKEN) return reply.code(401).send({ error: "unauthorized" });
+  const body = nftCollectionScheduleSchema.safeParse(req.body);
+  if (!body.success) {
+    return reply.code(400).send({ error: "expected { slug, whitelistStartsAt?: ISO string | null, publicStartsAt?: ISO string | null }" });
+  }
+  const result = await store.setNftCollectionSchedule(body.data.slug, {
+    whitelistStartsAt: body.data.whitelistStartsAt === undefined ? undefined : body.data.whitelistStartsAt ? new Date(body.data.whitelistStartsAt) : null,
+    publicStartsAt: body.data.publicStartsAt === undefined ? undefined : body.data.publicStartsAt ? new Date(body.data.publicStartsAt) : null,
+  });
+  if (!result) return reply.code(404).send({ error: "collection not found" });
+  app.log.warn(`[admin] nft collection schedule for ${result.slug}: whitelist=${result.whitelistStartsAt ?? "unset"} public=${result.publicStartsAt ?? "unset"}`);
+  return reply.send({ ok: true, collection: result });
+});
+
+// Brai, 2026-09-19: "las wallet del publico mintean a 0.0025" -- narrow
+// "just the price" knob, see store.setNftCollectionMintPrice's comment for
+// why this is separate from the seed/reseed routes. Same ADMIN_TOKEN gate.
+const nftCollectionPriceSchema = z.object({ slug: z.string().min(1), mintPriceZec: z.number().positive() });
+app.post("/api/admin/nft-collection-price", async (req, reply) => {
+  if (!ADMIN_TOKEN) return reply.code(503).send({ error: "ADMIN_TOKEN is not configured" });
+  if (req.headers["x-admin-token"] !== ADMIN_TOKEN) return reply.code(401).send({ error: "unauthorized" });
+  const body = nftCollectionPriceSchema.safeParse(req.body);
+  if (!body.success) return reply.code(400).send({ error: "expected { slug: string, mintPriceZec: number }" });
+  const result = await store.setNftCollectionMintPrice(body.data.slug, body.data.mintPriceZec);
+  if (!result) return reply.code(404).send({ error: "collection not found" });
+  app.log.warn(`[admin] nft collection ${result.slug} mintPriceZec -> ${result.mintPriceZec}`);
+  return reply.send({ ok: true, collection: result });
+});
+
 // ---------- NFT: mint ----------
 // Same model as a token-creation fee: the minter pays a fixed price to a
 // one-time address, and a piece only actually gets assigned once that
@@ -1495,12 +1541,38 @@ app.post("/api/nft/mint", async (req, reply) => {
     return reply.code(409).send({ error: "sold out" });
   }
 
+  // Brai, 2026-09-19: "la whitelist le activa en cierto horario y la
+  // publica a partir de cierto horario" -- presale gate. Owner wallets
+  // (isOwnerNftWallet) bypass this entirely, same as they bypass the
+  // price -- Brai needs to keep testing regardless of what phase the
+  // public presale is in. Everyone else: "locked" blocks all minting,
+  // "whitelist" requires an APPROVED whitelist entry (whether they're
+  // using their free claim or paying for more), "public" is wide open.
+  const isOwner = isOwnerNftWallet(wallet.id);
+  if (!isOwner && collection.mintPhase === "locked") {
+    return reply.code(403).send({ error: "minting hasn't opened yet" });
+  }
+  if (!isOwner && collection.mintPhase === "whitelist") {
+    const whitelisted = await store.isWalletNftWhitelisted(wallet.id);
+    if (!whitelisted) return reply.code(403).send({ error: "whitelist only right now -- public mint opens later" });
+  }
+
+  // Brai, 2026-09-19: "pone un mensaje limite por cada wallet 10" -- flat
+  // cap per wallet per collection, free + paid combined. Checked before
+  // either the free-claim attempt or the paid flow below so it can't be
+  // bypassed by exhausting the free allowance first.
+  const mintedSoFar = await store.getWalletNftMintCount(collection.id, wallet.id);
+  if (mintedSoFar >= NFT_MAX_MINTS_PER_WALLET) {
+    return reply.code(409).send({ error: `you've reached the limit of ${NFT_MAX_MINTS_PER_WALLET} per wallet for this collection` });
+  }
+
   // Brai, 2026-09-18: "les vamos a dar whitelist, o sea minteo gratis" --
-  // an APPROVED, not-yet-used whitelist entry (see /api/nft/whitelist*
-  // below) skips the entire payment/deposit-address dance below. Anything
-  // other than a clean success here (not whitelisted, already used their
-  // free mint, sold out) just falls through to the normal paid flow --
-  // "not approved" is by far the common case (most buyers never applied).
+  // an APPROVED whitelist entry with claims left (up to
+  // NFT_WHITELIST_FREE_MINT_LIMIT, see fees.ts) skips the entire
+  // payment/deposit-address dance below. Anything other than a clean
+  // success here (not whitelisted, free allowance used up, sold out) just
+  // falls through to the normal paid flow -- "not approved" is by far the
+  // common case (most buyers never applied).
   const freeMint = await store.claimFreeNftWhitelistMint(body.collectionSlug, wallet.id);
   if (freeMint.ok) {
     app.log.info(`NFT free whitelist mint: wallet ${wallet.id} -> ${freeMint.collectionSlug} #${freeMint.editionNumber}`);
@@ -1514,12 +1586,17 @@ app.post("/api/nft/mint", async (req, reply) => {
   }
 
   const walletService = walletServiceFor(collection.currency);
+  // Brai, 2026-09-19: "yo sigo minteando casi gratis... las wallet del
+  // publico mintean a 0.0025" -- owner wallets (env-gated, see fees.ts)
+  // always pay OWNER_NFT_MINT_PRICE_ZEC; everyone else pays the
+  // collection's normal mintPriceZec (the "public" price).
+  const mintPriceZec = nftMintPriceZecFor(wallet.id, collection.mintPriceZec);
 
   const pending = await store.createPendingNftMint({
     collectionId: collection.id,
     internalWalletId: wallet.id,
     currency: collection.currency,
-    expectedZecAmount: collection.mintPriceZec,
+    expectedZecAmount: mintPriceZec,
   });
 
   let zecAddress: string;
@@ -1527,7 +1604,7 @@ app.post("/api/nft/mint", async (req, reply) => {
   let saplingDiversifierHex: string | null = null;
   let orchardDiversifierHex: string | null = null;
   try {
-    const res = await walletService.generateOrderAddress(pending.id, collection.mintPriceZec);
+    const res = await walletService.generateOrderAddress(pending.id, mintPriceZec);
     zecAddress = res.address;
     zecAmount = res.expectedZecAmount;
     saplingDiversifierHex = (res as { saplingDiversifierHex?: string | null }).saplingDiversifierHex ?? null;

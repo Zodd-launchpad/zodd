@@ -365,6 +365,13 @@ export interface NftCollection {
   remaining: number;
   soldOut: boolean;
   createdAt: string;
+  // Brai, 2026-09-19: presale schedule -- see mintPhaseAt in the backend's
+  // store.ts. mintPhase is computed server-side (never trust the client
+  // clock): "locked" | "whitelist" | "public".
+  whitelistStartsAt: string | null;
+  publicStartsAt: string | null;
+  mintPhase: "locked" | "whitelist" | "public";
+  maxMintsPerWallet: number;
   floorZec: number | null;
   listedCount: number;
   salesCount: number;

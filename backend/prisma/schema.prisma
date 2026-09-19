@@ -383,6 +383,18 @@ model NftCollection {
   mintedCount       Int      @default(0) // contador denormalizado, evita un COUNT(*) en cada lectura
   createdAt         DateTime @default(now())
 
+  // Brai, 2026-09-19: "la whitelist le activa en cierto horario y la
+  // publica a partir de cierto horario" -- two presale gates, both
+  // optional (null = that phase hasn't been scheduled yet). Read together
+  // at mint time (see mintPhaseAt in store.ts): before whitelistStartsAt
+  // nobody but an owner wallet can mint; from whitelistStartsAt up to
+  // publicStartsAt only APPROVED whitelist wallets (NftWhitelistEntry) can;
+  // from publicStartsAt on, anyone can. Set/updated via
+  // POST /api/admin/nft-collection-schedule (ADMIN_TOKEN-gated) instead of
+  // needing a redeploy every time the schedule changes.
+  whitelistStartsAt DateTime?
+  publicStartsAt    DateTime?
+
   items NftItem[]
   mints PendingNftMint[]
 
@@ -604,15 +616,22 @@ model NftWhitelistEntry {
   // "no encuentro el retweet") -- puramente para su propio registro, nunca
   // mostrada al usuario.
   reviewNote    String?
-  // Se llena cuando el mint gratis efectivamente se usa (ver
-  // claimFreeNftWhitelistMint) -- una vez seteado, esta entrada ya no puede
-  // volver a mintear gratis aunque siga APPROVED.
+  // Se llena la primera vez que el mint gratis se usa (ver
+  // claimFreeNftWhitelistMint) -- queda seteado desde ese primer claim,
+  // aunque sigan quedando mints gratis disponibles (ver claimedCount).
   claimedAt     DateTime?
   // Que InternalWallet.id efectivamente se llevo el mint gratis -- solo
   // informativo (no hay relacion FK a proposito, mismo patron que
   // Token.creatorWalletId mas arriba: un string suelto, no un join
   // obligatorio).
   claimedByWalletId String?
+  // Brai, 2026-09-19: "las wallets de los handle que estan aprobados
+  // mintean gratis solo 5 nfts" -- cuántos mints gratis ya usó esta
+  // entrada. claimFreeNftWhitelistMint la incrementa en cada claim y
+  // rechaza con "already_claimed" al llegar a NFT_WHITELIST_FREE_MINT_LIMIT
+  // (fees.ts). Reemplaza el viejo gate "un solo claim por siempre" que
+  // claimedAt solo hacía cuando era un booleano de facto.
+  claimedCount  Int                @default(0)
 
   @@index([status])
   @@index([twitterHandle])

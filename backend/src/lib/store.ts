@@ -6,7 +6,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
 import { CurveState, DEFAULT_CURVE_CONFIG, currentPrice, quoteBuy, quoteSell } from "./bondingCurve.js";
-import { splitFee } from "./fees.js";
+import { splitFee, NFT_WHITELIST_FREE_MINT_LIMIT } from "./fees.js";
 
 export const prisma = new PrismaClient();
 export { DEFAULT_CURVE_CONFIG };
@@ -1477,6 +1477,8 @@ export async function recomputeCurveFromOrders(tokenId: string): Promise<{ befor
 export type NftMintStatus = "PENDING" | "CREATED" | "EXPIRED" | "FAILED";
 export type NftOrderStatus = "PENDING" | "FILLED" | "EXPIRED" | "FAILED";
 
+export type NftMintPhase = "locked" | "whitelist" | "public";
+
 export interface NftCollectionView {
   id: string;
   slug: string;
@@ -1488,6 +1490,30 @@ export interface NftCollectionView {
   coverImageDataUrl: string | null;
   mintedCount: number;
   createdAt: string;
+  whitelistStartsAt: string | null;
+  publicStartsAt: string | null;
+  /** Computed server-side (never trust a client clock): "locked" before
+   * whitelistStartsAt (or if it's unset), "whitelist" from
+   * whitelistStartsAt up to publicStartsAt, "public" from publicStartsAt
+   * on. Owner wallets bypass this entirely at mint time -- see
+   * isOwnerNftWallet in fees.ts -- so this reflects the gate a normal
+   * wallet sees, not an absolute "is minting possible" flag. */
+  mintPhase: NftMintPhase;
+}
+
+/** Brai, 2026-09-19: "la whitelist le activa en cierto horario y la
+ * publica a partir de cierto horario" -- the phase a NORMAL (non-owner)
+ * wallet is gated by right now. Exported so server.ts's /api/nft/mint can
+ * reuse the exact same logic the view uses, instead of re-deriving it. */
+export function mintPhaseAt(
+  collection: { whitelistStartsAt: Date | string | null; publicStartsAt: Date | string | null },
+  now: Date = new Date()
+): NftMintPhase {
+  const wl = collection.whitelistStartsAt ? new Date(collection.whitelistStartsAt) : null;
+  const pub = collection.publicStartsAt ? new Date(collection.publicStartsAt) : null;
+  if (!wl || now < wl) return "locked";
+  if (!pub || now < pub) return "whitelist";
+  return "public";
 }
 
 function toNftCollectionView(c: {
@@ -1501,6 +1527,8 @@ function toNftCollectionView(c: {
   coverImageDataUrl: string | null;
   mintedCount: number;
   createdAt: Date;
+  whitelistStartsAt: Date | null;
+  publicStartsAt: Date | null;
 }): NftCollectionView {
   return {
     id: c.id,
@@ -1513,6 +1541,9 @@ function toNftCollectionView(c: {
     coverImageDataUrl: c.coverImageDataUrl,
     mintedCount: c.mintedCount,
     createdAt: c.createdAt.toISOString(),
+    whitelistStartsAt: c.whitelistStartsAt ? c.whitelistStartsAt.toISOString() : null,
+    publicStartsAt: c.publicStartsAt ? c.publicStartsAt.toISOString() : null,
+    mintPhase: mintPhaseAt(c),
   };
 }
 
@@ -1524,6 +1555,62 @@ export async function getNftCollectionBySlug(slug: string): Promise<NftCollectio
 export async function getNftCollectionById(id: string): Promise<NftCollectionView | null> {
   const c = await prisma.nftCollection.findUnique({ where: { id } });
   return c ? toNftCollectionView(c) : null;
+}
+
+/** Brai, 2026-09-19: "hagamos un test, la whitelist ahora ponela que se
+ * pueda mintear a partir de las 13 horas utc -3, y la publica a partir de
+ * las 14 horas utc -3" -- lets the presale schedule be set/changed from
+ * the admin routes (POST /api/admin/nft-collection-schedule) without a
+ * redeploy. Pass null for either field to clear that gate (e.g. "locked"
+ * forever by clearing whitelistStartsAt, or "whitelist never ends" by
+ * clearing publicStartsAt) -- undefined leaves it untouched.
+ */
+export async function setNftCollectionSchedule(
+  slug: string,
+  input: { whitelistStartsAt?: Date | null; publicStartsAt?: Date | null }
+): Promise<NftCollectionView | null> {
+  const existing = await prisma.nftCollection.findUnique({ where: { slug } });
+  if (!existing) return null;
+  const c = await prisma.nftCollection.update({
+    where: { slug },
+    data: {
+      ...(input.whitelistStartsAt !== undefined ? { whitelistStartsAt: input.whitelistStartsAt } : {}),
+      ...(input.publicStartsAt !== undefined ? { publicStartsAt: input.publicStartsAt } : {}),
+    },
+  });
+  return toNftCollectionView(c);
+}
+
+/** Brai, 2026-09-19: "las wallet del publico mintean a 0.0025" -- lets the
+ * collection's base mint price (what a non-owner, non-free-whitelist
+ * wallet pays -- see nftMintPriceZecFor in fees.ts) be changed without a
+ * full re-seed. The seed/reseed routes (seedNftCollectionFromManifest,
+ * seedTieredNftCollection) also set mintPriceZec, but they touch the
+ * whole collection/pool and are meant for first-time setup or a
+ * deliberate wipe -- this is the narrow "just the price" knob for
+ * afterwards. */
+export async function setNftCollectionMintPrice(slug: string, mintPriceZec: number): Promise<NftCollectionView | null> {
+  const existing = await prisma.nftCollection.findUnique({ where: { slug } });
+  if (!existing) return null;
+  const c = await prisma.nftCollection.update({ where: { slug }, data: { mintPriceZec } });
+  return toNftCollectionView(c);
+}
+
+/** Brai, 2026-09-19: "pone un mensaje limite por cada wallet 10" -- total
+ * pieces of `collectionId` this wallet has ever minted (free whitelist
+ * claims + completed paid mints combined), used to enforce
+ * NFT_MAX_MINTS_PER_WALLET in /api/nft/mint. Deliberately counts MINTS,
+ * not current holdings -- selling a piece on the secondary market doesn't
+ * free up room to mint another one. */
+export async function getWalletNftMintCount(collectionId: string, walletId: string): Promise<number> {
+  const paidCount = await prisma.pendingNftMint.count({
+    where: { collectionId, internalWalletId: walletId, status: "CREATED" },
+  });
+  const whitelistEntry = await prisma.nftWhitelistEntry.findFirst({
+    where: { claimedByWalletId: walletId },
+    select: { claimedCount: true },
+  });
+  return paidCount + (whitelistEntry?.claimedCount ?? 0);
 }
 
 /** Read-only stats for the collection header (floor/listed/sales/volume),
@@ -2531,6 +2618,29 @@ export async function reviewNftWhitelistEntry(
  * Returns a tagged error instead of throwing for every expected case (no
  * matching approved entry, already used, collection missing/sold out) so
  * server.ts can turn each into a clean, specific 4xx. */
+/** Shared by claimFreeNftWhitelistMint and the presale phase gate in
+ * server.ts -- see claimFreeNftWhitelistMint's big comment above for why
+ * this checks both noirAddress and defaultRefundAddress. */
+async function findApprovedNftWhitelistEntryForWallet(walletId: string) {
+  const wallet = await prisma.internalWallet.findUnique({ where: { id: walletId } });
+  if (!wallet) return null;
+  const candidateAddresses = [wallet.noirAddress, wallet.defaultRefundAddress].filter(
+    (a): a is string => !!a
+  );
+  if (candidateAddresses.length === 0) return null;
+  return prisma.nftWhitelistEntry.findFirst({
+    where: { walletAddress: { in: candidateAddresses }, status: "APPROVED" },
+  });
+}
+
+/** Brai, 2026-09-19: "la whitelist [se] le activa en cierto horario" --
+ * during the whitelist-only presale window, only a wallet with an
+ * APPROVED entry may mint at all (whether their free claim or paying
+ * full price for more). Used by /api/nft/mint's phase gate. */
+export async function isWalletNftWhitelisted(walletId: string): Promise<boolean> {
+  return (await findApprovedNftWhitelistEntryForWallet(walletId)) !== null;
+}
+
 export async function claimFreeNftWhitelistMint(
   collectionSlug: string,
   walletId: string
@@ -2538,18 +2648,12 @@ export async function claimFreeNftWhitelistMint(
   | { ok: true; collectionSlug: string; itemId: string; editionNumber: number }
   | { ok: false; error: "not_approved" | "already_claimed" | "collection_not_found" | "sold_out" }
 > {
-  const wallet = await prisma.internalWallet.findUnique({ where: { id: walletId } });
-  if (!wallet) return { ok: false, error: "not_approved" };
-  const candidateAddresses = [wallet.noirAddress, wallet.defaultRefundAddress].filter(
-    (a): a is string => !!a
-  );
-  if (candidateAddresses.length === 0) return { ok: false, error: "not_approved" };
-
-  const entry = await prisma.nftWhitelistEntry.findFirst({
-    where: { walletAddress: { in: candidateAddresses }, status: "APPROVED" },
-  });
+  const entry = await findApprovedNftWhitelistEntryForWallet(walletId);
   if (!entry) return { ok: false, error: "not_approved" };
-  if (entry.claimedAt) return { ok: false, error: "already_claimed" };
+  // Brai, 2026-09-19: "las wallets de los handle que estan aprobados
+  // mintean gratis solo 5 nfts" -- up to NFT_WHITELIST_FREE_MINT_LIMIT free
+  // claims per entry (was a one-time-ever gate via claimedAt before).
+  if (entry.claimedCount >= NFT_WHITELIST_FREE_MINT_LIMIT) return { ok: false, error: "already_claimed" };
 
   const collection = await prisma.nftCollection.findUnique({ where: { slug: collectionSlug } });
   if (!collection) return { ok: false, error: "collection_not_found" };
@@ -2563,7 +2667,7 @@ export async function claimFreeNftWhitelistMint(
     prisma.nftCollection.update({ where: { id: collection.id }, data: { mintedCount: { increment: 1 } } }),
     prisma.nftWhitelistEntry.update({
       where: { id: entry.id },
-      data: { claimedAt: new Date(), claimedByWalletId: walletId },
+      data: { claimedAt: entry.claimedAt ?? new Date(), claimedByWalletId: walletId, claimedCount: { increment: 1 } },
     }),
   ]);
   return { ok: true, collectionSlug, itemId: item.id, editionNumber: item.editionNumber };

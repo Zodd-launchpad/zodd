@@ -17,12 +17,22 @@ import { getNoirWallet, isNoirWalletInstalled } from "@noir-wallet/sdk";
 // whichever piece got randomly assigned server-side.
 const COLLECTION_SLUG = "zodd-genesis";
 
-// Brai, 2026-09-19: "desactiva la piramide, que no puedan entrar al mint de
-// nft test la gente todavia" -- hard kill switch while he keeps testing.
-// Flip back to true when it's ready for real users.
-const MINT_OPEN = false;
+// Brai, 2026-09-19: "activa el minteo para seguir en esa pagina escondida" --
+// the old hard MINT_OPEN kill switch is gone; gating is now the real
+// whitelist/public presale schedule the backend computes
+// (collection.mintPhase, see mintPhaseAt in store.ts) plus the per-wallet
+// mint cap (collection.maxMintsPerWallet). The page itself still only
+// exists at this unlinked URL, not in any nav.
 
 type Phase = "loading" | "confirm" | "waiting" | "revealed" | "failed" | "soldOut" | "notConfigured";
+
+function formatLocalTime(iso: string): string {
+  try {
+    return new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+  } catch {
+    return iso;
+  }
+}
 
 export default function NftMintPage() {
   const { t } = useLanguage();
@@ -147,15 +157,6 @@ export default function NftMintPage() {
 
   if (walletLoading || phase === "loading") return null;
 
-  if (!MINT_OPEN) {
-    return (
-      <div className="container nft-market">
-        <h2 style={{ marginTop: 0 }}>{t("nftMarket.notConfigured.title")}</h2>
-        <p className="muted">{t("nftMarket.notConfigured.body")}</p>
-      </div>
-    );
-  }
-
   if (phase === "notConfigured") {
     return (
       <div className="container nft-market">
@@ -188,6 +189,23 @@ export default function NftMintPage() {
               </span>
             )}
           </p>
+          <p className="muted" style={{ fontSize: 12 }}>
+            {t("nftMint.limitNote", { max: collection.maxMintsPerWallet })}
+          </p>
+          {collection.mintPhase === "locked" && (
+            <p style={{ color: "var(--accent)", fontSize: 13 }}>
+              {collection.whitelistStartsAt
+                ? t("nftMint.phase.lockedWithTime", { time: formatLocalTime(collection.whitelistStartsAt) })
+                : t("nftMint.phase.locked")}
+            </p>
+          )}
+          {collection.mintPhase === "whitelist" && (
+            <p style={{ color: "var(--accent)", fontSize: 13 }}>
+              {collection.publicStartsAt
+                ? t("nftMint.phase.whitelist", { time: formatLocalTime(collection.publicStartsAt) })
+                : t("nftMint.phase.whitelistNoTime")}
+            </p>
+          )}
           {!wallet ? (
             <p className="muted">{t("portfolio.connectFirst")}</p>
           ) : (

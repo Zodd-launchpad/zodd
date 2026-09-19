@@ -78,6 +78,58 @@ export function createFeeZecFor(walletId: string): number {
  */
 export const TOKEN_CREATE_FEE_YEC = Number(process.env.YCASH_TOKEN_CREATE_FEE_YEC ?? 0.01);
 
+/**
+ * Brai, 2026-09-19: "yo sigo minteando casi gratis a 0.000001 por cada
+ * nft... las wallet del publico mintean a 0.0025. Las wallets de los
+ * handle que estan aprobados mintean gratis solo 5 nfts." -- three-tier
+ * NFT mint pricing, same shape as the create-fee discount above:
+ *   - an "owner" wallet (Brai's own, wallet-id gated) always pays
+ *     OWNER_NFT_MINT_PRICE_ZEC regardless of the collection's normal price
+ *   - an APPROVED whitelist wallet mints free, up to
+ *     NFT_WHITELIST_FREE_MINT_LIMIT pieces (see claimFreeNftWhitelistMint
+ *     in store.ts) -- anything beyond that falls through to the normal
+ *     paid price like anyone else
+ *   - everyone else pays NftCollection.mintPriceZec as-is (that field is
+ *     the "public" price now -- set it to 0.0025 via the collection admin
+ *     routes)
+ * DISCOUNTED_NFT_MINT_WALLET_IDS defaults to whatever's already in
+ * DISCOUNTED_CREATE_FEE_WALLET_IDS (Brai's "mi wallet en especial" from
+ * the create-fee discount above) so this works immediately without a new
+ * Railway variable -- set DISCOUNTED_NFT_MINT_WALLET_IDS explicitly later
+ * if the NFT owner list should ever differ from the token-create one.
+ */
+const DISCOUNTED_NFT_MINT_WALLET_IDS = new Set(
+  (process.env.DISCOUNTED_NFT_MINT_WALLET_IDS ?? process.env.DISCOUNTED_CREATE_FEE_WALLET_IDS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+);
+export const OWNER_NFT_MINT_PRICE_ZEC = Number(process.env.OWNER_NFT_MINT_PRICE_ZEC ?? 0.000001);
+
+export function isOwnerNftWallet(walletId: string): boolean {
+  return DISCOUNTED_NFT_MINT_WALLET_IDS.has(walletId);
+}
+
+/** The price a given wallet should pay to mint from `collection`, in ZEC.
+ * Does NOT account for the free whitelist allowance -- that's handled
+ * separately by claimFreeNftWhitelistMint, which is tried first and only
+ * falls through to this price when the free allowance is exhausted or the
+ * wallet was never whitelisted. */
+export function nftMintPriceZecFor(walletId: string, collectionMintPriceZec: number): number {
+  return isOwnerNftWallet(walletId) ? OWNER_NFT_MINT_PRICE_ZEC : collectionMintPriceZec;
+}
+
+/** Brai, 2026-09-19: "pone un mensaje limite por cada wallet 10" -- a flat
+ * cap on how many pieces of ONE collection a single wallet can ever mint
+ * (free + paid combined), independent of price tier. Owner wallets are
+ * NOT exempt -- Brai didn't ask for that, and it's an easy constant to
+ * raise later if he does. */
+export const NFT_MAX_MINTS_PER_WALLET = Number(process.env.NFT_MAX_MINTS_PER_WALLET ?? 10);
+
+/** How many pieces an APPROVED whitelist wallet can mint for free before
+ * paying the normal price like anyone else. */
+export const NFT_WHITELIST_FREE_MINT_LIMIT = Number(process.env.NFT_WHITELIST_FREE_MINT_LIMIT ?? 5);
+
 /** Currency-aware version of createFeeZecFor -- dispatches to the right
  * constant/discount logic for whichever currency the creator picked. */
 export function createFeeFor(currency: "ZEC" | "YEC", walletId: string): number {
