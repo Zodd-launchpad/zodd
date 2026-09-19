@@ -1280,11 +1280,14 @@ app.post("/api/nft/collections/:slug/forge/craft", async (req, reply) => {
   const wallet = await store.getWallet(body.walletId);
   if (!wallet) return reply.code(400).send({ error: "invalid wallet" });
   const result = await store.forgeCraft(body.walletId, collection.id, body.fromTier);
-  if (!result) {
+  if (result.ok === false) {
+    if (result.reason === "cap_reached") {
+      return reply.code(409).send({ error: `this collection already has the maximum of ${store.RELIQUIA_MAX_SUPPLY} TIER 3 pieces` });
+    }
     const need = store.FORGE_RECIPES[body.fromTier].count;
     return reply.code(409).send({ error: `you need ${need} unlisted ${body.fromTier.toLowerCase()}(s) to craft this` });
   }
-  return reply.send(result);
+  return reply.send(result.item);
 });
 
 app.get("/api/nft/collections/:slug/items/:editionNumber", async (req, reply) => {
@@ -1331,6 +1334,41 @@ app.post("/api/admin/nft-seed", async (req, reply) => {
     return reply.send(result);
   } catch (err: any) {
     return reply.code(400).send({ error: err?.message ?? "seed failed" });
+  }
+});
+
+// Brai, 2026-09-19: "hace 5555 de supply con las 3 fotos... borra todo y
+// resembra de cero" -- admin twin of /api/admin/nft-seed above, but for a
+// tier-based collection sharing one image per tier instead of a unique
+// image per piece (see seedTieredNftCollection's comment in store.ts). Same
+// ADMIN_TOKEN gate as every other admin mutation.
+const nftReseedTieredSchema = z.object({
+  slug: z.string().min(1),
+  name: z.string().min(1),
+  description: z.string().max(2000).optional(),
+  currency: z.enum(["ZEC", "YEC"]).optional(),
+  mintPriceZec: z.number().positive(),
+  papiroImageDataUrl: z.string().min(1),
+  fragmentoImageDataUrl: z.string().min(1),
+  reliquiaImageDataUrl: z.string().min(1),
+  tier1Count: z.number().int().nonnegative(),
+  tier2Count: z.number().int().nonnegative(),
+  tier3Count: z.number().int().nonnegative(),
+  wipeExisting: z.boolean(),
+});
+
+app.post("/api/admin/nft-reseed-tiered", async (req, reply) => {
+  if (!ADMIN_TOKEN) return reply.code(503).send({ error: "ADMIN_TOKEN is not configured" });
+  if (req.headers["x-admin-token"] !== ADMIN_TOKEN) return reply.code(401).send({ error: "unauthorized" });
+  // Same zod-inference quirk as nftSeedManifestSchema above (a nested
+  // z.record/optional makes tsc infer every top-level key as optional even
+  // though .parse() enforces them at runtime) -- verified the same way.
+  const body = nftReseedTieredSchema.parse(req.body) as store.TieredSeedInput;
+  try {
+    const result = await store.seedTieredNftCollection(body);
+    return reply.send(result);
+  } catch (err: any) {
+    return reply.code(400).send({ error: err?.message ?? "reseed failed" });
   }
 });
 

@@ -312,7 +312,7 @@ export default function NftMarketTestPage() {
                         <div className="nft-card-img-placeholder">?</div>
                       )}
                       {!it.mintedAt && <span className="nft-card-unminted-badge">{t("nftMarket.unminted")}</span>}
-                      {it.tier !== "PAPIRO" && <span className={`nft-card-tier-badge nft-card-tier-${it.tier.toLowerCase()}`}>{t(FORGE_TIER_LABEL_KEY[it.tier])}</span>}
+                      <span className={`nft-card-tier-badge nft-card-tier-${it.tier.toLowerCase()}`}>{t(FORGE_TIER_LABEL_KEY[it.tier])}</span>
                     </div>
                     <div className="nft-card-body">
                       <span className="nft-card-name">{it.name ?? `#${it.editionNumber}`}</span>

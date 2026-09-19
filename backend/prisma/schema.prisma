@@ -367,6 +367,15 @@ model NftCollection {
   totalSupply       Int // cantidad total de piezas -- X, TODO(Brai): número real
   mintPriceZec      Decimal  @db.Decimal(20, 8) // precio fijo de mint -- X, TODO(Brai): número real
   coverImageDataUrl String?  @db.Text
+  // Brai, 2026-09-19: "hace 5555 de supply con las 3 fotos que te di, uno
+  // que sea tier 1, el otro tier 2 y el otro tier 3" -- one shared image
+  // per tier instead of a unique image per piece (5555 rows would mean
+  // 5555 copies of the same 3 images otherwise). NftItem.imageDataUrl stays
+  // as a per-piece override (null for every pool-seeded piece); resolved at
+  // read time by toNftItemView/getCollectionTierImages in store.ts.
+  papiroImageDataUrl    String? @db.Text
+  fragmentoImageDataUrl String? @db.Text
+  reliquiaImageDataUrl  String? @db.Text
   // Igual que Token.hidden: reservado para cuando exista un índice público
   // de colecciones (hoy hay una sola, alcanzada directo por slug, así que
   // esto todavía no filtra nada en las rutas -- ver server.ts).
@@ -388,9 +397,12 @@ model NftCollection {
 // COUNT plano.
 // Brai, 2026-09-19: "habra 3 tipos de nfts.. los papiros, los fragmentos y
 // las reliquias" -- la forja (ver forgeCraft en store.ts): 5 PAPIRO ->
-// 1 FRAGMENTO, 3 FRAGMENTO -> 1 RELIQUIA. Toda pieza minteada del pool
-// normal nace PAPIRO (ver claimRandomUnmintedNftItem); FRAGMENTO y
-// RELIQUIA solo nacen por crafteo, nunca por mint directo.
+// 1 FRAGMENTO, 3 FRAGMENTO -> 1 RELIQUIA. Al principio (v14) toda pieza del
+// pool nacia PAPIRO y FRAGMENTO/RELIQUIA solo salian de craftear. Desde
+// "hace 5555 de supply... 60% tier1, 35% tier2, 5% tier3" (ver
+// seedTieredNftCollection en store.ts) el pool sembrado YA trae piezas de
+// los 3 tiers de entrada -- craftear sigue siendo la única otra forma de
+// conseguir FRAGMENTO/RELIQUIA además del mint directo, no la única.
 enum NftTier {
   PAPIRO
   FRAGMENTO

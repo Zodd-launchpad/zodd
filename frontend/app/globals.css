@@ -10,6 +10,11 @@
   --green-glow: rgba(22, 199, 132, 0.45);
   --red: #ea3943;
   --red-glow: rgba(234, 57, 67, 0.45);
+  /* Brai, 2026-09-19: "TIER 1 en verde, TIER 2 en amarillo y TIER 3 en
+     ROJO" -- forge tier badge colors (papiro/fragmento/reliquia). --yellow
+     is new; --green/--red are the existing up/down tones reused here. */
+  --yellow: #f3ba2f;
+  --yellow-glow: rgba(243, 186, 47, 0.45);
   --text: #f2f2f3;
   --text-dim: #8a8a92;
   /* Brai, 2026-09-07: "HACELO FARAONICO, COMO DE PIEDRA" -- bronze/gold
@@ -909,8 +914,9 @@ tr:hover td { background: #151517; cursor: pointer; }
   padding: 3px 6px;
   border-radius: 4px;
 }
-.nft-card-tier-fragmento { color: var(--accent); border-color: var(--accent-dim); }
-.nft-card-tier-reliquia { color: var(--bronze); border-color: var(--bronze-dim); text-shadow: 0 0 6px var(--bronze-glow); }
+.nft-card-tier-papiro { color: var(--green); border-color: var(--green); text-shadow: 0 0 6px var(--green-glow); }
+.nft-card-tier-fragmento { color: var(--yellow); border-color: var(--yellow); text-shadow: 0 0 6px var(--yellow-glow); }
+.nft-card-tier-reliquia { color: var(--red); border-color: var(--red); text-shadow: 0 0 6px var(--red-glow); }
 
 .nft-sales-table { width: 100%; border-collapse: collapse; }
 .nft-sales-table a { color: var(--accent); text-decoration: none; }

@@ -1424,28 +1424,52 @@ export interface NftItemView {
   tier: "PAPIRO" | "FRAGMENTO" | "RELIQUIA";
 }
 
-function toNftItemView(i: {
-  id: string;
-  collectionId: string;
-  editionNumber: number;
-  name: string | null;
-  imageDataUrl: string | null;
-  traits: unknown;
-  mintedAt: Date | null;
-  mintPaymentTxid: string | null;
-  ownerInternalWalletId: string | null;
-  ownerInternalWallet?: { walletTag: string } | null;
-  listedPriceZec: unknown;
-  listedAt: Date | null;
-  listedPayoutAddress: string | null;
-  tier: string;
-}): NftItemView {
+// Brai, 2026-09-19: "hace 5555 de supply con las 3 fotos... uno que sea
+// tier 1, el otro tier 2 y el otro tier 3" -- pool-seeded pieces (see
+// seedTieredNftCollection) don't carry their own imageDataUrl (that would
+// mean 5555 copies of 3 images sitting in the DB); this is the shared
+// per-tier fallback, resolved once per query and applied to every row that
+// has no imageDataUrl of its own. Forged pieces (forgeCraft) don't set one
+// either, so they fall back the same way.
+export type NftTierImages = { PAPIRO: string | null; FRAGMENTO: string | null; RELIQUIA: string | null };
+
+export async function getCollectionTierImages(collectionId: string): Promise<NftTierImages> {
+  const c = await prisma.nftCollection.findUnique({
+    where: { id: collectionId },
+    select: { papiroImageDataUrl: true, fragmentoImageDataUrl: true, reliquiaImageDataUrl: true },
+  });
+  return {
+    PAPIRO: c?.papiroImageDataUrl ?? null,
+    FRAGMENTO: c?.fragmentoImageDataUrl ?? null,
+    RELIQUIA: c?.reliquiaImageDataUrl ?? null,
+  };
+}
+
+function toNftItemView(
+  i: {
+    id: string;
+    collectionId: string;
+    editionNumber: number;
+    name: string | null;
+    imageDataUrl: string | null;
+    traits: unknown;
+    mintedAt: Date | null;
+    mintPaymentTxid: string | null;
+    ownerInternalWalletId: string | null;
+    ownerInternalWallet?: { walletTag: string } | null;
+    listedPriceZec: unknown;
+    listedAt: Date | null;
+    listedPayoutAddress: string | null;
+    tier: string;
+  },
+  tierImages?: NftTierImages
+): NftItemView {
   return {
     id: i.id,
     collectionId: i.collectionId,
     editionNumber: i.editionNumber,
     name: i.name,
-    imageDataUrl: i.imageDataUrl,
+    imageDataUrl: i.imageDataUrl ?? (tierImages ? tierImages[i.tier as keyof NftTierImages] ?? null : null),
     traits: i.traits ?? null,
     mintedAt: i.mintedAt ? i.mintedAt.toISOString() : null,
     mintPaymentTxid: i.mintPaymentTxid,
@@ -1487,7 +1511,7 @@ export async function listNftItems(
       : opts.sort === "price_asc"
         ? [{ listedPriceZec: "asc" as const }]
         : [{ editionNumber: "asc" as const }];
-  const [rows, total] = await Promise.all([
+  const [rows, total, tierImages] = await Promise.all([
     prisma.nftItem.findMany({
       where,
       orderBy,
@@ -1496,8 +1520,9 @@ export async function listNftItems(
       include: { ownerInternalWallet: { select: { walletTag: true } } },
     }),
     prisma.nftItem.count({ where }),
+    getCollectionTierImages(collectionId),
   ]);
-  return { items: rows.map(toNftItemView), total };
+  return { items: rows.map((r) => toNftItemView(r, tierImages)), total };
 }
 
 // Brai, 2026-09-19 (v14): powers the new Traits tab on /nft/test (copying
@@ -1524,11 +1549,14 @@ export async function getNftTraitCounts(collectionId: string): Promise<NftTraitC
 }
 
 export async function getNftItemByEdition(collectionId: string, editionNumber: number): Promise<NftItemView | null> {
-  const i = await prisma.nftItem.findUnique({
-    where: { collectionId_editionNumber: { collectionId, editionNumber } },
-    include: { ownerInternalWallet: { select: { walletTag: true } } },
-  });
-  return i ? toNftItemView(i) : null;
+  const [i, tierImages] = await Promise.all([
+    prisma.nftItem.findUnique({
+      where: { collectionId_editionNumber: { collectionId, editionNumber } },
+      include: { ownerInternalWallet: { select: { walletTag: true } } },
+    }),
+    getCollectionTierImages(collectionId),
+  ]);
+  return i ? toNftItemView(i, tierImages) : null;
 }
 
 export async function getNftItemById(id: string): Promise<NftItemView | null> {
@@ -1536,7 +1564,9 @@ export async function getNftItemById(id: string): Promise<NftItemView | null> {
     where: { id },
     include: { ownerInternalWallet: { select: { walletTag: true } } },
   });
-  return i ? toNftItemView(i) : null;
+  if (!i) return null;
+  const tierImages = await getCollectionTierImages(i.collectionId);
+  return toNftItemView(i, tierImages);
 }
 
 export async function getWalletNfts(walletId: string): Promise<NftItemView[]> {
@@ -1545,7 +1575,15 @@ export async function getWalletNfts(walletId: string): Promise<NftItemView[]> {
     orderBy: { mintedAt: "desc" },
     include: { ownerInternalWallet: { select: { walletTag: true } } },
   });
-  return rows.map(toNftItemView);
+  // Brai, 2026-09-19: a wallet's pieces can in principle span more than one
+  // collection, so this resolves each row's tier image against its OWN
+  // collection rather than assuming a single one.
+  const collectionIds: string[] = Array.from(new Set(rows.map((r) => r.collectionId)));
+  const tierImagesEntries = await Promise.all(
+    collectionIds.map(async (id): Promise<[string, NftTierImages]> => [id, await getCollectionTierImages(id)])
+  );
+  const tierImagesByCollection = new Map<string, NftTierImages>(tierImagesEntries);
+  return rows.map((r) => toNftItemView(r, tierImagesByCollection.get(r.collectionId)));
 }
 
 /** Owner-checked list/unlist -- both are a plain conditional UPDATE (WHERE
@@ -1579,9 +1617,10 @@ export async function unlistNft(itemId: string, walletId: string): Promise<NftIt
 
 // ---------- Forge: papiros -> fragmentos -> reliquias ----------
 // Brai, 2026-09-19: "si tenes 5 papiros podes crear 1 fragmento, si tenes 3
-// fragmentos podes crear una reliquia". Only PAPIRO pieces are ever minted
-// directly from a collection's pool (claimRandomUnmintedNftItem) --
-// FRAGMENTO and RELIQUIA only ever come from crafting here.
+// fragmentos podes crear una reliquia". A tier-based pool seeded by
+// seedTieredNftCollection can mint FRAGMENTO/RELIQUIA pieces directly too
+// (claimRandomUnmintedNftItem just claims whatever tier a row already has)
+// -- crafting here is an additional way to get there, not the only one.
 export const FORGE_RECIPES: Record<"PAPIRO" | "FRAGMENTO", { toTier: "FRAGMENTO" | "RELIQUIA"; count: number }> = {
   PAPIRO: { toTier: "FRAGMENTO", count: 5 },
   FRAGMENTO: { toTier: "RELIQUIA", count: 3 },
@@ -1606,32 +1645,54 @@ export async function getForgeInventory(walletId: string, collectionId: string):
   return counts;
 }
 
+// Brai, 2026-09-19: "balancea para que haya 300 personas que tengan
+// reliquia incluyendo los que puedan forjar... 300 reliquias en total
+// maximo" -- a hard, permanent ceiling on how many non-burned TIER 3
+// (RELIQUIA) pieces can ever exist in a collection, counting BOTH the ones
+// seeded directly by seedTieredNftCollection AND the ones forged here.
+// Checked live (a plain COUNT) inside the same transaction as the burn, so
+// once the cap is hit the FRAGMENTO->RELIQUIA craft simply stops working --
+// nothing is burned, the wallet keeps its fragmentos, same as any other
+// "didn't work, nothing changed" rejection in this file.
+export const RELIQUIA_MAX_SUPPLY = 300;
+
+export type ForgeCraftResult = { ok: true; item: NftItemView } | { ok: false; reason: "insufficient" | "cap_reached" };
+
 /**
  * Burns FORGE_RECIPES[fromTier].count pieces of fromTier owned by this
  * wallet (unlisted, already-minted, not already burned) and mints exactly
  * one brand-new piece of the next tier up, owned by the same wallet.
- * Returns null when the wallet doesn't have enough eligible pieces right
- * now (same "didn't work, nothing changed" convention as
- * listNftForSale/unlistNft returning null on a failed owner check).
+ * Returns { ok: false, reason: "insufficient" } when the wallet doesn't have
+ * enough eligible pieces, or { ok: false, reason: "cap_reached" } when
+ * crafting into RELIQUIA would exceed RELIQUIA_MAX_SUPPLY (same "didn't
+ * work, nothing changed" convention as listNftForSale/unlistNft returning
+ * null on a failed owner check -- just discriminated here since the two
+ * rejection reasons need different messages, see the /forge/craft route).
  *
  * Race-safe the same way fillNftPurchase is: the burn is a single
  * conditional UPDATE (WHERE id IN (...) AND burnedAt IS NULL) inside a
  * transaction, so if two requests somehow raced for the exact same rows,
  * whichever commits first wins and the loser's updateMany.count comes back
- * short -- caught below and turned into a clean rollback + null, instead of
- * ever burning fewer than the full recipe count or minting without a full
- * burn to back it.
+ * short -- caught below and turned into a clean rollback + "insufficient",
+ * instead of ever burning fewer than the full recipe count or minting
+ * without a full burn to back it.
  */
-export async function forgeCraft(walletId: string, collectionId: string, fromTier: "PAPIRO" | "FRAGMENTO"): Promise<NftItemView | null> {
+export async function forgeCraft(walletId: string, collectionId: string, fromTier: "PAPIRO" | "FRAGMENTO"): Promise<ForgeCraftResult> {
   const recipe = FORGE_RECIPES[fromTier];
   try {
     return await prisma.$transaction(async (tx) => {
+      if (recipe.toTier === "RELIQUIA") {
+        const existingReliquias = await tx.nftItem.count({ where: { collectionId, tier: "RELIQUIA", burnedAt: null } });
+        if (existingReliquias >= RELIQUIA_MAX_SUPPLY) {
+          return { ok: false, reason: "cap_reached" } as const;
+        }
+      }
       const candidates = await tx.nftItem.findMany({
         where: { collectionId, ownerInternalWalletId: walletId, tier: fromTier, burnedAt: null, listedPriceZec: null, mintedAt: { not: null } },
         take: recipe.count,
         select: { id: true },
       });
-      if (candidates.length < recipe.count) return null;
+      if (candidates.length < recipe.count) return { ok: false, reason: "insufficient" } as const;
       const ids = candidates.map((c) => c.id);
       const burned = await tx.nftItem.updateMany({
         where: { id: { in: ids }, ownerInternalWalletId: walletId, burnedAt: null },
@@ -1649,7 +1710,7 @@ export async function forgeCraft(walletId: string, collectionId: string, fromTie
         data: {
           collectionId,
           editionNumber: nextEdition,
-          name: `${recipe.toTier === "FRAGMENTO" ? "Fragmento" : "Reliquia"} #${nextEdition}`,
+          name: `${recipe.toTier === "FRAGMENTO" ? "TIER 2" : "TIER 3"} #${nextEdition}`,
           tier: recipe.toTier,
           mintedAt: new Date(),
           mintPaymentTxid: "FORGED",
@@ -1657,10 +1718,11 @@ export async function forgeCraft(walletId: string, collectionId: string, fromTie
         },
         include: { ownerInternalWallet: { select: { walletTag: true } } },
       });
-      return toNftItemView(created);
+      const tierImages = await getCollectionTierImages(collectionId);
+      return { ok: true, item: toNftItemView(created, tierImages) } as const;
     });
   } catch (err) {
-    if (err instanceof Error && err.message === "__forge_race_lost__") return null;
+    if (err instanceof Error && err.message === "__forge_race_lost__") return { ok: false, reason: "insufficient" };
     throw err;
   }
 }
@@ -1773,6 +1835,108 @@ export async function seedNftCollectionFromManifest(
   }
 
   return { collectionId: collection.id, totalSupply, created, updated, skippedMinted };
+}
+
+// Brai, 2026-09-19: "hace 5555 de supply con las 3 fotos que te di... 60%
+// tier1, 35% tier2, 5% tier3, calcula para que haya 300 reliquias en total
+// maximo. borra todo y resembra de cero" -- a tier-based sibling of
+// seedNftCollectionFromManifest above, for a collection whose pieces share
+// one image per tier instead of a unique image each (see the tier-image
+// fields on NftCollection). Wipes the collection's existing pieces (and
+// anything referencing them) first when wipeExisting is true, then bulk-
+// inserts totalSupply rows with no per-row imageDataUrl -- they resolve
+// through getCollectionTierImages at read time instead.
+export interface TieredSeedInput {
+  slug: string;
+  name: string;
+  description?: string | null;
+  currency?: "ZEC" | "YEC";
+  mintPriceZec: number;
+  papiroImageDataUrl: string;
+  fragmentoImageDataUrl: string;
+  reliquiaImageDataUrl: string;
+  tier1Count: number;
+  tier2Count: number;
+  tier3Count: number;
+  wipeExisting: boolean;
+}
+
+export async function seedTieredNftCollection(
+  input: TieredSeedInput
+): Promise<{ collectionId: string; totalSupply: number; wipedItems: number }> {
+  if (!input.slug || !input.name) throw new Error("slug and name are required");
+  if (!(input.mintPriceZec > 0)) throw new Error("mintPriceZec must be a positive number");
+  for (const [k, v] of Object.entries({ tier1Count: input.tier1Count, tier2Count: input.tier2Count, tier3Count: input.tier3Count })) {
+    if (!Number.isInteger(v) || v < 0) throw new Error(`${k} must be a non-negative integer`);
+  }
+  // RELIQUIA_MAX_SUPPLY (see forgeCraft) is a ceiling on RELIQUIA pieces in
+  // existence at once, counting direct-mint ones too -- a manifest that
+  // seeds more than that directly would make the "300 max" promise false
+  // from the moment this runs, before a single craft happens.
+  if (input.tier3Count > RELIQUIA_MAX_SUPPLY) {
+    throw new Error(`tier3Count (${input.tier3Count}) can't exceed RELIQUIA_MAX_SUPPLY (${RELIQUIA_MAX_SUPPLY})`);
+  }
+  if (!input.papiroImageDataUrl || !input.fragmentoImageDataUrl || !input.reliquiaImageDataUrl) {
+    throw new Error("papiroImageDataUrl, fragmentoImageDataUrl and reliquiaImageDataUrl are all required");
+  }
+
+  const totalSupply = input.tier1Count + input.tier2Count + input.tier3Count;
+  if (totalSupply <= 0) throw new Error("tier1Count + tier2Count + tier3Count must be greater than zero");
+
+  const collection = await prisma.nftCollection.upsert({
+    where: { slug: input.slug },
+    create: {
+      slug: input.slug,
+      name: input.name,
+      description: input.description ?? null,
+      currency: input.currency ?? "ZEC",
+      totalSupply,
+      mintPriceZec: input.mintPriceZec,
+      papiroImageDataUrl: input.papiroImageDataUrl,
+      fragmentoImageDataUrl: input.fragmentoImageDataUrl,
+      reliquiaImageDataUrl: input.reliquiaImageDataUrl,
+      hidden: true,
+      mintedCount: 0,
+    },
+    update: {
+      name: input.name,
+      description: input.description ?? null,
+      currency: input.currency ?? undefined,
+      totalSupply,
+      mintPriceZec: input.mintPriceZec,
+      papiroImageDataUrl: input.papiroImageDataUrl,
+      fragmentoImageDataUrl: input.fragmentoImageDataUrl,
+      reliquiaImageDataUrl: input.reliquiaImageDataUrl,
+      mintedCount: 0,
+    },
+  });
+
+  let wipedItems = 0;
+  if (input.wipeExisting) {
+    const existing = await prisma.nftItem.findMany({ where: { collectionId: collection.id }, select: { id: true } });
+    const ids = existing.map((r) => r.id);
+    if (ids.length) {
+      // NftPurchaseOrder.item is a real FK (RESTRICT) -- has to go before
+      // the items themselves, or the delete below fails outright.
+      await prisma.nftPurchaseOrder.deleteMany({ where: { itemId: { in: ids } } });
+    }
+    await prisma.pendingNftMint.deleteMany({ where: { collectionId: collection.id } });
+    const del = await prisma.nftItem.deleteMany({ where: { collectionId: collection.id } });
+    wipedItems = del.count;
+  }
+
+  const rows: { collectionId: string; editionNumber: number; tier: "PAPIRO" | "FRAGMENTO" | "RELIQUIA" }[] = [];
+  let edition = 1;
+  for (let i = 0; i < input.tier1Count; i++) rows.push({ collectionId: collection.id, editionNumber: edition++, tier: "PAPIRO" });
+  for (let i = 0; i < input.tier2Count; i++) rows.push({ collectionId: collection.id, editionNumber: edition++, tier: "FRAGMENTO" });
+  for (let i = 0; i < input.tier3Count; i++) rows.push({ collectionId: collection.id, editionNumber: edition++, tier: "RELIQUIA" });
+
+  const CHUNK = 1000;
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    await prisma.nftItem.createMany({ data: rows.slice(i, i + CHUNK) });
+  }
+
+  return { collectionId: collection.id, totalSupply, wipedItems };
 }
 
 // ---------- Pending NFT mints ----------

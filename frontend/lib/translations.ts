@@ -362,17 +362,21 @@ export const translations = {
   // las reliquias .. genera una solapa que sea como la forja" -- 5 papiros
   // -> 1 fragmento, 3 fragmentos -> 1 reliquia; owning a reliquia unlocks
   // LA PIRAMIDE in the Launchpad.
-  "nftMarket.forge.tier.papiro": { en: "Papyrus", zh: "纸莎草" },
-  "nftMarket.forge.tier.fragmento": { en: "Fragment", zh: "碎片" },
-  "nftMarket.forge.tier.reliquia": { en: "Relic", zh: "圣物" },
+  // Brai, 2026-09-19: "TIER 1 en verde, TIER 2 en amarillo y TIER 3 en
+  // ROJO" -- the tier badge now shows a plain rank instead of the
+  // papiro/fragmento/reliquia names (color comes from CSS, see
+  // .nft-card-tier-papiro/-fragmento/-reliquia in globals.css).
+  "nftMarket.forge.tier.papiro": { en: "TIER 1", zh: "一级" },
+  "nftMarket.forge.tier.fragmento": { en: "TIER 2", zh: "二级" },
+  "nftMarket.forge.tier.reliquia": { en: "TIER 3", zh: "三级" },
   "nftMarket.forge.intro": {
-    en: "Combine your pieces here: 5 Papyri forge into 1 Fragment, and 3 Fragments forge into 1 Relic. Crafting burns the pieces you feed in -- it can't be undone.",
-    zh: "在这里合成你的藏品：5 个纸莎草可合成 1 个碎片，3 个碎片可合成 1 个圣物。合成会烧毁投入的藏品，且无法撤销。",
+    en: "Combine your pieces here: 5 TIER 1 forge into 1 TIER 2, and 3 TIER 2 forge into 1 TIER 3. Crafting burns the pieces you feed in -- it can't be undone.",
+    zh: "在这里合成你的藏品：5 个一级可合成 1 个二级，3 个二级可合成 1 个三级。合成会烧毁投入的藏品，且无法撤销。",
   },
   "nftMarket.forge.craftButton": { en: "Craft (uses {count})", zh: "合成（消耗 {count} 个）" },
   "nftMarket.forge.crafting": { en: "Crafting…", zh: "合成中…" },
   "nftMarket.forge.crafted": { en: "Crafted {name}!", zh: "已合成 {name}！" },
-  "nftMarket.forge.reliquiaOwned": { en: "You own {count} Relic(s) -- that unlocks LA PIRAMIDE.", zh: "你拥有 {count} 个圣物——已解锁金字塔（LA PIRAMIDE）。" },
+  "nftMarket.forge.reliquiaOwned": { en: "You own {count} TIER 3 piece(s) -- that unlocks LA PIRAMIDE.", zh: "你拥有 {count} 个三级藏品——已解锁金字塔（LA PIRAMIDE）。" },
   "nftMarket.forge.goToPyramid": { en: "Go to LA PIRAMIDE →", zh: "前往金字塔 →" },
 
   // Brai, 2026-09-19: "LA PIRAMIDE, que es de donde salen unos tokens
@@ -382,17 +386,17 @@ export const translations = {
   // graduation threshold (see graduationThresholdFor in the backend).
   "pyramid.title": { en: "LA PIRAMIDE", zh: "金字塔" },
   "pyramid.subtitle": {
-    en: "Tokens launched here graduate to the general market at just 3 ZEC in the curve, instead of the normal threshold. Only Relic holders can launch one.",
-    zh: "在这里发行的代币只需在曲线中累积 3 ZEC 即可毕业进入公开市场，远低于普通门槛。只有拥有圣物的人才能在此发行代币。",
+    en: "Tokens launched here graduate to the general market at just 3 ZEC in the curve, instead of the normal threshold. Only TIER 3 holders can launch one.",
+    zh: "在这里发行的代币只需在曲线中累积 3 ZEC 即可毕业进入公开市场，远低于普通门槛。只有拥有三级藏品的人才能在此发行代币。",
   },
-  "pyramid.locked.title": { en: "You need a Relic to enter", zh: "你需要拥有一个圣物才能进入" },
+  "pyramid.locked.title": { en: "You need a TIER 3 piece to enter", zh: "你需要拥有一个三级藏品才能进入" },
   "pyramid.locked.body": {
-    en: "Craft a Relic in the Forge (3 Fragments, made from 5 Papyri each) to unlock LA PIRAMIDE. Selling your only Relic locks you back out.",
-    zh: "在熔炉中合成一个圣物（需要 3 个碎片，每个碎片由 5 个纸莎草合成）以解锁金字塔。如果卖掉你唯一的圣物，将重新失去访问权限。",
+    en: "Craft a TIER 3 in the Forge (3 TIER 2, made from 5 TIER 1 each) to unlock LA PIRAMIDE. Selling your only TIER 3 locks you back out.",
+    zh: "在熔炉中合成一个三级藏品（需要 3 个二级，每个二级由 5 个一级合成）以解锁金字塔。如果卖掉你唯一的三级藏品，将重新失去访问权限。",
   },
   "pyramid.locked.goToForge": { en: "Go to the Forge →", zh: "前往熔炉 →" },
   "pyramid.graduationNote": { en: "Graduates to the general market at 3 {currency} in the curve.", zh: "累积 3 {currency} 即可毕业进入公开市场。" },
-  "pyramid.checkingAccess": { en: "Checking your Relic…", zh: "正在检查你的圣物…" },
+  "pyramid.checkingAccess": { en: "Checking your TIER 3…", zh: "正在检查你的三级藏品…" },
 
   "nftMint.back": { en: "← Back to market", zh: "← 返回市场" },
   "nftMint.title": { en: "Mint · {name}", zh: "铸造 · {name}" },

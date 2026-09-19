@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import QRCode from "qrcode";
 import { api, formatUsd, formatZec, type NftItem } from "@/lib/api";
 import { useLanguage } from "@/lib/i18n";
+import type { TranslationKey } from "@/lib/translations";
 import { useZecUsdPrice } from "@/lib/zecPrice";
 import { useWallet } from "@/lib/wallet";
 import { getNoirWallet, isNoirWalletInstalled } from "@noir-wallet/sdk";
@@ -14,6 +15,15 @@ import { getNoirWallet, isNoirWalletInstalled } from "@noir-wallet/sdk";
 // list/unlist, anyone else sees buy (same one-time-address + memo + poll
 // payment mechanism as the mint page and BuyModal.tsx).
 const COLLECTION_SLUG = "zodd-genesis";
+
+// Brai, 2026-09-19: "a cada nft le pondras TIER 1 en verde, TIER 2 en
+// amarillo y TIER 3 en ROJO" -- same tier badge as the Items grid
+// (nft/test/page.tsx), shown on the detail page too.
+const FORGE_TIER_LABEL_KEY: Record<"PAPIRO" | "FRAGMENTO" | "RELIQUIA", TranslationKey> = {
+  PAPIRO: "nftMarket.forge.tier.papiro",
+  FRAGMENTO: "nftMarket.forge.tier.fragmento",
+  RELIQUIA: "nftMarket.forge.tier.reliquia",
+};
 
 function isShieldedAddress(addr: string): boolean {
   return /^(u1|zs1|ys1)/.test(addr.trim());
@@ -190,7 +200,12 @@ export default function NftItemPage() {
           {item.imageDataUrl ? <img src={item.imageDataUrl} alt={item.name ?? ""} className="nft-item-img" /> : <div className="nft-card-img-placeholder">?</div>}
         </div>
         <div className="card nft-item-panel">
-          <h1 style={{ marginTop: 0 }}>{item.name ?? `#${item.editionNumber}`}</h1>
+          <h1 style={{ marginTop: 0 }}>
+            {item.name ?? `#${item.editionNumber}`}{" "}
+            <span className={`nft-card-tier-badge nft-card-tier-${item.tier.toLowerCase()}`} style={{ position: "static", verticalAlign: "middle" }}>
+              {t(FORGE_TIER_LABEL_KEY[item.tier])}
+            </span>
+          </h1>
           {item.traits && Object.keys(item.traits).length > 0 && (
             <div className="nft-item-traits">
               {Object.entries(item.traits).map(([k, v]) => (
