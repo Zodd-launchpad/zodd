@@ -82,8 +82,8 @@ export default function NftMarketTestPage() {
   const [tab, setTab] = useState<Tab>("items");
 
   // ---- Items tab ----
-  const [status, setStatus] = useState<StatusFilter>("all");
-  const [sort, setSort] = useState<SortKey>("edition");
+  const [status, setStatus] = useState<StatusFilter>("listed");
+  const [sort, setSort] = useState<SortKey>("price_asc");
   const [page, setPage] = useState(1);
   const [items, setItems] = useState<NftItem[] | null>(null);
   const [itemsTotal, setItemsTotal] = useState(0);

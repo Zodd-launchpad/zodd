@@ -43,7 +43,7 @@ const { sendPayout, MAX_PAYOUT_ZEC } = zcashModule;
 // Railway's variables and only he knows the value.
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 
-const app = Fastify({ logger: true });
+const app = Fastify({ logger: true, maxParamLength: 512 });
 app.log.info(`ZCASH_MODE=${ZCASH_MODE} -- ${ZCASH_MODE === "real" ? "REAL ZEC IS LIVE ON THIS DEPLOYMENT" : "using the simulated zcash service, no real funds move"}`);
 
 app.register(import("@fastify/cors"), { origin: true });
