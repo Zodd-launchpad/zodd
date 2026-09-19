@@ -98,6 +98,15 @@ export default function TokenPage() {
                   <OfficialPill />
                 </span>
               )}
+              {token.isPyramidToken && (
+                <span
+                  className="badge"
+                  style={{ borderColor: "var(--bronze-dim)", color: "var(--bronze)", textShadow: "0 0 6px var(--bronze-glow)" }}
+                  title={t("pyramid.graduationNote", { currency: token.currency })}
+                >
+                  {t("pyramid.title")}
+                </span>
+              )}
             </div>
             <p className="muted" style={{ margin: 0 }}>{token.name}</p>
           </div>

@@ -28,6 +28,10 @@ export interface TokenSummary {
   tokensSold: number;
   graduated: boolean;
   graduationThresholdZec: number;
+  // Brai, 2026-09-19: "LA PIRAMIDE" -- true only for a token created
+  // through the reliquia-gated flow; it graduates at graduationThresholdZec
+  // (3 ZEC) instead of the normal default.
+  isPyramidToken: boolean;
   createdAt: string;
   logoDataUrl: string | null;
   description: string | null;
@@ -196,6 +200,10 @@ export const api = {
     // check in backend/src/server.ts's POST /api/tokens for why this can't
     // always be as large as requested.
     firstBuyZec?: number;
+    // Brai, 2026-09-19: "LA PIRAMIDE" -- only honored by the backend when
+    // this wallet currently owns a reliquia (see checkPyramidAccess below);
+    // otherwise the request is rejected with a 403.
+    isPyramidToken?: boolean;
   }): Promise<{
     creationId: string;
     currency: Currency;
@@ -305,6 +313,20 @@ export const api = {
     req(`/api/nft/items/${itemId}/buy`, { method: "POST", body: JSON.stringify({ walletId }) }),
   getNftPurchase: (id: string): Promise<NftPurchaseOrder> => req(`/api/nft/purchases/${id}`),
   getNftActivity: (): Promise<NftActivity[]> => req("/api/nft/activity"),
+
+  // ---------- Forge: papiros -> fragmentos -> reliquias ----------
+  getNftForgeInventory: (slug: string, walletId: string): Promise<{ inventory: NftForgeInventory; recipes: NftForgeRecipes }> =>
+    req(`/api/nft/collections/${slug}/forge?walletId=${encodeURIComponent(walletId)}`),
+  craftNft: (slug: string, data: { walletId: string; fromTier: "PAPIRO" | "FRAGMENTO" }): Promise<NftItem> =>
+    req(`/api/nft/collections/${slug}/forge/craft`, { method: "POST", body: JSON.stringify(data) }),
+
+  // ---------- LA PIRAMIDE ----------
+  // Brai, 2026-09-19: "tener la reliquia hace que tengas el privilegio de
+  // entrar a esa pestaña" -- used by the Launchpad's Pyramid section to
+  // show/hide the create form; the real enforcement is server-side (see
+  // createToken's isPyramidToken and the backend's POST /api/tokens).
+  checkPyramidAccess: (walletId: string): Promise<{ hasAccess: boolean }> =>
+    req(`/api/pyramid/access?walletId=${encodeURIComponent(walletId)}`),
 };
 
 export interface NftWhitelistEntry {
@@ -372,6 +394,22 @@ export interface NftItem {
   listedPriceZec: number | null;
   listedAt: string | null;
   listedPayoutAddress: string | null;
+  // Brai, 2026-09-19: "habra 3 tipos de nfts.. los papiros, los fragmentos
+  // y las reliquias" -- see the Forge tab.
+  tier: "PAPIRO" | "FRAGMENTO" | "RELIQUIA";
+}
+
+// Brai, 2026-09-19: the Forge tab's inventory + craft flow -- 5 PAPIRO ->
+// 1 FRAGMENTO, 3 FRAGMENTO -> 1 RELIQUIA (see FORGE_RECIPES in the backend).
+export interface NftForgeInventory {
+  papiro: number;
+  fragmento: number;
+  reliquia: number;
+}
+
+export interface NftForgeRecipes {
+  PAPIRO: { toTier: "FRAGMENTO"; count: number };
+  FRAGMENTO: { toTier: "RELIQUIA"; count: number };
 }
 
 export type NftMintResult =

@@ -9,6 +9,7 @@ import {
   type NftItem,
   type NftActivity,
   type NftTraitCount,
+  type NftForgeInventory,
 } from "@/lib/api";
 import { useLanguage } from "@/lib/i18n";
 import type { TranslationKey } from "@/lib/translations";
@@ -36,9 +37,13 @@ import { useWallet } from "@/lib/wallet";
 const COLLECTION_SLUG = "zodd-genesis";
 const PAGE_SIZE = 48;
 
-type Tab = "items" | "traits" | "analytics" | "activity" | "about";
+type Tab = "items" | "traits" | "analytics" | "activity" | "forge" | "about";
 type StatusFilter = "all" | "listed" | "not_listed" | "owned";
 type SortKey = "edition" | "price_asc" | "price_desc";
+// Brai, 2026-09-19: "5 papiros podes crear 1 fragmento, si tenes 3
+// fragmentos podes crear una reliquia" -- the two craftable directions on
+// the Forge tab (RELIQUIA has nothing further to craft into).
+type ForgeFromTier = "PAPIRO" | "FRAGMENTO";
 
 // t()'s key type is a strict union generated from translations.ts, so a
 // template-literal lookup like `nftMarket.tab.${tab}` doesn't type-check --
@@ -48,7 +53,13 @@ const TAB_LABEL_KEY: Record<Tab, TranslationKey> = {
   traits: "nftMarket.tab.traits",
   analytics: "nftMarket.tab.analytics",
   activity: "nftMarket.tab.activity",
+  forge: "nftMarket.tab.forge",
   about: "nftMarket.tab.about",
+};
+const FORGE_TIER_LABEL_KEY: Record<"PAPIRO" | "FRAGMENTO" | "RELIQUIA", TranslationKey> = {
+  PAPIRO: "nftMarket.forge.tier.papiro",
+  FRAGMENTO: "nftMarket.forge.tier.fragmento",
+  RELIQUIA: "nftMarket.forge.tier.reliquia",
 };
 const STATUS_LABEL_KEY: Record<StatusFilter, TranslationKey> = {
   all: "nftMarket.status.all",
@@ -82,6 +93,11 @@ export default function NftMarketTestPage() {
 
   // ---- Activity tab (lazy-loaded once) ----
   const [activity, setActivity] = useState<NftActivity[] | null>(null);
+
+  // ---- Forge tab ----
+  const [forgeInventory, setForgeInventory] = useState<NftForgeInventory | null>(null);
+  const [forgeCraftingTier, setForgeCraftingTier] = useState<ForgeFromTier | null>(null);
+  const [forgeMessage, setForgeMessage] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
 
   useEffect(() => {
     api
@@ -131,6 +147,36 @@ export default function NftMarketTestPage() {
       .then((rows) => setActivity(rows.filter((r) => r.collectionSlug === COLLECTION_SLUG)))
       .catch(() => setActivity([]));
   }, [collection, tab, activity]);
+
+  // Brai, 2026-09-19: the Forge tab needs a connected wallet (it's your own
+  // inventory) -- refetched whenever the tab is open and the wallet changes,
+  // same "always current, never stale after a craft" spirit as portfolio.
+  useEffect(() => {
+    if (!collection || tab !== "forge" || !wallet) {
+      if (!wallet) setForgeInventory(null);
+      return;
+    }
+    api
+      .getNftForgeInventory(COLLECTION_SLUG, wallet.walletId)
+      .then((r) => setForgeInventory(r.inventory))
+      .catch(() => setForgeInventory(null));
+  }, [collection, tab, wallet]);
+
+  async function craftForgeTier(fromTier: ForgeFromTier) {
+    if (!wallet) return;
+    setForgeCraftingTier(fromTier);
+    setForgeMessage(null);
+    try {
+      const result = await api.craftNft(COLLECTION_SLUG, { walletId: wallet.walletId, fromTier });
+      setForgeMessage({ kind: "ok", text: t("nftMarket.forge.crafted", { name: result.name ?? `#${result.editionNumber}` }) });
+      const r = await api.getNftForgeInventory(COLLECTION_SLUG, wallet.walletId);
+      setForgeInventory(r.inventory);
+    } catch (err) {
+      setForgeMessage({ kind: "error", text: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setForgeCraftingTier(null);
+    }
+  }
 
   const traitsByKey = useMemo(() => {
     if (!traits) return null;
@@ -205,7 +251,7 @@ export default function NftMarketTestPage() {
       </div>
 
       <div className="nft-market-tabs">
-        {(["items", "traits", "analytics", "activity", "about"] as Tab[]).map((k) => (
+        {(["items", "traits", "analytics", "activity", "forge", "about"] as Tab[]).map((k) => (
           <button key={k} className={`nft-market-tab ${tab === k ? "active" : ""}`} onClick={() => setTab(k)}>
             {t(TAB_LABEL_KEY[k])}
           </button>
@@ -266,6 +312,7 @@ export default function NftMarketTestPage() {
                         <div className="nft-card-img-placeholder">?</div>
                       )}
                       {!it.mintedAt && <span className="nft-card-unminted-badge">{t("nftMarket.unminted")}</span>}
+                      {it.tier !== "PAPIRO" && <span className={`nft-card-tier-badge nft-card-tier-${it.tier.toLowerCase()}`}>{t(FORGE_TIER_LABEL_KEY[it.tier])}</span>}
                     </div>
                     <div className="nft-card-body">
                       <span className="nft-card-name">{it.name ?? `#${it.editionNumber}`}</span>
@@ -404,6 +451,67 @@ export default function NftMarketTestPage() {
                 ))}
               </tbody>
             </table>
+          )}
+        </div>
+      )}
+
+      {tab === "forge" && (
+        <div className="nft-forge-tab">
+          {!wallet && <p className="muted">{t("portfolio.connectFirst")}</p>}
+          {wallet && forgeInventory === null && <p className="muted">{t("nftMarket.loading")}</p>}
+          {wallet && forgeInventory !== null && (
+            <>
+              <p className="muted nft-forge-intro">{t("nftMarket.forge.intro")}</p>
+              {forgeMessage && (
+                <div className={`nft-forge-message ${forgeMessage.kind === "error" ? "nft-forge-message-error" : "nft-forge-message-ok"}`}>
+                  {forgeMessage.text}
+                </div>
+              )}
+              <div className="nft-forge-recipes">
+                <div className="card nft-forge-recipe">
+                  <div className="nft-forge-recipe-you-have">
+                    <span className="nft-forge-count">{forgeInventory.papiro}</span>
+                    <span className="muted">{t(FORGE_TIER_LABEL_KEY.PAPIRO)}</span>
+                  </div>
+                  <div className="nft-forge-arrow">→</div>
+                  <div className="nft-forge-recipe-result">
+                    <span className="nft-forge-count">1</span>
+                    <span className="muted">{t(FORGE_TIER_LABEL_KEY.FRAGMENTO)}</span>
+                  </div>
+                  <button
+                    className="btn btn-gold"
+                    disabled={forgeInventory.papiro < 5 || forgeCraftingTier !== null}
+                    onClick={() => craftForgeTier("PAPIRO")}
+                  >
+                    {forgeCraftingTier === "PAPIRO" ? t("nftMarket.forge.crafting") : t("nftMarket.forge.craftButton", { count: "5" })}
+                  </button>
+                </div>
+                <div className="card nft-forge-recipe">
+                  <div className="nft-forge-recipe-you-have">
+                    <span className="nft-forge-count">{forgeInventory.fragmento}</span>
+                    <span className="muted">{t(FORGE_TIER_LABEL_KEY.FRAGMENTO)}</span>
+                  </div>
+                  <div className="nft-forge-arrow">→</div>
+                  <div className="nft-forge-recipe-result">
+                    <span className="nft-forge-count">1</span>
+                    <span className="muted">{t(FORGE_TIER_LABEL_KEY.RELIQUIA)}</span>
+                  </div>
+                  <button
+                    className="btn btn-gold"
+                    disabled={forgeInventory.fragmento < 3 || forgeCraftingTier !== null}
+                    onClick={() => craftForgeTier("FRAGMENTO")}
+                  >
+                    {forgeCraftingTier === "FRAGMENTO" ? t("nftMarket.forge.crafting") : t("nftMarket.forge.craftButton", { count: "3" })}
+                  </button>
+                </div>
+              </div>
+              {forgeInventory.reliquia > 0 && (
+                <div className="nft-forge-reliquia-note">
+                  {t("nftMarket.forge.reliquiaOwned", { count: String(forgeInventory.reliquia) })}{" "}
+                  <Link href="/launchpad">{t("nftMarket.forge.goToPyramid")}</Link>
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
