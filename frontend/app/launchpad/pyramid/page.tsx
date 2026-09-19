@@ -217,12 +217,16 @@ export default function PyramidCreatePage() {
   }
 
   if (!PYRAMID_OPEN) {
+    // Brai, 2026-09-19: "que cuando ingreses a la piramide diga, este
+    // beneficio exclusivo abrira para todos los poseedores de reliquias
+    // muy pronto (en ingles)" -- its own message instead of the generic
+    // nftMarket.notConfigured copy shared with the NFT pages.
     return (
       <div className="container" style={{ maxWidth: 480 }}>
         <h1 style={{ fontSize: 18 }}>{t("pyramid.title")}</h1>
         <div className="card" style={{ textAlign: "center" }}>
-          <h2 style={{ marginTop: 0 }}>{t("nftMarket.notConfigured.title")}</h2>
-          <p className="muted">{t("nftMarket.notConfigured.body")}</p>
+          <h2 style={{ marginTop: 0 }}>{t("pyramid.closed.title")}</h2>
+          <p className="muted">{t("pyramid.closed.body")}</p>
         </div>
       </div>
     );

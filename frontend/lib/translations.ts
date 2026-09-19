@@ -290,6 +290,8 @@ export const translations = {
   "nftMarket.badge": { en: "NFT MARKET", zh: "NFT 市场" },
   "nftMarket.notConfigured.title": { en: "Coming soon", zh: "敬请期待" },
   "nftMarket.notConfigured.body": { en: "The collection isn't live yet.", zh: "该系列尚未上线。" },
+  "pyramid.closed.title": { en: "Coming soon", zh: "敬请期待" },
+  "pyramid.closed.body": { en: "This exclusive benefit will open for all Reliquia holders very soon.", zh: "这项专属权益即将向所有持有圣物（Reliquia）的用户开放。" },
   "nftMarket.soldOut": { en: "SOLD OUT", zh: "已售罄" },
   "nftMarket.mintButton": { en: "Mint · {price} {currency}", zh: "铸造 · {price} {currency}" },
   "nftMarket.stat.minted": { en: "Minted", zh: "已铸造" },
