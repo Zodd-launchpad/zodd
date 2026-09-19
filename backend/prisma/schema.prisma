@@ -438,9 +438,11 @@ model PendingNftMint {
 // y al detectarse el pago la plataforma le manda un sendPayout real al
 // vendedor -- ver handleNftPurchasePayment en server.ts). Sin "make offer"
 // (Brai: "obviemos la parte de que la gente pueda ofertar"): el comprador
-// siempre paga exactamente el precio listado. Sin fee de mercado por ahora
-// -- el 100% del precio (menos el fee de red real, ver NETWORK_FEE_ZEC en
-// fees.ts) le llega al vendedor.
+// siempre paga exactamente el precio listado. Brai, 2026-09-19: "el 1% de
+// toda compra y venta de nft es para la plataforma" -- el 1% (ver
+// splitNftFee/NFT_PLATFORM_FEE_BPS en fees.ts) sale del lado del vendedor,
+// no se le suma al comprador; el resto (menos el fee de red real, ver
+// NETWORK_FEE_ZEC en fees.ts) le llega al vendedor.
 model NftPurchaseOrder {
   id                       String         @id @default(cuid())
   itemId                   String
@@ -460,6 +462,15 @@ model NftPurchaseOrder {
   executionTxid            String?
   createdAt                DateTime       @default(now())
   filledAt                 DateTime?
+  // El 1% de la plataforma sobre esta venta (ver splitNftFee en fees.ts),
+  // seteado recien cuando esto pasa a FILLED. Nunca se transfiere por
+  // separado -- igual que el platformFee de los trades de tokens, queda
+  // retenido simplemente por no formar parte de lo que se le paga al
+  // vendedor (ver computeSellerPayout en handleNftPurchasePayment).
+  // Sumado dentro de getPlatformFeeStatus junto a Token.platformFeeTotalZec
+  // para que sea retirable por el flujo ya existente de
+  // /api/admin/withdraw-platform-fee.
+  platformFeeZec           Decimal?       @db.Decimal(20, 8)
 
   item                 NftItem        @relation(fields: [itemId], references: [id])
   buyerInternalWallet  InternalWallet @relation("NftBuyer", fields: [buyerInternalWalletId], references: [id])

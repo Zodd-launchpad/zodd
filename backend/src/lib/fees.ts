@@ -130,3 +130,31 @@ export function computeSellerPayout(netPayout: number): SellPayoutResult {
   const sellerPayout = netPayout - NETWORK_FEE_ZEC;
   return { sellerPayout, blocked: sellerPayout <= 0 };
 }
+
+/**
+ * Brai, 2026-09-19: "el 1% de toda compra y venta de nft es para la
+ * plataforma" -- unlike a token trade (TRADE_FEE_BPS above), an NFT
+ * collection has no separate creator to split a fee with: it's the
+ * platform's own collection, so the whole 1% goes to the platform. Same
+ * "the seller's side absorbs it, buyer always pays exactly the listed
+ * price" philosophy as splitFee/computeSellerPayout: this comes off the
+ * gross sale amount FIRST, then computeSellerPayout takes the real network
+ * fee off what's left for the seller (see handleNftPurchasePayment in
+ * server.ts) -- so the platform's 1% is never affected by how small the
+ * network fee makes the seller's remainder, same as creatorFee/platformFee
+ * for token sells.
+ */
+export const NFT_PLATFORM_FEE_BPS = 100; // 1%
+
+export interface NftFeeSplit {
+  /** What's left for the seller after the platform's 1% cut, before the
+   * network-fee deduction in computeSellerPayout. */
+  net: number;
+  /** The platform's 1% share of the sale. */
+  platformFee: number;
+}
+
+export function splitNftFee(grossZec: number): NftFeeSplit {
+  const platformFee = (grossZec * NFT_PLATFORM_FEE_BPS) / 10_000;
+  return { net: grossZec - platformFee, platformFee };
+}

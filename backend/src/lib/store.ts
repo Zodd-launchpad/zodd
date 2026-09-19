@@ -365,11 +365,18 @@ export async function accrueFees(tokenId: string, creatorFeeZec: number, platfor
  * -- most of that balance is the bonding-curve reserve owed to future
  * sellers and unpaid creator fees, not free platform money. */
 export async function getPlatformFeeStatus(): Promise<{ totalEarnedZec: number; totalWithdrawnZec: number; claimableZec: number }> {
-  const [earned, withdrawn] = await Promise.all([
+  const [earned, nftEarned, withdrawn] = await Promise.all([
     prisma.token.aggregate({ _sum: { platformFeeTotalZec: true } }),
+    // Brai, 2026-09-19: "el 1% de toda compra y venta de nft es para la
+    // plataforma" -- summed in here alongside Token.platformFeeTotalZec so
+    // it's withdrawable through the same existing admin flow, rather than
+    // needing its own separate claim endpoint. Only FILLED orders ever get
+    // a platformFeeZec set (see fillNftPurchase), so this never double
+    // counts a still-pending purchase.
+    prisma.nftPurchaseOrder.aggregate({ _sum: { platformFeeZec: true }, where: { status: "FILLED" } }),
     prisma.platformWithdrawal.aggregate({ _sum: { amountZec: true } }),
   ]);
-  const totalEarnedZec = num(earned._sum.platformFeeTotalZec ?? 0);
+  const totalEarnedZec = num(earned._sum.platformFeeTotalZec ?? 0) + num(nftEarned._sum.platformFeeZec ?? 0);
   const totalWithdrawnZec = num(withdrawn._sum.amountZec ?? 0);
   return { totalEarnedZec, totalWithdrawnZec, claimableZec: Math.max(0, totalEarnedZec - totalWithdrawnZec) };
 }
@@ -2194,13 +2201,17 @@ export async function fillNftPurchase(
   itemId: string,
   sellerWalletId: string,
   buyerWalletId: string,
-  txid: string
+  txid: string,
+  // Brai, 2026-09-19: the platform's 1% cut of this sale (see splitNftFee
+  // in fees.ts), recorded on the order right when it fills so
+  // getPlatformFeeStatus can sum it -- never touched again after this.
+  platformFeeZec: number
 ): Promise<NftItemView | null> {
   const result = await prisma.nftItem.updateMany({
     where: { id: itemId, ownerInternalWalletId: sellerWalletId, listedPriceZec: { not: null } },
     data: { ownerInternalWalletId: buyerWalletId, listedPriceZec: null, listedAt: null, listedPayoutAddress: null },
   });
   if (result.count === 0) return null;
-  await prisma.nftPurchaseOrder.update({ where: { id: purchaseId }, data: { status: "FILLED", executionTxid: txid, filledAt: new Date() } });
+  await prisma.nftPurchaseOrder.update({ where: { id: purchaseId }, data: { status: "FILLED", executionTxid: txid, filledAt: new Date(), platformFeeZec } });
   return getNftItemById(itemId);
 }

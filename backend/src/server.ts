@@ -4,7 +4,7 @@ import * as store from "./lib/store.js";
 import { generateTwelveWords } from "./lib/wordlist.js";
 import { quoteBuy, quoteSell, currentPrice, marketCapZec, isGraduated } from "./lib/bondingCurve.js";
 import { simulatedInscriptionFor } from "./lib/simulatedChain.js";
-import { splitFee, TRADE_FEE_BPS, CREATOR_FEE_BPS, TOKEN_CREATE_FEE_ZEC, TOKEN_CREATE_FEE_YEC, createFeeFor, computeSellerPayout, NETWORK_FEE_ZEC, MAX_FIRST_BUY_ZEC } from "./lib/fees.js";
+import { splitFee, TRADE_FEE_BPS, CREATOR_FEE_BPS, TOKEN_CREATE_FEE_ZEC, TOKEN_CREATE_FEE_YEC, createFeeFor, computeSellerPayout, NETWORK_FEE_ZEC, MAX_FIRST_BUY_ZEC, splitNftFee } from "./lib/fees.js";
 import { startFeeDistributor, runFeeDistributionOnce } from "./lib/feeDistributor.js";
 import { startZecPricePolling, getZecUsdPrice } from "./lib/zecPrice.js";
 import { withTokenLock } from "./lib/mutex.js";
@@ -1526,11 +1526,16 @@ app.post("/api/nft/items/:id/list", async (req, reply) => {
     return reply.code(400).send({ error: `payout address doesn't look like a ${collection.currency} address` });
   }
   // Same reasoning as computeSellerPayout for token sells: a listing has to
-  // clear the real network-fee cost of the eventual payout, checked here
-  // (at list time) rather than after a buyer has already paid, so this can
-  // never happen post-payment -- see fillNftPurchase/handleNftPurchasePayment.
-  if (body.priceZec <= NETWORK_FEE_ZEC) {
-    return reply.code(400).send({ error: `list price must be greater than the ~${NETWORK_FEE_ZEC} ${collection.currency} network fee` });
+  // clear both the platform's 1% cut (splitNftFee, added 2026-09-19 per
+  // "el 1% de toda compra y venta de nft es para la plataforma") and the
+  // real network-fee cost of the eventual payout, checked here (at list
+  // time) rather than after a buyer has already paid, so this can never
+  // happen post-payment -- see fillNftPurchase/handleNftPurchasePayment.
+  const { blocked: unsellable } = computeSellerPayout(splitNftFee(body.priceZec).net);
+  if (unsellable) {
+    return reply
+      .code(400)
+      .send({ error: `list price must be greater than the platform's 1% fee plus the ~${NETWORK_FEE_ZEC} ${collection.currency} network fee` });
   }
   const updated = await store.listNftForSale(id, body.walletId, body.priceZec, body.payoutAddress);
   if (!updated) return reply.code(403).send({ error: "you don't own this piece" });
@@ -1656,8 +1661,21 @@ async function handleNftPurchasePayment(purchase: store.NftPurchaseOrderView, co
     if (isRepeat) app.log.warn(`repeat payment of ${confirmedZecAmount} ${purchase.currency} landed on NFT purchase ${purchase.id} after it already ${purchase.status} -- left unclaimed (txid ${txid})`);
     return;
   }
+  // Brai, 2026-09-19: "el 1% de toda compra y venta de nft es para la
+  // plataforma" -- computed off the full confirmed payment, same as a
+  // token trade's platformFee (splitFee), before the seller's own
+  // network-fee deduction below. Pure math, safe to do before the
+  // fillNftPurchase race is even resolved.
+  const { net: netAfterPlatformFee, platformFee } = splitNftFee(confirmedZecAmount);
   try {
-    const item = await store.fillNftPurchase(purchase.id, purchase.itemId, purchase.sellerInternalWalletId, purchase.buyerInternalWalletId, txid);
+    const item = await store.fillNftPurchase(
+      purchase.id,
+      purchase.itemId,
+      purchase.sellerInternalWalletId,
+      purchase.buyerInternalWalletId,
+      txid,
+      platformFee
+    );
     if (!item) {
       // Lost the race (or the seller delisted in between) -- the buyer's
       // payment is real and already in the platform wallet, but the piece
@@ -1669,12 +1687,12 @@ async function handleNftPurchasePayment(purchase: store.NftPurchaseOrderView, co
     }
     const walletService = walletServiceFor(purchase.currency);
     try {
-      const { sellerPayout, blocked } = computeSellerPayout(confirmedZecAmount);
+      const { sellerPayout, blocked } = computeSellerPayout(netAfterPlatformFee);
       if (blocked) {
-        app.log.error(`NFT purchase ${purchase.id} filled but payout would be <= 0 after the network fee -- needs manual admin payout to ${purchase.payoutAddress}`);
+        app.log.error(`NFT purchase ${purchase.id} filled but payout would be <= 0 after the platform fee and network fee -- needs manual admin payout to ${purchase.payoutAddress}`);
       } else {
         const { txid: payoutTxid } = await walletService.sendPayout(purchase.payoutAddress, sellerPayout);
-        app.log.info(`NFT purchase ${purchase.id} filled: ${confirmedZecAmount} ${purchase.currency} -> item ${item.id} to wallet ${purchase.buyerInternalWalletId}, payout ${sellerPayout} ${purchase.currency} -> ${purchase.payoutAddress} (buy txid ${txid}, payout txid ${payoutTxid})`);
+        app.log.info(`NFT purchase ${purchase.id} filled: ${confirmedZecAmount} ${purchase.currency} -> item ${item.id} to wallet ${purchase.buyerInternalWalletId}, payout ${sellerPayout} ${purchase.currency} -> ${purchase.payoutAddress} (platform fee ${platformFee.toFixed(8)} ${purchase.currency}, buy txid ${txid}, payout txid ${payoutTxid})`);
       }
     } catch (err) {
       app.log.error(err, `NFT purchase ${purchase.id} filled and ownership transferred, but the payout to the seller (${purchase.payoutAddress}) failed -- needs manual admin payout`);
