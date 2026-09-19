@@ -46,6 +46,10 @@ export default function SellModal({
   const [result, setResult] = useState<{ zecAmount: number } | null>(null);
   const [balance, setBalance] = useState<number | null>(null);
   const [isRealMode, setIsRealMode] = useState(false);
+  // Brai, 2026-09-19: "lo mismo cuando compras o vendes un token que tarda
+  // en aparecer" -- same WAIT treatment as BuyModal's submit button while
+  // the sell order/payout round trip is in flight.
+  const [isSubmitting, setIsSubmitting] = useState(false);
   // Brai, 2026-09-08: "no olvides hacer que aparezca aqui los zec que te
   // tiene que dar" -- spot-price estimate (amount * current priceZec), same
   // approximation BuyModal already uses for its own ZEC/USD preview. Real
@@ -94,6 +98,7 @@ export default function SellModal({
 
   async function submit() {
     setError(null);
+    setIsSubmitting(true);
     try {
       const amount = parseFloat(tokenAmount);
       if (!(amount > 0)) throw new Error(t("sell.error.invalidAmount"));
@@ -104,6 +109,8 @@ export default function SellModal({
       setResult({ zecAmount: order.zecAmount });
     } catch (e: any) {
       setError(e.message);
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
@@ -160,8 +167,8 @@ export default function SellModal({
               <span className="muted" style={{ fontSize: 11, marginTop: 4, display: "block" }}>{t(currency === "YEC" ? "sell.addressHintYec" : "sell.addressHint")}</span>
             </div>
             {error && <p style={{ color: "var(--red)", fontSize: 13 }}>{error}</p>}
-            <button className="btn btn-red" style={{ width: "100%" }} onClick={submit}>
-              {t("sell.button")}
+            <button className="btn btn-red" style={{ width: "100%" }} onClick={submit} disabled={isSubmitting}>
+              {isSubmitting ? t("common.wait") : t("sell.button")}
             </button>
           </>
         ) : (

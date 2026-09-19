@@ -1,6 +1,12 @@
 export type Lang = "en" | "zh";
 
 export const translations = {
+  // ---------- Common ----------
+  // Brai, 2026-09-19: "cuando tocas PAGAR, el QR tarda como 5 segundos en
+  // aparecer... quiero que haya un cartel que diga WAIT" -- shown on the
+  // pay/buy/sell/create buttons while the order+QR round trip is in flight.
+  "common.wait": { en: "WAIT...", zh: "请稍候…" },
+
   // ---------- Header / nav ----------
   "nav.launchpad": { en: "Launchpad", zh: "发射台" },
   "nav.bridge": { en: "Bridge", zh: "跨链桥" },

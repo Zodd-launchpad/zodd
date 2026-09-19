@@ -74,6 +74,13 @@ export default function BuyModal({
   const [noirSending, setNoirSending] = useState(false);
   const [noirTxid, setNoirTxid] = useState<string | null>(null);
   const [noirError, setNoirError] = useState<string | null>(null);
+  // Brai, 2026-09-19: "cuando tocas PAGAR, el QR tarda como 5 segundos en
+  // aparecer... quiero que haya un cartel que diga WAIT cuando haces click"
+  // -- submitBuy below awaits the order creation + QR generation before
+  // flipping phase to "waiting", so without this the button just sits there
+  // looking unresponsive for those ~5s. Same treatment in SellModal and the
+  // NFT mint page.
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Brai, 2026-09-07: "esa wallet que te aparece ahi para pagar cualquier
   // compra tiene que ser un boton que si lo clickeas se auto copia" -- the
@@ -121,6 +128,7 @@ export default function BuyModal({
 
   async function submitBuy() {
     setError(null);
+    setIsSubmitting(true);
     try {
       const amount = parseFloat(zecAmount);
       if (!(amount > 0)) throw new Error(t("buy.error.invalidAmount"));
@@ -145,6 +153,8 @@ export default function BuyModal({
       setPhase("waiting");
     } catch (e: any) {
       setError(e.message);
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
@@ -222,8 +232,8 @@ export default function BuyModal({
               <span className="muted" style={{ fontSize: 11, marginTop: 4, display: "block" }}>{t(currency === "YEC" ? "buy.refundAddressHintYec" : "buy.refundAddressHint")}</span>
             </div>
             {error && <p style={{ color: "var(--red)", fontSize: 13 }}>{error}</p>}
-            <button className="btn btn-gold" style={{ width: "100%" }} onClick={submitBuy}>
-              {t("buy.button")}
+            <button className="btn btn-gold" style={{ width: "100%" }} onClick={submitBuy} disabled={isSubmitting}>
+              {isSubmitting ? t("common.wait") : t("buy.button")}
             </button>
           </>
         )}

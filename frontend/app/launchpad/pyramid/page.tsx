@@ -23,6 +23,11 @@ import { getNoirWallet, isNoirWalletInstalled } from "@noir-wallet/sdk";
 type Phase = "form" | "waiting" | "created" | "failed";
 type AccessState = "checking" | "locked" | "unlocked";
 
+// Brai, 2026-09-19: "desactiva la piramide" -- hard kill switch while he
+// keeps testing (same pattern as MINT_OPEN in the NFT mint page). Flip
+// back to true when it's ready for real users.
+const PYRAMID_OPEN = false;
+
 export default function PyramidCreatePage() {
   const { wallet } = useWallet();
   const { t } = useLanguage();
@@ -202,6 +207,18 @@ export default function PyramidCreatePage() {
     } catch {
       // clipboard not available — the address is still selectable/visible
     }
+  }
+
+  if (!PYRAMID_OPEN) {
+    return (
+      <div className="container" style={{ maxWidth: 480 }}>
+        <h1 style={{ fontSize: 18 }}>{t("pyramid.title")}</h1>
+        <div className="card" style={{ textAlign: "center" }}>
+          <h2 style={{ marginTop: 0 }}>{t("nftMarket.notConfigured.title")}</h2>
+          <p className="muted">{t("nftMarket.notConfigured.body")}</p>
+        </div>
+      </div>
+    );
   }
 
   // ---- Gate: no wallet / checking / locked ----

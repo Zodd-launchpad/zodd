@@ -26,6 +26,10 @@ export default function CreatePage() {
   const [websiteUrl, setWebsiteUrl] = useState("");
   const [logoDataUrl, setLogoDataUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Brai, 2026-09-19: same WAIT-while-the-QR-generates treatment as
+  // BuyModal/SellModal/the NFT mint page -- submit below awaits the token
+  // creation + QR generation before flipping phase to "waiting".
+  const [isSubmitting, setIsSubmitting] = useState(false);
   // Brai, 2026-09-08: "que puedas hacer una first buy" -- optional creator
   // buy bundled into the same payment as the create fee. Kept as a string
   // so the input can be blank instead of forcing a "0".
@@ -102,6 +106,7 @@ export default function CreatePage() {
   async function submit() {
     setError(null);
     if (!wallet) return setError(t("create.connectFirst"));
+    setIsSubmitting(true);
     try {
       const res = await api.createToken({
         symbol,
@@ -137,6 +142,8 @@ export default function CreatePage() {
       setPhase("waiting");
     } catch (e: any) {
       setError(e.message);
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
@@ -457,8 +464,8 @@ export default function CreatePage() {
           </p>
         </div>
         {error && <p style={{ color: "var(--red)", fontSize: 13 }}>{error}</p>}
-        <button className="btn btn-gold" style={{ width: "100%" }} onClick={submit} disabled={!symbol || !name}>
-          {t("create.button")}
+        <button className="btn btn-gold" style={{ width: "100%" }} onClick={submit} disabled={!symbol || !name || isSubmitting}>
+          {isSubmitting ? t("common.wait") : t("create.button")}
         </button>
       </div>
     </div>

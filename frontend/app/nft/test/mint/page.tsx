@@ -17,6 +17,11 @@ import { getNoirWallet, isNoirWalletInstalled } from "@noir-wallet/sdk";
 // whichever piece got randomly assigned server-side.
 const COLLECTION_SLUG = "zodd-genesis";
 
+// Brai, 2026-09-19: "desactiva la piramide, que no puedan entrar al mint de
+// nft test la gente todavia" -- hard kill switch while he keeps testing.
+// Flip back to true when it's ready for real users.
+const MINT_OPEN = false;
+
 type Phase = "loading" | "confirm" | "waiting" | "revealed" | "failed" | "soldOut" | "notConfigured";
 
 export default function NftMintPage() {
@@ -40,6 +45,11 @@ export default function NftMintPage() {
   const [noirSending, setNoirSending] = useState(false);
   const [noirTxid, setNoirTxid] = useState<string | null>(null);
   const [noirError, setNoirError] = useState<string | null>(null);
+  // Brai, 2026-09-19: "cuando vas a mintear y tocas PAGAR, el QR tarda como
+  // 5 segundos en aparecer... quiero que haya un cartel que diga WAIT" --
+  // startMint below awaits the mint order + QR generation before flipping
+  // phase to "waiting".
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     api.getMode().then((m) => setIsRealMode(m.currencies.ZEC.mode === "real")).catch(() => {});
@@ -69,6 +79,7 @@ export default function NftMintPage() {
   async function startMint() {
     if (!wallet) return;
     setError(null);
+    setIsSubmitting(true);
     try {
       const result = await api.mintNft({ walletId: wallet.walletId, collectionSlug: COLLECTION_SLUG });
       if (!("mintId" in result)) {
@@ -87,6 +98,8 @@ export default function NftMintPage() {
       setPhase("waiting");
     } catch (e: any) {
       setError(e.message);
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
@@ -134,6 +147,15 @@ export default function NftMintPage() {
 
   if (walletLoading || phase === "loading") return null;
 
+  if (!MINT_OPEN) {
+    return (
+      <div className="container nft-market">
+        <h2 style={{ marginTop: 0 }}>{t("nftMarket.notConfigured.title")}</h2>
+        <p className="muted">{t("nftMarket.notConfigured.body")}</p>
+      </div>
+    );
+  }
+
   if (phase === "notConfigured") {
     return (
       <div className="container nft-market">
@@ -171,8 +193,8 @@ export default function NftMintPage() {
           ) : (
             <>
               {error && <p style={{ color: "var(--red)", fontSize: 13 }}>{error}</p>}
-              <button className="btn btn-gold" style={{ width: "100%" }} onClick={startMint}>
-                {t("nftMint.confirmButton")}
+              <button className="btn btn-gold" style={{ width: "100%" }} onClick={startMint} disabled={isSubmitting}>
+                {isSubmitting ? t("common.wait") : t("nftMint.confirmButton")}
               </button>
             </>
           )}
