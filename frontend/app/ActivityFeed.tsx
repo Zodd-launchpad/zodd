@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { api, GlobalTrade, NftActivity } from "@/lib/api";
+import { api, GlobalTrade, NftActivity, nftItemPath, nftItemLabel } from "@/lib/api";
 import { useLanguage } from "@/lib/i18n";
 
 const POLL_MS = 4000;
@@ -91,9 +91,9 @@ export default function ActivityFeed() {
                   </span>
                 </Link>
               ) : (
-                <Link key={row.key} href={`/nft/test/item/${row.nft.editionNumber}`} className="activity-row">
+                <Link key={row.key} href={nftItemPath(row.nft.editionNumber, row.nft.tier)} className="activity-row">
                   <span className={row.nft.kind === "LIST" ? "activity-row-amount" : "activity-row-amount up"}>
-                    {t(`activity.nft.${row.nft.kind}`)} {row.nft.name ?? `#${row.nft.editionNumber}`}{" "}
+                    {t(`activity.nft.${row.nft.kind}`)} {row.nft.name ?? nftItemLabel(row.nft.tier, row.nft.editionNumber)}{" "}
                     <span className="activity-row-arrow">·</span> {row.nft.priceZec.toFixed(4)} {row.nft.currency}
                   </span>
                 </Link>

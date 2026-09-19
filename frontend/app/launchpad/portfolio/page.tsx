@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useWallet } from "@/lib/wallet";
-import { api, formatUsd, type NftItem } from "@/lib/api";
+import { api, formatUsd, nftItemPath, nftItemLabel, type NftItem } from "@/lib/api";
 import { useLanguage } from "@/lib/i18n";
 import { useZecUsdPrice } from "@/lib/zecPrice";
 
@@ -66,16 +66,16 @@ export default function PortfolioPage() {
           <h2 style={{ fontSize: 15, marginTop: 28 }}>{t("portfolio.nfts.title")}</h2>
           <div className="nft-grid">
             {nfts.map((it) => (
-              <Link key={it.id} href={`/nft/test/item/${it.editionNumber}`} className="nft-card">
+              <Link key={it.id} href={nftItemPath(it.editionNumber, it.tier)} className="nft-card">
                 <div className="nft-card-img-wrap">
                   {it.imageDataUrl ? (
-                    <img src={it.imageDataUrl} alt={it.name ?? `#${it.editionNumber}`} className="nft-card-img" />
+                    <img src={it.imageDataUrl} alt={it.name ?? nftItemLabel(it.tier, it.editionNumber)} className="nft-card-img" />
                   ) : (
                     <div className="nft-card-img-placeholder">?</div>
                   )}
                 </div>
                 <div className="nft-card-body">
-                  <span className="nft-card-name">{it.name ?? `#${it.editionNumber}`}</span>
+                  <span className="nft-card-name">{it.name ?? nftItemLabel(it.tier, it.editionNumber)}</span>
                   <span className="nft-card-price">{it.listedPriceZec != null ? t("portfolio.nfts.listed") : t("portfolio.nfts.unlisted")}</span>
                 </div>
               </Link>

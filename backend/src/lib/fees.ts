@@ -130,6 +130,22 @@ export const NFT_MAX_MINTS_PER_WALLET = Number(process.env.NFT_MAX_MINTS_PER_WAL
  * paying the normal price like anyone else. */
 export const NFT_WHITELIST_FREE_MINT_LIMIT = Number(process.env.NFT_WHITELIST_FREE_MINT_LIMIT ?? 5);
 
+/** Brai, 2026-09-19: "todos sigan un numero tipo TIER 1 #1321... si puede
+ * empezar en 1300 la cuenta mejor asi no parece que recien empezamos" --
+ * each tier's edition-number counter (PAPIRO/FRAGMENTO/RELIQUIA, each
+ * independent -- see the NftItem.editionNumber comment) starts here
+ * instead of at 1, so the collection doesn't read as brand new. */
+export const NFT_TIER_NUMBERING_START = Number(process.env.NFT_TIER_NUMBERING_START ?? 1300);
+
+/** Brai, 2026-09-19: "cada NFT tiene que generar una transaccion... los que
+ * hacen free mint tienen que hacer una tx con su wallet y cobrarle muy
+ * poco" -- a whitelist free claim is no longer $0: it still goes through
+ * the normal pay-to-a-generated-address flow (see /api/nft/mint), just at
+ * this token price instead of the collection's full mintPriceZec, so a
+ * real on-chain tx backs every mint. Fixed ZEC amount (Brai chose this over
+ * a live USD conversion) -- small enough to just cover network fees. */
+export const NFT_FREE_MINT_FEE_ZEC = Number(process.env.NFT_FREE_MINT_FEE_ZEC ?? 0.001);
+
 /** Currency-aware version of createFeeZecFor -- dispatches to the right
  * constant/discount logic for whichever currency the creator picked. */
 export function createFeeFor(currency: "ZEC" | "YEC", walletId: string): number {

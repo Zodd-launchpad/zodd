@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import QRCode from "qrcode";
 import { useRouter } from "next/navigation";
-import { api, formatUsd, formatZec, type NftActivity, type NftCollection, type NftItem, type NftWhitelistEntry } from "@/lib/api";
+import { api, formatUsd, formatZec, nftItemPath, nftItemLabel, nftTierSlug, type NftActivity, type NftCollection, type NftItem, type NftWhitelistEntry } from "@/lib/api";
 import { useLanguage } from "@/lib/i18n";
 import type { TranslationKey } from "@/lib/translations";
 import { useZecUsdPrice } from "@/lib/zecPrice";
@@ -59,6 +59,11 @@ export default function NftMintPage() {
   const [mintId, setMintId] = useState<string | null>(null);
   const [address, setAddress] = useState<string | null>(null);
   const [exactZecAmount, setExactZecAmount] = useState<number | null>(null);
+  // Brai, 2026-09-19: "inclusive los que hacen free mint tienen que hacer
+  // una tx ... cobrarle muy poco" -- a whitelist free claim now waits on a
+  // tiny on-chain fee too (see api.mintNft's PENDING branch), so the
+  // "waiting" screen needs to say that's what this is, not a real purchase.
+  const [freeClaim, setFreeClaim] = useState(false);
   const [mintedQuantity, setMintedQuantity] = useState(1);
   const [memo, setMemo] = useState<string | null>(null);
   const [qr, setQr] = useState<string | null>(null);
@@ -162,7 +167,9 @@ export default function NftMintPage() {
       if ("free" in result) {
         // free whitelist/owner mint -- assigned immediately, nothing to pay
         const items = await Promise.all(
-          result.editionNumbers.map((en) => api.getNftItem(COLLECTION_SLUG, en).then((r) => r.item))
+          result.editionNumbers.map((en, i) =>
+            api.getNftItem(COLLECTION_SLUG, nftTierSlug(result.tiers[i]), en).then((r) => r.item)
+          )
         );
         setResultItems(items);
         setMintedQuantity(items.length);
@@ -174,6 +181,7 @@ export default function NftMintPage() {
       setExactZecAmount(result.zecAmount);
       setMintedQuantity(result.quantity);
       setMemo(result.memo ?? null);
+      setFreeClaim(!!result.freeClaim);
       const uri = `zcash:${result.zecAddress}?amount=${result.zecAmount}${result.memo ? `&memo=${result.memo}` : ""}`;
       setQr(await QRCode.toDataURL(uri, { margin: 1, width: 220 }));
       setPhase("waiting");
@@ -284,7 +292,7 @@ export default function NftMintPage() {
             <div className="nft-mintpage-header">
               <div>
                 <h1 className="nft-mintpage-title">{collection.name}</h1>
-                <p className="muted nft-mintpage-supply">{t("nftMint.supply", { minted: collection.mintedCount, total: collection.totalSupply })}</p>
+                <p className="muted nft-mintpage-supply">{t("nftMint.supply", { supply: collection.aliveSupply, total: collection.totalSupply })}</p>
               </div>
               <span className={badgeClass}>{t(badgeKey)}</span>
             </div>
@@ -346,14 +354,17 @@ export default function NftMintPage() {
                   )}
 
                   {freeMintQuantity > 0 && (
-                    <button
-                      className="btn btn-gold"
-                      style={{ width: "100%", marginBottom: 12 }}
-                      onClick={() => startMint(freeMintQuantity, "free")}
-                      disabled={submitting !== null}
-                    >
-                      {submitting === "free" ? t("common.wait") : t("nftMint.freeMintButton", { count: freeMintQuantity })}
-                    </button>
+                    <>
+                      <button
+                        className="btn btn-gold"
+                        style={{ width: "100%", marginBottom: 4 }}
+                        onClick={() => startMint(freeMintQuantity, "free")}
+                        disabled={submitting !== null}
+                      >
+                        {submitting === "free" ? t("common.wait") : t("nftMint.freeMintButton", { count: freeMintQuantity })}
+                      </button>
+                      <p className="muted" style={{ fontSize: 11, marginBottom: 12, marginTop: 0 }}>{t("nftMint.freeClaim.feeNote")}</p>
+                    </>
                   )}
 
                   <div className="nft-mintpage-qty-row">
@@ -456,8 +467,8 @@ export default function NftMintPage() {
                   <p className="muted" style={{ fontSize: 12 }}>{t("nftMint.live.empty")}</p>
                 ) : (
                   liveMints.map((a, i) => (
-                    <Link key={`${a.editionNumber}-${a.createdAt}-${i}`} href={`/nft/test/item/${a.editionNumber}`} className="nft-mintpage-live-row">
-                      <span>{a.name ?? `#${a.editionNumber}`}</span>
+                    <Link key={`${a.editionNumber}-${a.createdAt}-${i}`} href={nftItemPath(a.editionNumber, a.tier)} className="nft-mintpage-live-row">
+                      <span>{a.name ?? nftItemLabel(a.tier, a.editionNumber)}</span>
                       <span className="muted">{new Date(a.createdAt).toLocaleTimeString()}</span>
                     </Link>
                   ))
@@ -469,8 +480,8 @@ export default function NftMintPage() {
                   <p className="muted" style={{ fontSize: 12 }}>{t("nftMint.live.empty")}</p>
                 ) : (
                   liveSales.map((a, i) => (
-                    <Link key={`${a.editionNumber}-${a.createdAt}-${i}`} href={`/nft/test/item/${a.editionNumber}`} className="nft-mintpage-live-row">
-                      <span>{a.name ?? `#${a.editionNumber}`}</span>
+                    <Link key={`${a.editionNumber}-${a.createdAt}-${i}`} href={nftItemPath(a.editionNumber, a.tier)} className="nft-mintpage-live-row">
+                      <span>{a.name ?? nftItemLabel(a.tier, a.editionNumber)}</span>
                       <span>
                         {formatZec(a.priceZec)} {a.currency}
                       </span>
@@ -485,11 +496,12 @@ export default function NftMintPage() {
 
       {phase === "waiting" && (
         <div className="card">
+          {freeClaim && <div className="badge" style={{ display: "block", textAlign: "center", marginBottom: 10 }}>{t("nftMint.freeClaim.badge")}</div>}
           <h2 style={{ marginTop: 0, textAlign: "center" }}>
             {exactZecAmount != null ? formatZec(exactZecAmount) : ""} {collection?.currency}
             {mintedQuantity > 1 && <span className="muted" style={{ fontSize: 14, fontWeight: 400 }}> ({t("nftMint.quantity.label")}: {mintedQuantity})</span>}
           </h2>
-          <p className="muted" style={{ textAlign: "center" }}>{t("nftMint.waitingBody")}</p>
+          <p className="muted" style={{ textAlign: "center" }}>{freeClaim ? t("nftMint.freeClaim.waitingBody") : t("nftMint.waitingBody")}</p>
           {isRealMode && (
             <div style={{ margin: "12px 0" }}>
               {noirTxid ? (
@@ -537,21 +549,21 @@ export default function NftMintPage() {
           {resultItems.length === 1 ? (
             <>
               {resultItems[0].imageDataUrl && <img src={resultItems[0].imageDataUrl} alt={resultItems[0].name ?? ""} className="nft-reveal-img" />}
-              <h2 style={{ margin: "12px 0 4px" }}>{resultItems[0].name ?? `#${resultItems[0].editionNumber}`}</h2>
+              <h2 style={{ margin: "12px 0 4px" }}>{resultItems[0].name ?? nftItemLabel(resultItems[0].tier, resultItems[0].editionNumber)}</h2>
             </>
           ) : (
             <div className="nft-mintpage-reveal-grid">
               {resultItems.map((item) => (
                 <div key={item.id} className="nft-mintpage-reveal-item">
                   {item.imageDataUrl && <img src={item.imageDataUrl} alt={item.name ?? ""} />}
-                  <span>{item.name ?? `#${item.editionNumber}`}</span>
+                  <span>{item.name ?? nftItemLabel(item.tier, item.editionNumber)}</span>
                 </div>
               ))}
             </div>
           )}
           <div className="nft-mint-footer">
             {resultItems.length === 1 && (
-              <Link href={`/nft/test/item/${resultItems[0].editionNumber}`} className="btn btn-outline">
+              <Link href={nftItemPath(resultItems[0].editionNumber, resultItems[0].tier)} className="btn btn-outline">
                 {t("nftMint.revealed.viewItem")}
               </Link>
             )}

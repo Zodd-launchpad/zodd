@@ -424,7 +424,15 @@ enum NftTier {
 model NftItem {
   id             String    @id @default(cuid())
   collectionId   String
-  editionNumber  Int // 1..totalSupply para el pool sembrado; las piezas crafteadas (ver forgeCraft) toman números por encima de eso, asignados on-the-fly
+  // Brai, 2026-09-19: "todos sigan un numero tipo TIER 1 #1321... si puede
+  // empezar en 1300" -- editionNumber is now scoped PER TIER, not global:
+  // each tier (PAPIRO/FRAGMENTO/RELIQUIA) has its own counter starting at
+  // NFT_TIER_NUMBERING_START (see fees.ts), so "TIER 1 #1321" and
+  // "TIER 2 #1321" can both exist -- that's why the unique constraint below
+  // is now (collectionId, tier, editionNumber) instead of just
+  // (collectionId, editionNumber). Forged pieces (ver forgeCraft) continue
+  // their target tier's own counter, not a global one.
+  editionNumber  Int
   name           String? // ej. "ZODD #61" -- opcional, si falta se muestra "#<editionNumber>"
   imageDataUrl   String?   @db.Text
   traits         Json? // mapa opcional {trait: valor}, se muestra en la página del item si existe
@@ -459,7 +467,7 @@ model NftItem {
   ownerInternalWallet InternalWallet?    @relation("NftOwner", fields: [ownerInternalWalletId], references: [id])
   purchases           NftPurchaseOrder[]
 
-  @@unique([collectionId, editionNumber])
+  @@unique([collectionId, tier, editionNumber])
   @@index([collectionId, ownerInternalWalletId])
   @@index([collectionId, listedPriceZec])
   @@index([ownerInternalWalletId, tier, burnedAt])
@@ -494,6 +502,18 @@ model PendingNftMint {
   // first one (unchanged shape for anything still reading it directly),
   // resultItemIds holds the full set for quantity > 1.
   resultItemIds String[] @default([])
+
+  // Brai, 2026-09-19: "inclusive los que hacen free mint tienen que hacer
+  // una tx con su wallet y cobrarle muy poco ... que cubran la transaccion
+  // y un poquito mas" -- a whitelist free claim is no longer instant, it
+  // goes through this exact same address/QR/poll payment flow, just for
+  // NFT_FREE_MINT_FEE_ZEC (see fees.ts) instead of the real mint price. Set
+  // only on that kind of row; a normal paid mint leaves it null. On
+  // completion (completePendingNftMint), a non-null value here also
+  // increments that NftWhitelistEntry's claimedCount/claimedAt -- loose
+  // string reference on purpose, no FK, same "informational, not a join
+  // obligation" pattern as NftWhitelistEntry.claimedByWalletId below.
+  freeClaimWhitelistEntryId String?
 
   collection     NftCollection  @relation(fields: [collectionId], references: [id])
   internalWallet InternalWallet @relation(fields: [internalWalletId], references: [id])

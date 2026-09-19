@@ -133,15 +133,17 @@ async function main() {
   let skippedMinted = 0;
   for (const item of manifest.items) {
     const imageDataUrl = imageToDataUrl(baseDir, item.image);
+    // Brai, 2026-09-19: same PAPIRO-default note as the manifest HTTP path
+    // in store.ts -- this CLI script has no tier concept either.
     const existing = await prisma.nftItem.findUnique({
-      where: { collectionId_editionNumber: { collectionId: collection.id, editionNumber: item.editionNumber } },
+      where: { collectionId_tier_editionNumber: { collectionId: collection.id, tier: "PAPIRO", editionNumber: item.editionNumber } },
     });
     if (existing?.ownerInternalWalletId) {
       skippedMinted++;
       continue; // already minted -- never overwrite a piece someone owns
     }
     await prisma.nftItem.upsert({
-      where: { collectionId_editionNumber: { collectionId: collection.id, editionNumber: item.editionNumber } },
+      where: { collectionId_tier_editionNumber: { collectionId: collection.id, tier: "PAPIRO", editionNumber: item.editionNumber } },
       create: {
         collectionId: collection.id,
         editionNumber: item.editionNumber,

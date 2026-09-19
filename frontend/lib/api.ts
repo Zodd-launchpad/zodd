@@ -135,6 +135,22 @@ export function formatZec(zecAmount: number): string {
   return Number(zecAmount.toFixed(8)).toString();
 }
 
+// Brai, 2026-09-19: editionNumber is scoped per tier now -- every item
+// detail link needs "<tier>/<editionNumber>", not just the bare number.
+// One place to keep the tier-enum-to-URL-slug mapping consistent.
+export function nftTierSlug(tier: "PAPIRO" | "FRAGMENTO" | "RELIQUIA"): "papiro" | "fragmento" | "reliquia" {
+  return tier === "PAPIRO" ? "papiro" : tier === "FRAGMENTO" ? "fragmento" : "reliquia";
+}
+export function nftItemPath(editionNumber: number, tier: "PAPIRO" | "FRAGMENTO" | "RELIQUIA"): string {
+  return `/nft/test/item/${nftTierSlug(tier)}/${editionNumber}`;
+}
+// Brai, 2026-09-19: "todos sigan un numero tipo TIER 1 #1321" -- consistent
+// display label wherever an item's name might be missing.
+export function nftItemLabel(tier: "PAPIRO" | "FRAGMENTO" | "RELIQUIA", editionNumber: number): string {
+  const tierNum = tier === "PAPIRO" ? 1 : tier === "FRAGMENTO" ? 2 : 3;
+  return `TIER ${tierNum} #${editionNumber}`;
+}
+
 export const api = {
   createWallet: () => req("/api/wallets", { method: "POST" }),
   importWallet: (words: string[]): Promise<{ walletId: string; walletTag: string }> =>
@@ -304,8 +320,15 @@ export const api = {
   // Brai, 2026-09-19 (v14): Traits tab on /nft/test -- see the backend's
   // getNftTraitCounts for why this is its own aggregation endpoint.
   getNftTraits: (slug: string): Promise<{ traits: NftTraitCount[] }> => req(`/api/nft/collections/${slug}/traits`),
-  getNftItem: (slug: string, editionNumber: number): Promise<{ collection: { slug: string; name: string; currency: Currency }; item: NftItem }> =>
-    req(`/api/nft/collections/${slug}/items/${editionNumber}`),
+  // Brai, 2026-09-19: editionNumber is scoped per tier now (see the
+  // backend's NftItem.editionNumber comment) -- "TIER 1 #1321" and
+  // "TIER 2 #1321" can both exist, so the lookup needs the tier slug too.
+  getNftItem: (
+    slug: string,
+    tierSlug: "papiro" | "fragmento" | "reliquia",
+    editionNumber: number
+  ): Promise<{ collection: { slug: string; name: string; currency: Currency }; item: NftItem }> =>
+    req(`/api/nft/collections/${slug}/items/${tierSlug}/${editionNumber}`),
   getWalletNfts: (walletId: string): Promise<NftItem[]> => req(`/api/wallets/${walletId}/nfts`),
   mintNft: (data: { walletId: string; collectionSlug: string; quantity?: number }): Promise<NftMintResult> =>
     req("/api/nft/mint", { method: "POST", body: JSON.stringify(data) }),
@@ -388,6 +411,12 @@ export interface NftCollection {
   listedCount: number;
   salesCount: number;
   volumeZec: number;
+  // Brai, 2026-09-19: "el supply debe ir bajando" -- live count of items
+  // that exist right now and haven't been burned by forging (see
+  // getNftCollectionStats in the backend). mintedCount above is a
+  // lifetime/never-decreasing counter (used for the per-wallet cap) and is
+  // NOT what the SUPPLY display should show.
+  aliveSupply: number;
 }
 
 export interface NftTraitCount {
@@ -440,9 +469,26 @@ export type NftMintResult =
       editionNumber: number;
       itemIds: string[];
       editionNumbers: number[];
+      // Brai, 2026-09-19: "TIER 1 #1321" numbering is per-tier now, so a
+      // free-mint result needs to say which tier each editionNumbers[i]
+      // belongs to (claimRandomUnmintedNftItem can hand out any tier).
+      tiers: ("PAPIRO" | "FRAGMENTO" | "RELIQUIA")[];
       quantity: number;
     }
-  | { mintId: string; currency: Currency; zecAddress: string; zecAmount: number; quantity: number; memo: string; status: "PENDING" };
+  | {
+      mintId: string;
+      currency: Currency;
+      zecAddress: string;
+      zecAmount: number;
+      quantity: number;
+      memo: string;
+      status: "PENDING";
+      // Brai, 2026-09-19: "inclusive los que hacen free mint tienen que
+      // hacer una tx ... cobrarle muy poco" -- true when this PENDING is a
+      // whitelist free claim's tiny on-chain fee (NFT_FREE_MINT_FEE_ZEC),
+      // not a real paid mint. Optional/absent on a normal paid mint.
+      freeClaim?: boolean;
+    };
 
 export interface NftPendingMint {
   id: string;
@@ -451,6 +497,10 @@ export interface NftPendingMint {
   currency: Currency;
   zecAddress: string | null;
   expectedZecAmount: number;
+  // Same freeClaim flag as NftMintResult's PENDING branch -- present on
+  // the polled /api/nft/mints/:id row too, so the "waiting" UI still knows
+  // after a page reload (mintId in state, freeClaim not).
+  freeClaim: boolean;
   status: "PENDING" | "CREATED" | "EXPIRED" | "FAILED";
   resultItemId: string | null;
   // Brai, 2026-09-19: quantity minting -- how many pieces this payment
@@ -488,6 +538,7 @@ export interface NftActivity {
   kind: "MINT" | "LIST" | "SALE";
   collectionSlug: string;
   editionNumber: number;
+  tier: "PAPIRO" | "FRAGMENTO" | "RELIQUIA";
   name: string | null;
   priceZec: number;
   currency: Currency;
