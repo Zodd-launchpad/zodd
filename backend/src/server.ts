@@ -1585,12 +1585,33 @@ app.post("/api/nft/mint", async (req, reply) => {
     });
   }
 
-  const walletService = walletServiceFor(collection.currency);
   // Brai, 2026-09-19: "yo sigo minteando casi gratis... las wallet del
   // publico mintean a 0.0025" -- owner wallets (env-gated, see fees.ts)
   // always pay OWNER_NFT_MINT_PRICE_ZEC; everyone else pays the
   // collection's normal mintPriceZec (the "public" price).
   const mintPriceZec = nftMintPriceZecFor(wallet.id, collection.mintPriceZec);
+
+  // Brai, 2026-09-19: "mintea a precio 0" -- when an owner wallet's price
+  // is actually 0, there's no real payment to wait for, so skip the
+  // address/QR/poll flow entirely (same idea as the free whitelist claim
+  // above). See store.claimFreeOwnerNftMint's comment.
+  if (isOwner && mintPriceZec <= 0) {
+    const ownerFreeMint: Awaited<ReturnType<typeof store.claimFreeOwnerNftMint>> = await store.claimFreeOwnerNftMint(body.collectionSlug, wallet.id);
+    if (ownerFreeMint.ok === true) {
+      app.log.info(`NFT free OWNER mint: wallet ${wallet.id} -> ${ownerFreeMint.collectionSlug} #${ownerFreeMint.editionNumber}`);
+      return reply.send({
+        free: true,
+        status: "CREATED",
+        collectionSlug: ownerFreeMint.collectionSlug,
+        itemId: ownerFreeMint.itemId,
+        editionNumber: ownerFreeMint.editionNumber,
+      });
+    }
+    if (ownerFreeMint.error === "sold_out") return reply.code(409).send({ error: "sold out" });
+    return reply.code(404).send({ error: "collection not found" });
+  }
+
+  const walletService = walletServiceFor(collection.currency);
 
   const pending = await store.createPendingNftMint({
     collectionId: collection.id,

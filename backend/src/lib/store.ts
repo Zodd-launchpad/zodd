@@ -1610,7 +1610,16 @@ export async function getWalletNftMintCount(collectionId: string, walletId: stri
     where: { claimedByWalletId: walletId },
     select: { claimedCount: true },
   });
-  return paidCount + (whitelistEntry?.claimedCount ?? 0);
+  // Brai, 2026-09-19: "mintea a precio 0" -- an owner free mint (see
+  // claimFreeOwnerNftMint) never creates a PendingNftMint row, so it has
+  // to be counted separately. Its synthetic txid (`owner-free-<walletId>-`)
+  // is the only record of it and stays put even if the piece is later sold
+  // on the secondary market, so this stays accurate for "how many has this
+  // wallet ever minted" regardless of what they still hold.
+  const ownerFreeCount = await prisma.nftItem.count({
+    where: { collectionId, mintPaymentTxid: { startsWith: `owner-free-${walletId}-` } },
+  });
+  return paidCount + (whitelistEntry?.claimedCount ?? 0) + ownerFreeCount;
 }
 
 /** Read-only stats for the collection header (floor/listed/sales/volume),
@@ -2669,6 +2678,35 @@ export async function claimFreeNftWhitelistMint(
       where: { id: entry.id },
       data: { claimedAt: entry.claimedAt ?? new Date(), claimedByWalletId: walletId, claimedCount: { increment: 1 } },
     }),
+  ]);
+  return { ok: true, collectionSlug, itemId: item.id, editionNumber: item.editionNumber };
+}
+
+/** Brai, 2026-09-19: "ese es el id de wallet mio, del desarrollador, mintea
+ * a precio 0" -- when an owner wallet's price (nftMintPriceZecFor in
+ * fees.ts) is actually 0, there's no real payment to wait for, so this
+ * skips the address/QR/poll dance entirely, the same way
+ * claimFreeNftWhitelistMint does for a free whitelist claim. Unlike that
+ * one, this has no per-entry cap of its own -- server.ts already enforces
+ * NFT_MAX_MINTS_PER_WALLET before calling this, and that's the only limit
+ * an owner wallet is subject to. */
+export async function claimFreeOwnerNftMint(
+  collectionSlug: string,
+  walletId: string
+): Promise<
+  | { ok: true; collectionSlug: string; itemId: string; editionNumber: number }
+  | { ok: false; error: "collection_not_found" | "sold_out" }
+> {
+  const collection = await prisma.nftCollection.findUnique({ where: { slug: collectionSlug } });
+  if (!collection) return { ok: false, error: "collection_not_found" };
+
+  const txid = `owner-free-${walletId}-${Date.now()}`;
+  const itemId = await claimRandomUnmintedNftItem(collection.id, walletId, txid);
+  if (!itemId) return { ok: false, error: "sold_out" };
+
+  const [item] = await prisma.$transaction([
+    prisma.nftItem.findUniqueOrThrow({ where: { id: itemId } }),
+    prisma.nftCollection.update({ where: { id: collection.id }, data: { mintedCount: { increment: 1 } } }),
   ]);
   return { ok: true, collectionSlug, itemId: item.id, editionNumber: item.editionNumber };
 }
