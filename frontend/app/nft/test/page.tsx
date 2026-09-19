@@ -1,31 +1,87 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { api, formatUsd, formatZec, type NftCollection, type NftItem, type NftActivity } from "@/lib/api";
+import {
+  api,
+  formatUsd,
+  formatZec,
+  type NftCollection,
+  type NftItem,
+  type NftActivity,
+  type NftTraitCount,
+} from "@/lib/api";
 import { useLanguage } from "@/lib/i18n";
+import type { TranslationKey } from "@/lib/translations";
 import { useZecUsdPrice } from "@/lib/zecPrice";
+import { useWallet } from "@/lib/wallet";
 
 // Brai, 2026-09-18: "empeza a deployar el marketplace ... te envio una
-// pagina que me gustaria copiar, sencilla: zecrocks.cash/market ... no me
-// gusta que te diga los holders, esa parte sacala" -- same overall shape as
-// that reference (a stats header, a grid of the collection's pieces, a
-// recent-sales list) rebuilt on ZODD's own design system, and with NO
-// holders/owner leaderboard anywhere -- only a Market tab and a Sales tab.
+// pagina que me gustaria copiar, sencilla: zecrocks.cash/market" -- original
+// v1 of this page (stats header + a Market/Sales tab pair).
 //
-// Deliberately at /nft/test, not /nft (still the "coming soon" page) --
-// Brai: "en una url escondida que sea como zodd.fun/NFT/TEST y luego lo
-// mandamos a zodd.fun/nft" once he's happy with it.
+// Brai, 2026-09-19 (v14): "en la pagina zodd.fun/nft/test no aparecen los
+// listados, solo dice listed 1 ... la idea es que aparezca en varias
+// solapas, una que diga listed ... excepto offers, copia todo de esa pagina
+// https://zecbit.net/collection/zecbit-genesis" -- the grid was actually
+// rendering fine (confirmed live); what was missing was any way to see just
+// the LISTED pieces, and the richer multi-tab layout zecbit uses. Rebuilt
+// around that reference's shape: Items (with a status filter -- All /
+// Listed / Not listed / Owned by you -- and a trait sort), Traits,
+// Analytics, Activity, About. Deliberately no Offers tab -- ZODD has no
+// offer system, Brai explicitly said to skip it.
+//
+// Deliberately still at /nft/test, not /nft (still the "coming soon" page)
+// -- Brai: "en una url escondida ... y luego lo mandamos a zodd.fun/nft"
+// once he's happy with it.
 const COLLECTION_SLUG = "zodd-genesis";
+const PAGE_SIZE = 48;
 
-type Tab = "market" | "sales";
+type Tab = "items" | "traits" | "analytics" | "activity" | "about";
+type StatusFilter = "all" | "listed" | "not_listed" | "owned";
+type SortKey = "edition" | "price_asc" | "price_desc";
+
+// t()'s key type is a strict union generated from translations.ts, so a
+// template-literal lookup like `nftMarket.tab.${tab}` doesn't type-check --
+// these small maps keep the dynamic lookups typed instead of casting to any.
+const TAB_LABEL_KEY: Record<Tab, TranslationKey> = {
+  items: "nftMarket.tab.items",
+  traits: "nftMarket.tab.traits",
+  analytics: "nftMarket.tab.analytics",
+  activity: "nftMarket.tab.activity",
+  about: "nftMarket.tab.about",
+};
+const STATUS_LABEL_KEY: Record<StatusFilter, TranslationKey> = {
+  all: "nftMarket.status.all",
+  listed: "nftMarket.status.listed",
+  not_listed: "nftMarket.status.notListed",
+  owned: "nftMarket.status.owned",
+};
+const ACTIVITY_KIND_KEY: Record<NftActivity["kind"], TranslationKey> = {
+  MINT: "nftMarket.activity.kind.mint",
+  LIST: "nftMarket.activity.kind.list",
+  SALE: "nftMarket.activity.kind.sale",
+};
 
 export default function NftMarketTestPage() {
   const { t } = useLanguage();
   const usdRate = useZecUsdPrice();
+  const { wallet } = useWallet();
+
   const [collection, setCollection] = useState<NftCollection | null | undefined>(undefined); // undefined = loading, null = not configured yet
+  const [tab, setTab] = useState<Tab>("items");
+
+  // ---- Items tab ----
+  const [status, setStatus] = useState<StatusFilter>("all");
+  const [sort, setSort] = useState<SortKey>("edition");
+  const [page, setPage] = useState(1);
   const [items, setItems] = useState<NftItem[] | null>(null);
-  const [tab, setTab] = useState<Tab>("market");
-  const [sales, setSales] = useState<NftActivity[] | null>(null);
+  const [itemsTotal, setItemsTotal] = useState(0);
+
+  // ---- Traits tab (lazy-loaded once) ----
+  const [traits, setTraits] = useState<NftTraitCount[] | null>(null);
+
+  // ---- Activity tab (lazy-loaded once) ----
+  const [activity, setActivity] = useState<NftActivity[] | null>(null);
 
   useEffect(() => {
     api
@@ -34,21 +90,60 @@ export default function NftMarketTestPage() {
       .catch(() => setCollection(null));
   }, []);
 
+  // "Owned by you" needs a connected wallet -- fall back to "all" if it
+  // disconnects mid-filter rather than silently querying ownerWalletId=undefined.
   useEffect(() => {
-    if (!collection) return;
-    api
-      .getNftItems(COLLECTION_SLUG, { sort: "edition" })
-      .then((r) => setItems(r.items))
-      .catch(() => setItems([]));
-  }, [collection]);
+    if (status === "owned" && !wallet) setStatus("all");
+  }, [status, wallet]);
 
   useEffect(() => {
-    if (tab !== "sales" || !collection) return;
+    if (!collection || tab !== "items") return;
+    setItems(null);
+    const opts: Parameters<typeof api.getNftItems>[1] = { sort, page };
+    if (status === "owned" && wallet) opts.ownerWalletId = wallet.walletId;
+    else if (status === "listed") opts.status = "listed";
+    else if (status === "not_listed") opts.status = "not_listed";
+    else opts.status = "all";
+    api
+      .getNftItems(COLLECTION_SLUG, opts)
+      .then((r) => {
+        setItems(r.items);
+        setItemsTotal(r.total);
+      })
+      .catch(() => {
+        setItems([]);
+        setItemsTotal(0);
+      });
+  }, [collection, tab, status, sort, page, wallet]);
+
+  useEffect(() => {
+    if (!collection || tab !== "traits" || traits !== null) return;
+    api
+      .getNftTraits(COLLECTION_SLUG)
+      .then((r) => setTraits(r.traits))
+      .catch(() => setTraits([]));
+  }, [collection, tab, traits]);
+
+  useEffect(() => {
+    if (!collection || (tab !== "activity" && tab !== "analytics") || activity !== null) return;
     api
       .getNftActivity()
-      .then((rows) => setSales(rows.filter((r) => r.kind === "SALE" && r.collectionSlug === COLLECTION_SLUG)))
-      .catch(() => setSales([]));
-  }, [tab, collection]);
+      .then((rows) => setActivity(rows.filter((r) => r.collectionSlug === COLLECTION_SLUG)))
+      .catch(() => setActivity([]));
+  }, [collection, tab, activity]);
+
+  const traitsByKey = useMemo(() => {
+    if (!traits) return null;
+    const grouped = new Map<string, NftTraitCount[]>();
+    for (const row of traits) {
+      const arr = grouped.get(row.trait) ?? [];
+      arr.push(row);
+      grouped.set(row.trait, arr);
+    }
+    return Array.from(grouped.entries());
+  }, [traits]);
+
+  const recentSales = useMemo(() => (activity ?? []).filter((a) => a.kind === "SALE"), [activity]);
 
   if (collection === undefined) return null;
 
@@ -61,6 +156,8 @@ export default function NftMarketTestPage() {
       </div>
     );
   }
+
+  const totalPages = Math.max(1, Math.ceil(itemsTotal / PAGE_SIZE));
 
   return (
     <div className="container nft-market">
@@ -108,72 +205,232 @@ export default function NftMarketTestPage() {
       </div>
 
       <div className="nft-market-tabs">
-        <button className={`nft-market-tab ${tab === "market" ? "active" : ""}`} onClick={() => setTab("market")}>
-          {t("nftMarket.tab.market")}
-        </button>
-        <button className={`nft-market-tab ${tab === "sales" ? "active" : ""}`} onClick={() => setTab("sales")}>
-          {t("nftMarket.tab.sales")}
-        </button>
+        {(["items", "traits", "analytics", "activity", "about"] as Tab[]).map((k) => (
+          <button key={k} className={`nft-market-tab ${tab === k ? "active" : ""}`} onClick={() => setTab(k)}>
+            {t(TAB_LABEL_KEY[k])}
+          </button>
+        ))}
       </div>
 
-      {tab === "market" && (
-        <>
-          {items === null && <p className="muted">{t("nftMarket.loading")}</p>}
-          {items !== null && items.length === 0 && <p className="muted">{t("nftMarket.empty")}</p>}
-          {items !== null && items.length > 0 && (
-            <div className="nft-grid">
-              {items.map((it) => (
-                <Link key={it.id} href={`/nft/test/item/${it.editionNumber}`} className="nft-card">
-                  <div className="nft-card-img-wrap">
-                    {it.imageDataUrl ? (
-                      <img src={it.imageDataUrl} alt={it.name ?? `#${it.editionNumber}`} className="nft-card-img" />
-                    ) : (
-                      <div className="nft-card-img-placeholder">?</div>
-                    )}
-                    {!it.mintedAt && <span className="nft-card-unminted-badge">{t("nftMarket.unminted")}</span>}
-                  </div>
-                  <div className="nft-card-body">
-                    <span className="nft-card-name">{it.name ?? `#${it.editionNumber}`}</span>
-                    <span className="nft-card-price">
-                      {it.listedPriceZec != null ? `${formatZec(it.listedPriceZec)} ${collection.currency}` : t("nftMarket.notListed")}
-                    </span>
-                  </div>
-                </Link>
+      {tab === "items" && (
+        <div className="nft-items-layout">
+          <div className="nft-items-sidebar">
+            <div className="nft-items-sidebar-label">{t("nftMarket.status.label")}</div>
+            <div className="nft-status-filters">
+              {(["all", "listed", "not_listed", "owned"] as StatusFilter[]).map((s) => (
+                <button
+                  key={s}
+                  className={`nft-status-chip ${status === s ? "active" : ""}`}
+                  disabled={s === "owned" && !wallet}
+                  onClick={() => {
+                    setStatus(s);
+                    setPage(1);
+                  }}
+                  title={s === "owned" && !wallet ? t("portfolio.connectFirst") : undefined}
+                >
+                  {t(STATUS_LABEL_KEY[s])}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="nft-items-main">
+            <div className="nft-items-toolbar">
+              <span className="muted" style={{ fontSize: 13 }}>
+                {items !== null && t("nftMarket.showingCount", { shown: String(items.length), total: String(itemsTotal) })}
+              </span>
+              <select
+                className="nft-sort-select"
+                value={sort}
+                onChange={(e) => {
+                  setSort(e.target.value as SortKey);
+                  setPage(1);
+                }}
+              >
+                <option value="edition">{t("nftMarket.sort.edition")}</option>
+                <option value="price_asc">{t("nftMarket.sort.priceAsc")}</option>
+                <option value="price_desc">{t("nftMarket.sort.priceDesc")}</option>
+              </select>
+            </div>
+
+            {items === null && <p className="muted">{t("nftMarket.loading")}</p>}
+            {items !== null && items.length === 0 && <p className="muted">{t("nftMarket.empty")}</p>}
+            {items !== null && items.length > 0 && (
+              <div className="nft-grid">
+                {items.map((it) => (
+                  <Link key={it.id} href={`/nft/test/item/${it.editionNumber}`} className="nft-card">
+                    <div className="nft-card-img-wrap">
+                      {it.imageDataUrl ? (
+                        <img src={it.imageDataUrl} alt={it.name ?? `#${it.editionNumber}`} className="nft-card-img" />
+                      ) : (
+                        <div className="nft-card-img-placeholder">?</div>
+                      )}
+                      {!it.mintedAt && <span className="nft-card-unminted-badge">{t("nftMarket.unminted")}</span>}
+                    </div>
+                    <div className="nft-card-body">
+                      <span className="nft-card-name">{it.name ?? `#${it.editionNumber}`}</span>
+                      <span className="nft-card-price">
+                        {it.listedPriceZec != null ? `${formatZec(it.listedPriceZec)} ${collection.currency}` : t("nftMarket.notListed")}
+                      </span>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            )}
+
+            {itemsTotal > PAGE_SIZE && (
+              <div className="nft-pagination">
+                <button className="btn btn-outline" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+                  {t("nftMarket.prevPage")}
+                </button>
+                <span className="muted" style={{ fontSize: 13 }}>{t("nftMarket.page", { page: String(page), pages: String(totalPages) })}</span>
+                <button className="btn btn-outline" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
+                  {t("nftMarket.nextPage")}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {tab === "traits" && (
+        <div className="nft-traits-tab">
+          {traits === null && <p className="muted">{t("nftMarket.loading")}</p>}
+          {traits !== null && traits.length === 0 && <p className="muted">{t("nftMarket.traits.empty")}</p>}
+          {traitsByKey && traitsByKey.length > 0 && (
+            <div className="nft-traits-groups">
+              {traitsByKey.map(([trait, values]) => (
+                <div key={trait} className="card nft-traits-group">
+                  <h3 className="nft-traits-group-title">{trait}</h3>
+                  <table className="nft-sales-table">
+                    <thead>
+                      <tr>
+                        <th>{t("nftMarket.traits.col.value")}</th>
+                        <th>{t("nftMarket.traits.col.count")}</th>
+                        <th>{t("nftMarket.traits.col.rarity")}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {values.map((v) => (
+                        <tr key={v.value}>
+                          <td>{v.value}</td>
+                          <td>{v.count}</td>
+                          <td className="muted">{collection.mintedCount > 0 ? `${((v.count / collection.mintedCount) * 100).toFixed(1)}%` : "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               ))}
             </div>
           )}
-        </>
+        </div>
       )}
 
-      {tab === "sales" && (
-        <>
-          {sales === null && <p className="muted">{t("nftMarket.loading")}</p>}
-          {sales !== null && sales.length === 0 && <p className="muted">{t("nftMarket.noSales")}</p>}
-          {sales !== null && sales.length > 0 && (
+      {tab === "analytics" && (
+        <div className="nft-analytics-tab">
+          <div className="nft-market-stats" style={{ marginBottom: 20 }}>
+            <div className="nft-market-stat">
+              <span className="nft-market-stat-label">{t("nftMarket.analytics.mintProgress")}</span>
+              <span className="nft-market-stat-value">
+                {collection.totalSupply > 0 ? `${Math.round((collection.mintedCount / collection.totalSupply) * 100)}%` : "—"}
+              </span>
+            </div>
+            <div className="nft-market-stat">
+              <span className="nft-market-stat-label">{t("nftMarket.analytics.avgSale")}</span>
+              <span className="nft-market-stat-value">
+                {recentSales.length > 0
+                  ? `${formatZec(recentSales.reduce((sum, s) => sum + s.priceZec, 0) / recentSales.length)} ${collection.currency}`
+                  : "—"}
+              </span>
+            </div>
+          </div>
+
+          <div className="nft-progress-bar">
+            <div
+              className="nft-progress-bar-fill"
+              style={{ width: `${collection.totalSupply > 0 ? Math.min(100, (collection.mintedCount / collection.totalSupply) * 100) : 0}%` }}
+            />
+          </div>
+
+          <h3 style={{ marginTop: 28, fontSize: 14 }}>{t("nftMarket.analytics.recentSalePrices")}</h3>
+          {activity === null && <p className="muted">{t("nftMarket.loading")}</p>}
+          {activity !== null && recentSales.length === 0 && <p className="muted">{t("nftMarket.analytics.noSales")}</p>}
+          {recentSales.length > 0 && (
+            <div className="nft-sparkline">
+              {recentSales
+                .slice()
+                .reverse()
+                .map((s, i) => {
+                  const max = Math.max(...recentSales.map((r) => r.priceZec), 0.0001);
+                  const h = Math.max(4, (s.priceZec / max) * 100);
+                  return <div key={i} className="nft-sparkline-bar" style={{ height: `${h}%` }} title={`${formatZec(s.priceZec)} ${s.currency}`} />;
+                })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab === "activity" && (
+        <div className="nft-activity-tab">
+          {activity === null && <p className="muted">{t("nftMarket.loading")}</p>}
+          {activity !== null && activity.length === 0 && <p className="muted">{t("nftMarket.activity.empty")}</p>}
+          {activity !== null && activity.length > 0 && (
             <table className="nft-sales-table">
               <thead>
                 <tr>
-                  <th>{t("nftMarket.sales.col.item")}</th>
-                  <th>{t("nftMarket.sales.col.price")}</th>
-                  <th>{t("nftMarket.sales.col.when")}</th>
+                  <th>{t("nftMarket.activity.col.event")}</th>
+                  <th>{t("nftMarket.activity.col.item")}</th>
+                  <th>{t("nftMarket.activity.col.price")}</th>
+                  <th>{t("nftMarket.activity.col.when")}</th>
                 </tr>
               </thead>
               <tbody>
-                {sales.map((s, i) => (
-                  <tr key={`${s.editionNumber}-${s.createdAt}-${i}`}>
+                {activity.map((a, i) => (
+                  <tr key={`${a.editionNumber}-${a.createdAt}-${i}`}>
                     <td>
-                      <Link href={`/nft/test/item/${s.editionNumber}`}>{s.name ?? `#${s.editionNumber}`}</Link>
+                      <span className={`nft-activity-kind nft-activity-kind-${a.kind.toLowerCase()}`}>
+                        {t(ACTIVITY_KIND_KEY[a.kind])}
+                      </span>
                     </td>
                     <td>
-                      {formatZec(s.priceZec)} {s.currency}
+                      <Link href={`/nft/test/item/${a.editionNumber}`}>{a.name ?? `#${a.editionNumber}`}</Link>
                     </td>
-                    <td className="muted">{new Date(s.createdAt).toLocaleString()}</td>
+                    <td>
+                      {formatZec(a.priceZec)} {a.currency}
+                    </td>
+                    <td className="muted">{new Date(a.createdAt).toLocaleString()}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           )}
-        </>
+        </div>
+      )}
+
+      {tab === "about" && (
+        <div className="card nft-about-tab">
+          <h3 style={{ marginTop: 0 }}>{t("nftMarket.about.details")}</h3>
+          <p className="muted">{collection.description || t("nftMarket.about.noDescription")}</p>
+          <div className="nft-about-grid">
+            <div>
+              <span className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>{t("nftMarket.about.currency")}</span>
+              <div>{collection.currency}</div>
+            </div>
+            <div>
+              <span className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>{t("nftMarket.about.totalSupply")}</span>
+              <div>{collection.totalSupply}</div>
+            </div>
+            <div>
+              <span className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>{t("nftMarket.about.mintPrice")}</span>
+              <div>{formatZec(collection.mintPriceZec)} {collection.currency}</div>
+            </div>
+            <div>
+              <span className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>{t("nftMarket.about.created")}</span>
+              <div>{new Date(collection.createdAt).toLocaleDateString()}</div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

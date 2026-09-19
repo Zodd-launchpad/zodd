@@ -1169,7 +1169,12 @@ app.get("/api/admin/orders-by-amount", async (req, reply) => {
 // configured" instead of a collection.
 
 const listNftItemsQuerySchema = z.object({
-  status: z.enum(["listed", "all"]).optional(),
+  // Brai, 2026-09-19 (v14): "no aparecen los listados ... la idea es que
+  // aparezca en varias solapas, una que diga listed" -- the /nft/test page
+  // is getting a "Not listed" filter chip (copying zecbit.net's Items tab),
+  // which needs its own backend filter -- "all minus listed" client-side
+  // would silently break as soon as pagination is involved.
+  status: z.enum(["listed", "not_listed", "all"]).optional(),
   ownerWalletId: z.string().optional(),
   sort: z.enum(["price_asc", "price_desc", "edition"]).optional(),
   page: z.coerce.number().int().positive().optional(),
@@ -1207,6 +1212,17 @@ app.get("/api/nft/collections/:slug/items", async (req, reply) => {
   const q = listNftItemsQuerySchema.parse(req.query);
   const { items, total } = await store.listNftItems(collection.id, q);
   return reply.send({ items, total, page: q.page ?? 1 });
+});
+
+// Brai, 2026-09-19 (v14): Traits tab on /nft/test -- see
+// store.getNftTraitCounts's own comment for why this is a real aggregation
+// query and not "fetch every item and count in JS".
+app.get("/api/nft/collections/:slug/traits", async (req, reply) => {
+  const { slug } = req.params as { slug: string };
+  const collection = await store.getNftCollectionBySlug(slug);
+  if (!collection) return reply.code(404).send({ error: "collection not found" });
+  const traits = await store.getNftTraitCounts(collection.id);
+  return reply.send({ traits });
 });
 
 app.get("/api/nft/collections/:slug/items/:editionNumber", async (req, reply) => {

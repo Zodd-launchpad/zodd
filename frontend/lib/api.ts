@@ -273,7 +273,12 @@ export const api = {
   getNftCollection: (slug: string): Promise<NftCollection> => req(`/api/nft/collections/${slug}`),
   getNftItems: (
     slug: string,
-    opts?: { status?: "listed" | "all"; ownerWalletId?: string; sort?: "price_asc" | "price_desc" | "edition"; page?: number }
+    opts?: {
+      status?: "listed" | "not_listed" | "all";
+      ownerWalletId?: string;
+      sort?: "price_asc" | "price_desc" | "edition";
+      page?: number;
+    }
   ): Promise<{ items: NftItem[]; total: number; page: number }> => {
     const params = new URLSearchParams();
     if (opts?.status) params.set("status", opts.status);
@@ -283,6 +288,9 @@ export const api = {
     const qs = params.toString();
     return req(`/api/nft/collections/${slug}/items${qs ? `?${qs}` : ""}`);
   },
+  // Brai, 2026-09-19 (v14): Traits tab on /nft/test -- see the backend's
+  // getNftTraitCounts for why this is its own aggregation endpoint.
+  getNftTraits: (slug: string): Promise<{ traits: NftTraitCount[] }> => req(`/api/nft/collections/${slug}/traits`),
   getNftItem: (slug: string, editionNumber: number): Promise<{ collection: { slug: string; name: string; currency: Currency }; item: NftItem }> =>
     req(`/api/nft/collections/${slug}/items/${editionNumber}`),
   getWalletNfts: (walletId: string): Promise<NftItem[]> => req(`/api/wallets/${walletId}/nfts`),
@@ -339,6 +347,12 @@ export interface NftCollection {
   listedCount: number;
   salesCount: number;
   volumeZec: number;
+}
+
+export interface NftTraitCount {
+  trait: string;
+  value: string;
+  count: number;
 }
 
 export interface NftItem {

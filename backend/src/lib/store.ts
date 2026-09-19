@@ -1420,7 +1420,7 @@ function toNftItemView(i: {
 export async function listNftItems(
   collectionId: string,
   opts: {
-    status?: "listed" | "all";
+    status?: "listed" | "not_listed" | "all";
     ownerWalletId?: string;
     sort?: "price_asc" | "price_desc" | "edition";
     page?: number;
@@ -1431,6 +1431,11 @@ export async function listNftItems(
   const page = Math.max(opts.page ?? 1, 1);
   const where: Record<string, unknown> = { collectionId };
   if (opts.status === "listed") where.listedPriceZec = { not: null };
+  // Brai, 2026-09-19 (v14): "Not listed" chip on the Items tab (copying
+  // zecbit.net) -- deliberately includes not-yet-minted pieces too, same as
+  // "All" already does elsewhere on this page; an unminted piece is,
+  // definitionally, not listed for sale either.
+  if (opts.status === "not_listed") where.listedPriceZec = null;
   if (opts.ownerWalletId) where.ownerInternalWalletId = opts.ownerWalletId;
   const orderBy =
     opts.sort === "price_desc"
@@ -1449,6 +1454,29 @@ export async function listNftItems(
     prisma.nftItem.count({ where }),
   ]);
   return { items: rows.map(toNftItemView), total };
+}
+
+// Brai, 2026-09-19 (v14): powers the new Traits tab on /nft/test (copying
+// zecbit.net's Items-tab sidebar, but as its own tab per Brai's "varias
+// solapas" ask). Aggregated server-side with jsonb_each_text rather than
+// paging through every NftItem client-side -- the current test collection
+// has 3 pieces, but this needs to still be correct (and fast) once it's a
+// real 3000+ piece collection.
+export interface NftTraitCount {
+  trait: string;
+  value: string;
+  count: number;
+}
+
+export async function getNftTraitCounts(collectionId: string): Promise<NftTraitCount[]> {
+  const rows = await prisma.$queryRaw<{ trait: string; value: string; count: bigint }[]>`
+    SELECT kv.key AS trait, kv.value AS value, count(*)::bigint AS count
+    FROM "NftItem", jsonb_each_text(traits) AS kv(key, value)
+    WHERE "collectionId" = ${collectionId} AND traits IS NOT NULL
+    GROUP BY kv.key, kv.value
+    ORDER BY kv.key ASC, count DESC
+  `;
+  return rows.map((r) => ({ trait: r.trait, value: r.value, count: Number(r.count) }));
 }
 
 export async function getNftItemByEdition(collectionId: string, editionNumber: number): Promise<NftItemView | null> {

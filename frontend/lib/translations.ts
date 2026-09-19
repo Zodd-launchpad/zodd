@@ -300,6 +300,62 @@ export const translations = {
   "nftMarket.sales.col.item": { en: "Item", zh: "作品" },
   "nftMarket.sales.col.price": { en: "Price", zh: "价格" },
   "nftMarket.sales.col.when": { en: "When", zh: "时间" },
+
+  // Brai, 2026-09-19 (v14): "la idea es que aparezca en varias solapas, una
+  // que diga listed ... excepto offers, copia todo de esa pagina
+  // [zecbit.net]" -- the /nft/test market page rebuilt around zecbit's
+  // multi-tab layout (Items/Traits/Analytics/Activity/About), minus their
+  // Offers tab (ZODD has no offer system). "Market"/"Sales" above are kept
+  // for old translation-key compatibility but no longer rendered.
+  "nftMarket.tab.items": { en: "Items", zh: "作品" },
+  "nftMarket.tab.traits": { en: "Traits", zh: "属性" },
+  "nftMarket.tab.analytics": { en: "Analytics", zh: "数据" },
+  "nftMarket.tab.activity": { en: "Activity", zh: "动态" },
+  "nftMarket.tab.about": { en: "About", zh: "关于" },
+
+  "nftMarket.stat.onchain": { en: "Minted", zh: "已铸造" },
+
+  "nftMarket.status.label": { en: "Status", zh: "状态" },
+  "nftMarket.status.all": { en: "All", zh: "全部" },
+  "nftMarket.status.listed": { en: "Listed", zh: "在售" },
+  "nftMarket.status.notListed": { en: "Not listed", zh: "未上架" },
+  "nftMarket.status.owned": { en: "Owned by you", zh: "你拥有的" },
+
+  "nftMarket.sort.edition": { en: "Edition #", zh: "编号" },
+  "nftMarket.sort.priceAsc": { en: "Price low to high", zh: "价格从低到高" },
+  "nftMarket.sort.priceDesc": { en: "Price high to low", zh: "价格从高到低" },
+
+  "nftMarket.showingCount": { en: "Showing {shown} of {total} items", zh: "显示 {total} 件中的 {shown} 件" },
+  "nftMarket.page": { en: "Page {page} of {pages}", zh: "第 {page} / {pages} 页" },
+  "nftMarket.prevPage": { en: "← Prev", zh: "← 上一页" },
+  "nftMarket.nextPage": { en: "Next →", zh: "下一页 →" },
+
+  "nftMarket.traits.empty": { en: "This collection doesn't have any traits recorded yet.", zh: "该系列还没有任何属性记录。" },
+  "nftMarket.traits.col.value": { en: "Value", zh: "属性值" },
+  "nftMarket.traits.col.count": { en: "Items", zh: "数量" },
+  "nftMarket.traits.col.rarity": { en: "Rarity", zh: "稀有度" },
+
+  "nftMarket.activity.empty": { en: "Nothing has happened in this collection yet.", zh: "该系列还没有任何动态。" },
+  "nftMarket.activity.col.event": { en: "Event", zh: "事件" },
+  "nftMarket.activity.col.item": { en: "Item", zh: "作品" },
+  "nftMarket.activity.col.price": { en: "Price", zh: "价格" },
+  "nftMarket.activity.col.when": { en: "When", zh: "时间" },
+  "nftMarket.activity.kind.mint": { en: "Mint", zh: "铸造" },
+  "nftMarket.activity.kind.list": { en: "List", zh: "上架" },
+  "nftMarket.activity.kind.sale": { en: "Sale", zh: "成交" },
+
+  "nftMarket.analytics.mintProgress": { en: "Mint progress", zh: "铸造进度" },
+  "nftMarket.analytics.avgSale": { en: "Avg. sale price", zh: "平均成交价" },
+  "nftMarket.analytics.noSales": { en: "Not enough sales yet for a price chart.", zh: "成交数据还不够，无法生成价格走势图。" },
+  "nftMarket.analytics.recentSalePrices": { en: "Recent sale prices", zh: "近期成交价格" },
+
+  "nftMarket.about.details": { en: "Collection details", zh: "系列详情" },
+  "nftMarket.about.currency": { en: "Currency", zh: "结算币种" },
+  "nftMarket.about.totalSupply": { en: "Total supply", zh: "总供应量" },
+  "nftMarket.about.mintPrice": { en: "Mint price", zh: "铸造价格" },
+  "nftMarket.about.created": { en: "Created", zh: "创建时间" },
+  "nftMarket.about.noDescription": { en: "No description yet.", zh: "暂无描述。" },
+
   "nftMint.back": { en: "← Back to market", zh: "← 返回市场" },
   "nftMint.title": { en: "Mint · {name}", zh: "铸造 · {name}" },
   "nftMint.body": { en: "{remaining} of {total} left. You'll get a random piece from the collection.", zh: "剩余 {remaining} / {total} 件。你将随机获得系列中的一件作品。" },

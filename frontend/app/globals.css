@@ -902,6 +902,62 @@ tr:hover td { background: #151517; cursor: pointer; }
 .nft-sales-table a { color: var(--accent); text-decoration: none; }
 .nft-sales-table a:hover { text-decoration: underline; }
 
+/* Brai, 2026-09-19 (v14): multi-tab /nft/test rebuild, copying
+   zecbit.net/collection/zecbit-genesis's Items/Traits/Analytics/Activity/
+   About layout on ZODD's own chrome/dark palette. */
+.nft-items-layout { display: grid; grid-template-columns: 200px 1fr; gap: 28px; align-items: start; }
+@media (max-width: 720px) {
+  .nft-items-layout { grid-template-columns: 1fr; }
+}
+
+.nft-items-sidebar-label { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-dim); margin-bottom: 10px; }
+.nft-status-filters { display: flex; flex-direction: column; gap: 6px; }
+@media (max-width: 720px) {
+  .nft-status-filters { flex-direction: row; flex-wrap: wrap; }
+}
+.nft-status-chip {
+  text-align: left;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.nft-status-chip:hover:not(:disabled) { color: var(--text); border-color: var(--accent-dim); }
+.nft-status-chip.active { color: var(--bg); background: var(--accent); border-color: var(--accent); font-weight: 600; }
+.nft-status-chip:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.nft-items-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+.nft-sort-select {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 13px;
+}
+
+.nft-pagination { display: flex; align-items: center; justify-content: center; gap: 16px; margin-top: 24px; }
+.nft-pagination .btn { padding: 8px 16px; font-size: 13px; }
+
+.nft-traits-groups { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+.nft-traits-group-title { margin: 0 0 10px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--accent-dim); }
+
+.nft-progress-bar { width: 100%; height: 8px; border-radius: 4px; background: var(--panel); border: 1px solid var(--border); overflow: hidden; }
+.nft-progress-bar-fill { height: 100%; background: var(--accent); }
+
+.nft-sparkline { display: flex; align-items: flex-end; gap: 3px; height: 80px; padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); }
+.nft-sparkline-bar { flex: 1; min-width: 3px; background: var(--accent-dim); border-radius: 2px 2px 0 0; }
+
+.nft-activity-kind { font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; padding: 3px 8px; border-radius: 4px; display: inline-block; }
+.nft-activity-kind-mint { color: var(--accent); background: var(--glow-soft); }
+.nft-activity-kind-list { color: var(--bronze); background: rgba(201, 162, 75, 0.15); }
+.nft-activity-kind-sale { color: var(--green); background: rgba(22, 199, 132, 0.15); }
+
+.nft-about-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 16px; margin-top: 16px; font-size: 14px; }
+
 .nft-mint-price { font-size: 22px; font-weight: 700; margin: 10px 0 18px; }
 .nft-mint-footer { display: flex; gap: 10px; margin-top: 16px; }
 .nft-mint-footer .btn { flex: 1; }
