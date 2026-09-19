@@ -299,8 +299,17 @@ export const translations = {
   // tier (see nftMarket.forge.tier.reliquia / .reliquiaOwned above).
   "pyramid.closed.body": { en: "This exclusive benefit will open for all TIER 3 holders very soon.", zh: "这项专属权益即将向所有持有三级藏品的用户开放。" },
   "nftMarket.soldOut": { en: "SOLD OUT", zh: "已售罄" },
-  "nftMarket.mintButton": { en: "Mint · {price} {currency}", zh: "铸造 · {price} {currency}" },
-  "nftMarket.stat.minted": { en: "Minted", zh: "已铸造" },
+  // Brai, 2026-09-19: "no quiero que diga los zec porque parece que estas
+  // pagando, quiero que solo diga MINT" -- dropped the price/currency from
+  // this button's label (the mint page itself still shows the exact ZEC
+  // amount once you're actually on the payment flow, just not here).
+  "nftMarket.mintButton": { en: "Mint", zh: "铸造" },
+  // Brai, 2026-09-19: "arriba donde dice MINTED ... tiene que decir SUPPLY"
+  // -- relabeled; the value it's paired with (nft/test/page.tsx) now shows
+  // collection.aliveSupply, a live count that goes DOWN as people forge
+  // (see getNftCollectionStats in the backend), not the old
+  // always-increasing mintedCount.
+  "nftMarket.stat.minted": { en: "Supply", zh: "供应量" },
   "nftMarket.stat.floor": { en: "Floor", zh: "地板价" },
   "nftMarket.stat.listed": { en: "Listed", zh: "在售" },
   "nftMarket.stat.volume": { en: "Volume", zh: "成交量" },
@@ -319,14 +328,17 @@ export const translations = {
   // Brai, 2026-09-19 (v14): "la idea es que aparezca en varias solapas, una
   // que diga listed ... excepto offers, copia todo de esa pagina
   // [zecbit.net]" -- the /nft/test market page rebuilt around zecbit's
-  // multi-tab layout (Items/Traits/Analytics/Activity/About), minus their
-  // Offers tab (ZODD has no offer system). "Market"/"Sales" above are kept
-  // for old translation-key compatibility but no longer rendered.
+  // multi-tab layout, minus their Offers tab (ZODD has no offer system).
+  // "Market"/"Sales" above are kept for old translation-key compatibility
+  // but no longer rendered.
+  //
+  // Brai, 2026-09-19: "primero tiene que estar items, borra traits, segundo
+  // forge, tercero activity cuarto analytics y quinto about" -- tab order
+  // below matches that; the old Traits tab/key is gone.
   "nftMarket.tab.items": { en: "Items", zh: "作品" },
-  "nftMarket.tab.traits": { en: "Traits", zh: "属性" },
-  "nftMarket.tab.analytics": { en: "Analytics", zh: "数据" },
-  "nftMarket.tab.activity": { en: "Activity", zh: "动态" },
   "nftMarket.tab.forge": { en: "Forge", zh: "熔炉" },
+  "nftMarket.tab.activity": { en: "Activity", zh: "动态" },
+  "nftMarket.tab.analytics": { en: "Analytics", zh: "数据" },
   "nftMarket.tab.about": { en: "About", zh: "关于" },
 
   "nftMarket.stat.onchain": { en: "Minted", zh: "已铸造" },
@@ -346,10 +358,6 @@ export const translations = {
   "nftMarket.prevPage": { en: "← Prev", zh: "← 上一页" },
   "nftMarket.nextPage": { en: "Next →", zh: "下一页 →" },
 
-  "nftMarket.traits.empty": { en: "This collection doesn't have any traits recorded yet.", zh: "该系列还没有任何属性记录。" },
-  "nftMarket.traits.col.value": { en: "Value", zh: "属性值" },
-  "nftMarket.traits.col.count": { en: "Items", zh: "数量" },
-  "nftMarket.traits.col.rarity": { en: "Rarity", zh: "稀有度" },
 
   "nftMarket.activity.empty": { en: "Nothing has happened in this collection yet.", zh: "该系列还没有任何动态。" },
   "nftMarket.activity.col.event": { en: "Event", zh: "事件" },
@@ -427,6 +435,15 @@ export const translations = {
   "nftMint.buyButton": { en: "BUY", zh: "购买" },
   "nftMint.total.free": { en: "FREE", zh: "免费" },
   "nftMint.waitingBody": { en: "Send the exact amount below. Your piece is revealed automatically once payment is detected.", zh: "请发送下方准确金额。检测到付款后将自动为你揭示作品。" },
+  // Brai, 2026-09-19: "inclusive los que hacen free mint tienen que hacer
+  // una tx con su wallet y cobrarle muy poco, que cubran la transaccion y
+  // un poquito mas ... sino no tiene sentido solo son nfts en mi base de
+  // datos, la idea es que vivan en la blockchain" -- a whitelist free
+  // claim now needs a tiny real on-chain payment too (NFT_FREE_MINT_FEE_ZEC
+  // in the backend), so it can't stay fully silent about a fee existing.
+  "nftMint.freeClaim.feeNote": { en: "A tiny network fee applies so your piece lives on-chain, not just in a database.", zh: "需支付极少的网络手续费，让你的作品真正上链，而不只是存在数据库里。" },
+  "nftMint.freeClaim.badge": { en: "FREE MINT", zh: "免费铸造" },
+  "nftMint.freeClaim.waitingBody": { en: "Send the exact (tiny) amount below to put your free piece on-chain. It's revealed automatically once payment is detected.", zh: "请发送下方极少金额，让你的免费作品上链。检测到付款后将自动为你揭示作品。" },
   "nftMint.revealed.badge": { en: "YOU MINTED", zh: "铸造成功" },
   "nftMint.revealed.viewItem": { en: "View piece", zh: "查看作品" },
   "nftMint.revealed.backToMarket": { en: "Back to market", zh: "返回市场" },
@@ -444,7 +461,10 @@ export const translations = {
   "nftMint.badge.whitelist": { en: "WHITELIST LIVE", zh: "白名单铸造进行中" },
   "nftMint.badge.public": { en: "PUBLIC MINT LIVE", zh: "公开铸造进行中" },
   "nftMint.badge.soldOut": { en: "SOLD OUT", zh: "已售罄" },
-  "nftMint.supply": { en: "{minted} / {total} minted", zh: "已铸造 {minted} / {total}" },
+  // Brai, 2026-09-19: "SUPPLY ... debe ir bajando" -- {supply} is
+  // collection.aliveSupply (live, drops as people forge/burn), not the
+  // old always-increasing mintedCount.
+  "nftMint.supply": { en: "SUPPLY {supply} / {total}", zh: "供应量 {supply} / {total}" },
   "nftMint.stats.floorPrice": { en: "Floor Price", zh: "地板价" },
   "nftMint.stats.noFloor": { en: "No listings yet", zh: "暂无挂单" },
   "nftMint.schedule.title": { en: "Mint Schedule", zh: "铸造时间表" },

@@ -5,10 +5,11 @@ import {
   api,
   formatUsd,
   formatZec,
+  nftItemPath,
+  nftItemLabel,
   type NftCollection,
   type NftItem,
   type NftActivity,
-  type NftTraitCount,
   type NftForgeInventory,
 } from "@/lib/api";
 import { useLanguage } from "@/lib/i18n";
@@ -27,9 +28,10 @@ import { useWallet } from "@/lib/wallet";
 // rendering fine (confirmed live); what was missing was any way to see just
 // the LISTED pieces, and the richer multi-tab layout zecbit uses. Rebuilt
 // around that reference's shape: Items (with a status filter -- All /
-// Listed / Not listed / Owned by you -- and a trait sort), Traits,
-// Analytics, Activity, About. Deliberately no Offers tab -- ZODD has no
-// offer system, Brai explicitly said to skip it.
+// Listed / Not listed / Owned by you), Forge, Activity, Analytics, About
+// (see the 2026-09-19 tab-order comment on the Tab type below -- Traits was
+// dropped and the rest reordered). Deliberately no Offers tab -- ZODD has
+// no offer system, Brai explicitly said to skip it.
 //
 // Deliberately still at /nft/test, not /nft (still the "coming soon" page)
 // -- Brai: "en una url escondida ... y luego lo mandamos a zodd.fun/nft"
@@ -37,7 +39,10 @@ import { useWallet } from "@/lib/wallet";
 const COLLECTION_SLUG = "zodd-genesis";
 const PAGE_SIZE = 48;
 
-type Tab = "items" | "traits" | "analytics" | "activity" | "forge" | "about";
+// Brai, 2026-09-19: "primero tiene que estar items, borra traits, segundo
+// forge, tercero activity cuarto analytics y quinto about" -- tab order
+// (and this union's order) now matches that exactly; Traits is gone.
+type Tab = "items" | "forge" | "activity" | "analytics" | "about";
 type StatusFilter = "all" | "listed" | "not_listed" | "owned";
 type SortKey = "edition" | "price_asc" | "price_desc";
 // Brai, 2026-09-19: "5 papiros podes crear 1 fragmento, si tenes 3
@@ -50,10 +55,9 @@ type ForgeFromTier = "PAPIRO" | "FRAGMENTO";
 // these small maps keep the dynamic lookups typed instead of casting to any.
 const TAB_LABEL_KEY: Record<Tab, TranslationKey> = {
   items: "nftMarket.tab.items",
-  traits: "nftMarket.tab.traits",
-  analytics: "nftMarket.tab.analytics",
-  activity: "nftMarket.tab.activity",
   forge: "nftMarket.tab.forge",
+  activity: "nftMarket.tab.activity",
+  analytics: "nftMarket.tab.analytics",
   about: "nftMarket.tab.about",
 };
 const FORGE_TIER_LABEL_KEY: Record<"PAPIRO" | "FRAGMENTO" | "RELIQUIA", TranslationKey> = {
@@ -82,14 +86,14 @@ export default function NftMarketTestPage() {
   const [tab, setTab] = useState<Tab>("items");
 
   // ---- Items tab ----
+  // Brai, 2026-09-19: "el marketplace debe comenzar en LISTED y precios de
+  // mas bajo a mas alto" -- these are just the initial defaults; the chips
+  // and sort dropdown are still fully interactive after that.
   const [status, setStatus] = useState<StatusFilter>("listed");
   const [sort, setSort] = useState<SortKey>("price_asc");
   const [page, setPage] = useState(1);
   const [items, setItems] = useState<NftItem[] | null>(null);
   const [itemsTotal, setItemsTotal] = useState(0);
-
-  // ---- Traits tab (lazy-loaded once) ----
-  const [traits, setTraits] = useState<NftTraitCount[] | null>(null);
 
   // ---- Activity tab (lazy-loaded once) ----
   const [activity, setActivity] = useState<NftActivity[] | null>(null);
@@ -133,14 +137,6 @@ export default function NftMarketTestPage() {
   }, [collection, tab, status, sort, page, wallet]);
 
   useEffect(() => {
-    if (!collection || tab !== "traits" || traits !== null) return;
-    api
-      .getNftTraits(COLLECTION_SLUG)
-      .then((r) => setTraits(r.traits))
-      .catch(() => setTraits([]));
-  }, [collection, tab, traits]);
-
-  useEffect(() => {
     if (!collection || (tab !== "activity" && tab !== "analytics") || activity !== null) return;
     api
       .getNftActivity()
@@ -168,7 +164,7 @@ export default function NftMarketTestPage() {
     setForgeMessage(null);
     try {
       const result = await api.craftNft(COLLECTION_SLUG, { walletId: wallet.walletId, fromTier });
-      setForgeMessage({ kind: "ok", text: t("nftMarket.forge.crafted", { name: result.name ?? `#${result.editionNumber}` }) });
+      setForgeMessage({ kind: "ok", text: t("nftMarket.forge.crafted", { name: result.name ?? nftItemLabel(result.tier, result.editionNumber) }) });
       const r = await api.getNftForgeInventory(COLLECTION_SLUG, wallet.walletId);
       setForgeInventory(r.inventory);
     } catch (err) {
@@ -177,17 +173,6 @@ export default function NftMarketTestPage() {
       setForgeCraftingTier(null);
     }
   }
-
-  const traitsByKey = useMemo(() => {
-    if (!traits) return null;
-    const grouped = new Map<string, NftTraitCount[]>();
-    for (const row of traits) {
-      const arr = grouped.get(row.trait) ?? [];
-      arr.push(row);
-      grouped.set(row.trait, arr);
-    }
-    return Array.from(grouped.entries());
-  }, [traits]);
 
   const recentSales = useMemo(() => (activity ?? []).filter((a) => a.kind === "SALE"), [activity]);
 
@@ -214,7 +199,7 @@ export default function NftMarketTestPage() {
           {collection.description && <p className="muted nft-market-desc">{collection.description}</p>}
         </div>
         <Link href="/nft/test/mint" className="btn btn-gold nft-market-mint-btn">
-          {collection.soldOut ? t("nftMarket.soldOut") : t("nftMarket.mintButton", { price: formatZec(collection.mintPriceZec), currency: collection.currency })}
+          {collection.soldOut ? t("nftMarket.soldOut") : t("nftMarket.mintButton")}
         </Link>
       </div>
 
@@ -222,7 +207,7 @@ export default function NftMarketTestPage() {
         <div className="nft-market-stat">
           <span className="nft-market-stat-label">{t("nftMarket.stat.minted")}</span>
           <span className="nft-market-stat-value">
-            {collection.mintedCount} / {collection.totalSupply}
+            {collection.aliveSupply} / {collection.totalSupply}
           </span>
         </div>
         <div className="nft-market-stat">
@@ -251,7 +236,7 @@ export default function NftMarketTestPage() {
       </div>
 
       <div className="nft-market-tabs">
-        {(["items", "traits", "analytics", "activity", "forge", "about"] as Tab[]).map((k) => (
+        {(["items", "forge", "activity", "analytics", "about"] as Tab[]).map((k) => (
           <button key={k} className={`nft-market-tab ${tab === k ? "active" : ""}`} onClick={() => setTab(k)}>
             {t(TAB_LABEL_KEY[k])}
           </button>
@@ -304,10 +289,10 @@ export default function NftMarketTestPage() {
             {items !== null && items.length > 0 && (
               <div className="nft-grid">
                 {items.map((it) => (
-                  <Link key={it.id} href={`/nft/test/item/${it.editionNumber}`} className="nft-card">
+                  <Link key={it.id} href={nftItemPath(it.editionNumber, it.tier)} className="nft-card">
                     <div className="nft-card-img-wrap">
                       {it.imageDataUrl ? (
-                        <img src={it.imageDataUrl} alt={it.name ?? `#${it.editionNumber}`} className="nft-card-img" />
+                        <img src={it.imageDataUrl} alt={it.name ?? nftItemLabel(it.tier, it.editionNumber)} className="nft-card-img" />
                       ) : (
                         <div className="nft-card-img-placeholder">?</div>
                       )}
@@ -315,7 +300,7 @@ export default function NftMarketTestPage() {
                       <span className={`nft-card-tier-badge nft-card-tier-${it.tier.toLowerCase()}`}>{t(FORGE_TIER_LABEL_KEY[it.tier])}</span>
                     </div>
                     <div className="nft-card-body">
-                      <span className="nft-card-name">{it.name ?? `#${it.editionNumber}`}</span>
+                      <span className="nft-card-name">{it.name ?? nftItemLabel(it.tier, it.editionNumber)}</span>
                       <span className="nft-card-price">
                         {it.listedPriceZec != null ? `${formatZec(it.listedPriceZec)} ${collection.currency}` : t("nftMarket.notListed")}
                       </span>
@@ -337,40 +322,6 @@ export default function NftMarketTestPage() {
               </div>
             )}
           </div>
-        </div>
-      )}
-
-      {tab === "traits" && (
-        <div className="nft-traits-tab">
-          {traits === null && <p className="muted">{t("nftMarket.loading")}</p>}
-          {traits !== null && traits.length === 0 && <p className="muted">{t("nftMarket.traits.empty")}</p>}
-          {traitsByKey && traitsByKey.length > 0 && (
-            <div className="nft-traits-groups">
-              {traitsByKey.map(([trait, values]) => (
-                <div key={trait} className="card nft-traits-group">
-                  <h3 className="nft-traits-group-title">{trait}</h3>
-                  <table className="nft-sales-table">
-                    <thead>
-                      <tr>
-                        <th>{t("nftMarket.traits.col.value")}</th>
-                        <th>{t("nftMarket.traits.col.count")}</th>
-                        <th>{t("nftMarket.traits.col.rarity")}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {values.map((v) => (
-                        <tr key={v.value}>
-                          <td>{v.value}</td>
-                          <td>{v.count}</td>
-                          <td className="muted">{collection.mintedCount > 0 ? `${((v.count / collection.mintedCount) * 100).toFixed(1)}%` : "—"}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
       )}
 
@@ -441,7 +392,7 @@ export default function NftMarketTestPage() {
                       </span>
                     </td>
                     <td>
-                      <Link href={`/nft/test/item/${a.editionNumber}`}>{a.name ?? `#${a.editionNumber}`}</Link>
+                      <Link href={nftItemPath(a.editionNumber, a.tier)}>{a.name ?? nftItemLabel(a.tier, a.editionNumber)}</Link>
                     </td>
                     <td>
                       {formatZec(a.priceZec)} {a.currency}

@@ -6,7 +6,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
 import { CurveState, DEFAULT_CURVE_CONFIG, currentPrice, quoteBuy, quoteSell } from "./bondingCurve.js";
-import { splitFee, NFT_WHITELIST_FREE_MINT_LIMIT } from "./fees.js";
+import { splitFee, NFT_WHITELIST_FREE_MINT_LIMIT, NFT_TIER_NUMBERING_START } from "./fees.js";
 
 export const prisma = new PrismaClient();
 export { DEFAULT_CURVE_CONFIG };
@@ -851,6 +851,7 @@ export interface NftActivityView {
   kind: NftActivityKind;
   collectionSlug: string;
   editionNumber: number;
+  tier: "PAPIRO" | "FRAGMENTO" | "RELIQUIA";
   name: string | null;
   priceZec: number;
   currency: Currency;
@@ -864,13 +865,13 @@ export async function getRecentNftActivityGlobal(limit = 30): Promise<NftActivit
       where: { mintedAt: { not: null } },
       orderBy: { mintedAt: "desc" },
       take: perKind,
-      select: { editionNumber: true, name: true, mintedAt: true, collection: { select: { slug: true, mintPriceZec: true, currency: true } } },
+      select: { editionNumber: true, tier: true, name: true, mintedAt: true, collection: { select: { slug: true, mintPriceZec: true, currency: true } } },
     }),
     prisma.nftItem.findMany({
       where: { listedAt: { not: null } },
       orderBy: { listedAt: "desc" },
       take: perKind,
-      select: { editionNumber: true, name: true, listedAt: true, listedPriceZec: true, collection: { select: { slug: true, currency: true } } },
+      select: { editionNumber: true, tier: true, name: true, listedAt: true, listedPriceZec: true, collection: { select: { slug: true, currency: true } } },
     }),
     prisma.nftPurchaseOrder.findMany({
       where: { status: "FILLED" },
@@ -880,7 +881,7 @@ export async function getRecentNftActivityGlobal(limit = 30): Promise<NftActivit
         filledAt: true,
         currency: true,
         expectedZecAmount: true,
-        item: { select: { editionNumber: true, name: true, collection: { select: { slug: true } } } },
+        item: { select: { editionNumber: true, tier: true, name: true, collection: { select: { slug: true } } } },
       },
     }),
   ]);
@@ -890,6 +891,7 @@ export async function getRecentNftActivityGlobal(limit = 30): Promise<NftActivit
       kind: "MINT" as const,
       collectionSlug: m.collection.slug,
       editionNumber: m.editionNumber,
+      tier: m.tier,
       name: m.name,
       priceZec: num(m.collection.mintPriceZec),
       currency: m.collection.currency as Currency,
@@ -899,6 +901,7 @@ export async function getRecentNftActivityGlobal(limit = 30): Promise<NftActivit
       kind: "LIST" as const,
       collectionSlug: l.collection.slug,
       editionNumber: l.editionNumber,
+      tier: l.tier,
       name: l.name,
       priceZec: num(l.listedPriceZec),
       currency: l.collection.currency as Currency,
@@ -908,6 +911,7 @@ export async function getRecentNftActivityGlobal(limit = 30): Promise<NftActivit
       kind: "SALE" as const,
       collectionSlug: s.item.collection.slug,
       editionNumber: s.item.editionNumber,
+      tier: s.item.tier,
       name: s.item.name,
       priceZec: num(s.expectedZecAmount),
       currency: s.currency as Currency,
@@ -1631,8 +1635,20 @@ export async function getNftCollectionStats(collectionId: string): Promise<{
   listedCount: number;
   salesCount: number;
   volumeZec: number;
+  // Brai, 2026-09-19: "arriba donde dice MINTED tiene que decir SUPPLY, y
+  // ahi tiene que contar el supply en tiempo real, a medida que la gente
+  // forja y va quemando tier 1 para hacer tier 2 y tier 2 para hacer tier 3
+  // ... el supply debe ir bajando" -- mintedCount only ever goes UP (it's a
+  // lifetime counter of base mints, used for the per-wallet cap -- see
+  // getWalletNftMintCount), so it can't be what SUPPLY shows. This is a
+  // live count instead: every item that currently exists and hasn't been
+  // burned (forgeCraft sets burnedAt on the pieces it consumes -- see its
+  // comment), across all three tiers, including pieces forgeCraft itself
+  // created. A craft burns N pieces to create 1, so aliveSupply drops by
+  // (N-1) every time someone forges -- exactly the "va bajando" behavior.
+  aliveSupply: number;
 }> {
-  const [floor, listedCount, sales] = await Promise.all([
+  const [floor, listedCount, sales, aliveSupply] = await Promise.all([
     prisma.nftItem.aggregate({
       where: { collectionId, listedPriceZec: { not: null } },
       _min: { listedPriceZec: true },
@@ -1643,12 +1659,14 @@ export async function getNftCollectionStats(collectionId: string): Promise<{
       _sum: { expectedZecAmount: true },
       _count: true,
     }),
+    prisma.nftItem.count({ where: { collectionId, mintedAt: { not: null }, burnedAt: null } }),
   ]);
   return {
     floorZec: floor._min.listedPriceZec != null ? num(floor._min.listedPriceZec) : null,
     listedCount,
     salesCount: sales._count,
     volumeZec: num(sales._sum.expectedZecAmount ?? 0),
+    aliveSupply,
   };
 }
 
@@ -1800,10 +1818,17 @@ export async function getNftTraitCounts(collectionId: string): Promise<NftTraitC
   return rows.map((r) => ({ trait: r.trait, value: r.value, count: Number(r.count) }));
 }
 
-export async function getNftItemByEdition(collectionId: string, editionNumber: number): Promise<NftItemView | null> {
+// Brai, 2026-09-19: editionNumber is scoped per tier now (see
+// NftItem.editionNumber's comment) -- "TIER 1 #1321" and "TIER 2 #1321" can
+// both exist, so a lookup needs the tier too, not just the number.
+export async function getNftItemByEdition(
+  collectionId: string,
+  tier: "PAPIRO" | "FRAGMENTO" | "RELIQUIA",
+  editionNumber: number
+): Promise<NftItemView | null> {
   const [i, tierImages] = await Promise.all([
     prisma.nftItem.findUnique({
-      where: { collectionId_editionNumber: { collectionId, editionNumber } },
+      where: { collectionId_tier_editionNumber: { collectionId, tier, editionNumber } },
       include: { ownerInternalWallet: { select: { walletTag: true } } },
     }),
     getCollectionTierImages(collectionId),
@@ -1955,9 +1980,11 @@ export async function forgeCraft(walletId: string, collectionId: string, fromTie
       }
       // Crafted pieces aren't part of the collection's pre-seeded pool (see
       // NftItem.editionNumber's comment), so they get their own edition
-      // number continuing past whatever the pool's highest number is.
-      const agg = await tx.nftItem.aggregate({ where: { collectionId }, _max: { editionNumber: true } });
-      const nextEdition = (agg._max.editionNumber ?? 0) + 1;
+      // number continuing past whatever that TIER's pool highest number is
+      // -- each tier keeps its own counter, so a crafted FRAGMENTO piece
+      // never jumps into RELIQUIA's or PAPIRO's number range.
+      const agg = await tx.nftItem.aggregate({ where: { collectionId, tier: recipe.toTier }, _max: { editionNumber: true } });
+      const nextEdition = (agg._max.editionNumber ?? NFT_TIER_NUMBERING_START - 1) + 1;
       const created = await tx.nftItem.create({
         data: {
           collectionId,
@@ -2060,15 +2087,19 @@ export async function seedNftCollectionFromManifest(
   let updated = 0;
   let skippedMinted = 0;
   for (const item of manifest.items) {
+    // Brai, 2026-09-19: this manifest path has no tier concept (single-tier
+    // collections only) -- items land as PAPIRO, same as NftItem.tier's
+    // schema default, so the lookup key needs that explicit tier now that
+    // editionNumber is scoped per tier (see NftItem.editionNumber's comment).
     const existing = await prisma.nftItem.findUnique({
-      where: { collectionId_editionNumber: { collectionId: collection.id, editionNumber: item.editionNumber } },
+      where: { collectionId_tier_editionNumber: { collectionId: collection.id, tier: "PAPIRO", editionNumber: item.editionNumber } },
     });
     if (existing?.ownerInternalWalletId) {
       skippedMinted++;
       continue; // already minted -- never overwrite a piece someone owns
     }
     await prisma.nftItem.upsert({
-      where: { collectionId_editionNumber: { collectionId: collection.id, editionNumber: item.editionNumber } },
+      where: { collectionId_tier_editionNumber: { collectionId: collection.id, tier: "PAPIRO", editionNumber: item.editionNumber } },
       create: {
         collectionId: collection.id,
         editionNumber: item.editionNumber,
@@ -2177,11 +2208,26 @@ export async function seedTieredNftCollection(
     wipedItems = del.count;
   }
 
-  const rows: { collectionId: string; editionNumber: number; tier: "PAPIRO" | "FRAGMENTO" | "RELIQUIA" }[] = [];
-  let edition = 1;
-  for (let i = 0; i < input.tier1Count; i++) rows.push({ collectionId: collection.id, editionNumber: edition++, tier: "PAPIRO" });
-  for (let i = 0; i < input.tier2Count; i++) rows.push({ collectionId: collection.id, editionNumber: edition++, tier: "FRAGMENTO" });
-  for (let i = 0; i < input.tier3Count; i++) rows.push({ collectionId: collection.id, editionNumber: edition++, tier: "RELIQUIA" });
+  // Brai, 2026-09-19: "todos sigan un numero tipo TIER 1 #1321" -- each
+  // tier gets its OWN counter starting at NFT_TIER_NUMBERING_START, instead
+  // of one counter running across all three tiers back to back (which used
+  // to put FRAGMENTO/RELIQUIA up in the thousands while PAPIRO started at 1).
+  const rows: { collectionId: string; editionNumber: number; tier: "PAPIRO" | "FRAGMENTO" | "RELIQUIA"; name: string }[] = [];
+  let papiroEdition = NFT_TIER_NUMBERING_START;
+  let fragmentoEdition = NFT_TIER_NUMBERING_START;
+  let reliquiaEdition = NFT_TIER_NUMBERING_START;
+  for (let i = 0; i < input.tier1Count; i++) {
+    rows.push({ collectionId: collection.id, editionNumber: papiroEdition, tier: "PAPIRO", name: `TIER 1 #${papiroEdition}` });
+    papiroEdition++;
+  }
+  for (let i = 0; i < input.tier2Count; i++) {
+    rows.push({ collectionId: collection.id, editionNumber: fragmentoEdition, tier: "FRAGMENTO", name: `TIER 2 #${fragmentoEdition}` });
+    fragmentoEdition++;
+  }
+  for (let i = 0; i < input.tier3Count; i++) {
+    rows.push({ collectionId: collection.id, editionNumber: reliquiaEdition, tier: "RELIQUIA", name: `TIER 3 #${reliquiaEdition}` });
+    reliquiaEdition++;
+  }
 
   const CHUNK = 1000;
   for (let i = 0; i < rows.length; i += CHUNK) {
@@ -2251,6 +2297,12 @@ export interface PendingNftMintView {
   quantity: number;
   resultItemIds: string[];
   createdAt: string;
+  // Brai, 2026-09-19: "inclusive los que hacen free mint tienen que hacer
+  // una tx" -- true when this pending mint is a whitelist free claim's
+  // tiny on-chain fee (NFT_FREE_MINT_FEE_ZEC) rather than a real paid
+  // mint, so the frontend can show "FREE MINT -- just cover the network
+  // fee" instead of treating it like a normal purchase.
+  freeClaim: boolean;
 }
 
 function toPendingNftMintView(p: {
@@ -2267,6 +2319,7 @@ function toPendingNftMintView(p: {
   quantity: number;
   resultItemIds: string[];
   createdAt: Date;
+  freeClaimWhitelistEntryId?: string | null;
 }): PendingNftMintView {
   return {
     id: p.id,
@@ -2282,6 +2335,7 @@ function toPendingNftMintView(p: {
     quantity: p.quantity,
     resultItemIds: p.resultItemIds,
     createdAt: p.createdAt.toISOString(),
+    freeClaim: !!p.freeClaimWhitelistEntryId,
   };
 }
 
@@ -2291,6 +2345,7 @@ export async function createPendingNftMint(input: {
   currency?: Currency;
   expectedZecAmount: number;
   quantity?: number;
+  freeClaimWhitelistEntryId?: string;
 }) {
   const p = await prisma.pendingNftMint.create({
     data: {
@@ -2299,6 +2354,7 @@ export async function createPendingNftMint(input: {
       currency: input.currency ?? "ZEC",
       expectedZecAmount: input.expectedZecAmount,
       quantity: input.quantity ?? 1,
+      freeClaimWhitelistEntryId: input.freeClaimWhitelistEntryId ?? null,
     },
   });
   return toPendingNftMintView(p);
@@ -2406,7 +2462,29 @@ export async function completePendingNftMint(
   const p = await prisma.pendingNftMint.findUnique({ where: { id } });
   if (!p || p.status !== "PENDING") return null;
 
-  const requestedQty = Math.max(1, p.quantity);
+  let requestedQty = Math.max(1, p.quantity);
+  // Brai, 2026-09-19: this pending mint is a whitelist free claim's tiny
+  // on-chain fee (see PendingNftMint.freeClaimWhitelistEntryId's comment),
+  // not a real paid mint -- re-check the entry's remaining allowance NOW,
+  // right before actually claiming pieces. It was already checked once at
+  // request time (getWhitelistFreeClaimEligibility), but that check and
+  // this payment confirming are separated by however long the buyer takes
+  // to actually send the fee, during which another pending free-claim
+  // order for the same entry could've completed first (e.g. two tabs) --
+  // clamping here is what keeps a wallet from ever walking away with more
+  // than NFT_WHITELIST_FREE_MINT_LIMIT pieces total. Same "partial claim
+  // still completes with what it got" philosophy as the sold-out case
+  // below, just against the whitelist cap instead of total supply.
+  let freeClaimEntry: { claimedAt: Date | null; claimedCount: number } | null = null;
+  if (p.freeClaimWhitelistEntryId) {
+    freeClaimEntry = await prisma.nftWhitelistEntry.findUnique({
+      where: { id: p.freeClaimWhitelistEntryId },
+      select: { claimedAt: true, claimedCount: true },
+    });
+    const remaining = Math.max(0, NFT_WHITELIST_FREE_MINT_LIMIT - (freeClaimEntry?.claimedCount ?? 0));
+    requestedQty = Math.min(requestedQty, remaining);
+    if (requestedQty === 0) return null;
+  }
   const itemIds = await claimRandomUnmintedNftItems(p.collectionId, p.internalWalletId, txid, requestedQty);
   if (itemIds.length === 0) return null;
 
@@ -2416,6 +2494,18 @@ export async function completePendingNftMint(
     where: { id },
     data: { status: "CREATED", resultItemId: itemIds[0], resultItemIds: itemIds, completedAt: new Date() },
   });
+  // The free allowance itself is only actually spent now that the fee
+  // payment has genuinely confirmed, same claimedCount/claimedAt/
+  // claimedByWalletId bookkeeping the old instant claimFreeNftWhitelistMint
+  // used to do at claim time. A wallet that generates a payment address
+  // and never pays it never touches this, so it never loses part of its
+  // free allowance for nothing.
+  if (p.freeClaimWhitelistEntryId) {
+    await prisma.nftWhitelistEntry.update({
+      where: { id: p.freeClaimWhitelistEntryId },
+      data: { claimedAt: freeClaimEntry?.claimedAt ?? new Date(), claimedByWalletId: p.internalWalletId, claimedCount: { increment: itemIds.length } },
+    });
+  }
   const collection = await prisma.nftCollection.findUniqueOrThrow({ where: { id: p.collectionId }, select: { slug: true } });
   const editionNumbers = itemIds.map((itemId) => items.find((it) => it.id === itemId)!.editionNumber);
   return {
@@ -2639,6 +2729,89 @@ export async function listNftWhitelistEntries(status?: NftWhitelistStatus): Prom
   return entries.map(toNftWhitelistEntryView);
 }
 
+export type NftWhitelistDisplayStatus = "APPROVED" | "UNDER_REVIEW" | "REJECTED";
+
+export interface NftWhitelistUnifiedRow {
+  twitterHandle: string;
+  displayStatus: NftWhitelistDisplayStatus;
+  // Brai, 2026-09-19: "si te doy una lista... aunque no hayan hecho el
+  // whitelist" -- a handle can be APPROVED via the standing preapproval
+  // list (NftWhitelistPreapproved) before it ever has a real
+  // NftWhitelistEntry row (that only gets created once they run the wizard
+  // and supply a wallet address -- see submitNftWhitelistEntry). hasApplied
+  // tells the two apart: false means "on the list, hasn't gone through the
+  // wizard yet", so walletAddress/createdAt/claimedAt below are null.
+  hasApplied: boolean;
+  walletAddress: string | null;
+  reviewNote: string | null;
+  createdAt: string | null;
+  reviewedAt: string | null;
+  claimedAt: string | null;
+  claimedCount: number;
+}
+
+/** Brai, 2026-09-19: "arregla eso, solo que haya una lista, APROBADO, si
+ * esta, automaticamente APROBADO sino UNDER REVIEW" -- the admin list used
+ * to only show NftWhitelistEntry rows, so a preapproved handle that hadn't
+ * gone through the wizard yet (see NftWhitelistPreapproved's comment on
+ * preapproveNftWhitelistHandles) looked completely missing, not APPROVED,
+ * even though it really is approved the moment it's on that standing list.
+ * This merges both sources into one list: every preapproved handle reads
+ * APPROVED whether or not it has an entry yet, everything else reads its
+ * real status with PENDING relabeled to the friendlier UNDER_REVIEW (kept
+ * as its own value rather than folded into REJECTED, since Brai still
+ * wants those visibly distinct -- he only ever described two buckets for
+ * "not yet decided" vs "approved", not for a deliberate rejection).
+ * Optional status filter narrows to just one bucket, e.g. ?status=APPROVED
+ * to get the same clean "who's actually approved" list without also
+ * pulling every one of the thousands of still-pending applicants. */
+export async function listNftWhitelistUnified(statusFilter?: NftWhitelistDisplayStatus): Promise<NftWhitelistUnifiedRow[]> {
+  const [preapproved, entries] = await Promise.all([
+    prisma.nftWhitelistPreapproved.findMany(),
+    prisma.nftWhitelistEntry.findMany(),
+  ]);
+  const preapprovedByHandle = new Map(preapproved.map((p) => [p.twitterHandle, p]));
+  const entryByHandle = new Map(entries.map((e) => [e.twitterHandle, e]));
+
+  const rows: NftWhitelistUnifiedRow[] = [];
+
+  for (const p of preapproved) {
+    const entry = entryByHandle.get(p.twitterHandle);
+    rows.push({
+      twitterHandle: p.twitterHandle,
+      displayStatus: "APPROVED",
+      hasApplied: !!entry,
+      walletAddress: entry?.walletAddress ?? null,
+      reviewNote: entry?.reviewNote ?? p.note ?? null,
+      createdAt: entry ? entry.createdAt.toISOString() : null,
+      reviewedAt: entry?.reviewedAt ? entry.reviewedAt.toISOString() : null,
+      claimedAt: entry?.claimedAt ? entry.claimedAt.toISOString() : null,
+      claimedCount: entry?.claimedCount ?? 0,
+    });
+  }
+
+  for (const e of entries) {
+    if (preapprovedByHandle.has(e.twitterHandle)) continue; // already covered above, always APPROVED
+    const displayStatus: NftWhitelistDisplayStatus = e.status === "APPROVED" ? "APPROVED" : e.status === "REJECTED" ? "REJECTED" : "UNDER_REVIEW";
+    rows.push({
+      twitterHandle: e.twitterHandle,
+      displayStatus,
+      hasApplied: true,
+      walletAddress: e.walletAddress,
+      reviewNote: e.reviewNote,
+      createdAt: e.createdAt.toISOString(),
+      reviewedAt: e.reviewedAt ? e.reviewedAt.toISOString() : null,
+      claimedAt: e.claimedAt ? e.claimedAt.toISOString() : null,
+      claimedCount: e.claimedCount,
+    });
+  }
+
+  const filtered = statusFilter ? rows.filter((r) => r.displayStatus === statusFilter) : rows;
+  const STATUS_ORDER: Record<NftWhitelistDisplayStatus, number> = { APPROVED: 0, UNDER_REVIEW: 1, REJECTED: 2 };
+  filtered.sort((a, b) => STATUS_ORDER[a.displayStatus] - STATUS_ORDER[b.displayStatus] || a.twitterHandle.localeCompare(b.twitterHandle));
+  return filtered;
+}
+
 export async function reviewNftWhitelistEntry(
   id: string,
   status: "APPROVED" | "REJECTED",
@@ -2718,12 +2891,47 @@ export async function getNftWhitelistStatusForWallet(walletId: string): Promise<
   return entry ? toNftWhitelistEntryView(entry) : null;
 }
 
+/** Brai, 2026-09-19: "inclusive los que hacen free mint tienen que hacer
+ * una tx con su wallet y cobrarle muy poco ... que cubran la transaccion y
+ * un poquito mas" -- a whitelist free claim is no longer instant (that was
+ * claimFreeNftWhitelistMint below, now unused by /api/nft/mint): it goes
+ * through the exact same address/QR/poll payment flow as a paid mint, just
+ * for NFT_FREE_MINT_FEE_ZEC instead of the real price, so every piece has
+ * a real on-chain tx behind it (Brai: "sino no tiene sentido solo son nfts
+ * en mi base de datos"). This is the READ-ONLY eligibility check
+ * /api/nft/mint does BEFORE creating that pending payment, so a wallet
+ * that isn't approved (or has no free claims left) is never asked to pay a
+ * fee for a claim it doesn't actually have. Nothing is written here --
+ * claimedCount/claimedAt/claimedByWalletId only update once the fee
+ * payment actually confirms, inside completePendingNftMint's
+ * freeClaimWhitelistEntryId handling (see PendingNftMint's comment in
+ * schema.prisma). Same quantity-clamping as the old instant claim: asking
+ * for more than what's left of the 5-per-wallet allowance just returns the
+ * most it can give, never an error. */
+export async function getWhitelistFreeClaimEligibility(
+  walletId: string,
+  quantity: number
+): Promise<{ ok: true; entryId: string; quantity: number } | { ok: false; error: "not_approved" | "already_claimed" }> {
+  const entry = await findApprovedNftWhitelistEntryForWallet(walletId);
+  if (!entry) return { ok: false, error: "not_approved" };
+  const remaining = NFT_WHITELIST_FREE_MINT_LIMIT - entry.claimedCount;
+  if (remaining <= 0) return { ok: false, error: "already_claimed" };
+  return { ok: true, entryId: entry.id, quantity: Math.min(Math.max(1, quantity), remaining) };
+}
+
+/** Brai, 2026-09-19: superseded by getWhitelistFreeClaimEligibility +
+ * completePendingNftMint's freeClaimWhitelistEntryId handling -- a free
+ * whitelist claim is no longer instant (see that comment). Left in place,
+ * unused by /api/nft/mint, in case it's ever useful again (e.g. an admin
+ * "just give them the piece" override) -- not deleted since it's still a
+ * correct, working implementation of "instant free claim", just not the
+ * one the live route calls anymore. */
 export async function claimFreeNftWhitelistMint(
   collectionSlug: string,
   walletId: string,
   quantity: number = 1
 ): Promise<
-  | { ok: true; collectionSlug: string; itemId: string; editionNumber: number; itemIds: string[]; editionNumbers: number[] }
+  | { ok: true; collectionSlug: string; itemId: string; editionNumber: number; itemIds: string[]; editionNumbers: number[]; tiers: ("PAPIRO" | "FRAGMENTO" | "RELIQUIA")[] }
   | { ok: false; error: "not_approved" | "already_claimed" | "collection_not_found" | "sold_out" }
 > {
   const entry = await findApprovedNftWhitelistEntryForWallet(walletId);
@@ -2752,7 +2960,11 @@ export async function claimFreeNftWhitelistMint(
     data: { claimedAt: entry.claimedAt ?? new Date(), claimedByWalletId: walletId, claimedCount: { increment: itemIds.length } },
   });
   const editionNumbers = itemIds.map((itemId) => items.find((it) => it.id === itemId)!.editionNumber);
-  return { ok: true, collectionSlug, itemId: itemIds[0], editionNumber: editionNumbers[0], itemIds, editionNumbers };
+  // Brai, 2026-09-19: editionNumber is scoped per tier now -- the mint
+  // page needs each piece's tier to build its item-detail link (see
+  // api.ts's nftItemPath) without an extra fetch per piece.
+  const tiers = itemIds.map((itemId) => items.find((it) => it.id === itemId)!.tier as "PAPIRO" | "FRAGMENTO" | "RELIQUIA");
+  return { ok: true, collectionSlug, itemId: itemIds[0], editionNumber: editionNumbers[0], itemIds, editionNumbers, tiers };
 }
 
 /** Brai, 2026-09-19: "ese es el id de wallet mio, del desarrollador, mintea
@@ -2768,7 +2980,7 @@ export async function claimFreeOwnerNftMint(
   walletId: string,
   quantity: number = 1
 ): Promise<
-  | { ok: true; collectionSlug: string; itemId: string; editionNumber: number; itemIds: string[]; editionNumbers: number[] }
+  | { ok: true; collectionSlug: string; itemId: string; editionNumber: number; itemIds: string[]; editionNumbers: number[]; tiers: ("PAPIRO" | "FRAGMENTO" | "RELIQUIA")[] }
   | { ok: false; error: "collection_not_found" | "sold_out" }
 > {
   const collection = await prisma.nftCollection.findUnique({ where: { slug: collectionSlug } });
@@ -2781,7 +2993,8 @@ export async function claimFreeOwnerNftMint(
   const items = await prisma.nftItem.findMany({ where: { id: { in: itemIds } } });
   await prisma.nftCollection.update({ where: { id: collection.id }, data: { mintedCount: { increment: itemIds.length } } });
   const editionNumbers = itemIds.map((itemId) => items.find((it) => it.id === itemId)!.editionNumber);
-  return { ok: true, collectionSlug, itemId: itemIds[0], editionNumber: editionNumbers[0], itemIds, editionNumbers };
+  const tiers = itemIds.map((itemId) => items.find((it) => it.id === itemId)!.tier as "PAPIRO" | "FRAGMENTO" | "RELIQUIA");
+  return { ok: true, collectionSlug, itemId: itemIds[0], editionNumber: editionNumbers[0], itemIds, editionNumbers, tiers };
 }
 
 // ---------- NFT secondary-market purchases ----------

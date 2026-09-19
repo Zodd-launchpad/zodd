@@ -4,7 +4,7 @@ import * as store from "./lib/store.js";
 import { generateTwelveWords } from "./lib/wordlist.js";
 import { quoteBuy, quoteSell, currentPrice, marketCapZec } from "./lib/bondingCurve.js";
 import { simulatedInscriptionFor } from "./lib/simulatedChain.js";
-import { splitFee, TRADE_FEE_BPS, CREATOR_FEE_BPS, TOKEN_CREATE_FEE_ZEC, TOKEN_CREATE_FEE_YEC, createFeeFor, computeSellerPayout, NETWORK_FEE_ZEC, MAX_FIRST_BUY_ZEC, splitNftFee, isOwnerNftWallet, nftMintPriceZecFor, NFT_MAX_MINTS_PER_WALLET, NFT_WHITELIST_FREE_MINT_LIMIT } from "./lib/fees.js";
+import { splitFee, TRADE_FEE_BPS, CREATOR_FEE_BPS, TOKEN_CREATE_FEE_ZEC, TOKEN_CREATE_FEE_YEC, createFeeFor, computeSellerPayout, NETWORK_FEE_ZEC, MAX_FIRST_BUY_ZEC, splitNftFee, isOwnerNftWallet, nftMintPriceZecFor, NFT_MAX_MINTS_PER_WALLET, NFT_WHITELIST_FREE_MINT_LIMIT, NFT_FREE_MINT_FEE_ZEC } from "./lib/fees.js";
 import { startFeeDistributor, runFeeDistributionOnce } from "./lib/feeDistributor.js";
 import { startZecPricePolling, getZecUsdPrice } from "./lib/zecPrice.js";
 import { withTokenLock } from "./lib/mutex.js";
@@ -1367,11 +1367,21 @@ app.post("/api/nft/collections/:slug/forge/craft", async (req, reply) => {
   return reply.send(result.item);
 });
 
-app.get("/api/nft/collections/:slug/items/:editionNumber", async (req, reply) => {
-  const { slug, editionNumber } = req.params as { slug: string; editionNumber: string };
+// Brai, 2026-09-19: editionNumber is scoped per tier now (see
+// NftItem.editionNumber's comment in schema.prisma) -- "TIER 1 #1321" and
+// "TIER 2 #1321" can both exist, so the lookup route needs :tier too.
+const NFT_TIER_SLUGS: Record<string, "PAPIRO" | "FRAGMENTO" | "RELIQUIA"> = {
+  papiro: "PAPIRO",
+  fragmento: "FRAGMENTO",
+  reliquia: "RELIQUIA",
+};
+app.get("/api/nft/collections/:slug/items/:tier/:editionNumber", async (req, reply) => {
+  const { slug, tier, editionNumber } = req.params as { slug: string; tier: string; editionNumber: string };
+  const tierEnum = NFT_TIER_SLUGS[tier.toLowerCase()];
+  if (!tierEnum) return reply.code(400).send({ error: "invalid tier -- expected papiro, fragmento or reliquia" });
   const collection = await store.getNftCollectionBySlug(slug);
   if (!collection) return reply.code(404).send({ error: "collection not found" });
-  const item = await store.getNftItemByEdition(collection.id, Number(editionNumber));
+  const item = await store.getNftItemByEdition(collection.id, tierEnum, Number(editionNumber));
   if (!item) return reply.code(404).send({ error: "item not found" });
   return reply.send({ collection: { slug: collection.slug, name: collection.name, currency: collection.currency }, item });
 });
@@ -1576,29 +1586,56 @@ app.post("/api/nft/mint", async (req, reply) => {
   }
   const quantity = Math.min(body.quantity ?? 1, remainingWalletAllowance);
 
-  // Brai, 2026-09-18: "les vamos a dar whitelist, o sea minteo gratis" --
-  // an APPROVED whitelist entry with claims left (up to
-  // NFT_WHITELIST_FREE_MINT_LIMIT, see fees.ts) skips the entire
-  // payment/deposit-address dance below, for as much of `quantity` as the
-  // remaining free allowance covers. Anything other than a clean success
-  // here (not whitelisted, free allowance used up, sold out) just falls
-  // through to the normal paid flow -- "not approved" is by far the common
-  // case (most buyers never applied). Note: if the free allowance only
-  // covers part of `quantity`, this returns just those free pieces --
-  // minting the rest at full price is a separate call, same as hitting
-  // "mint" again after using up a free allowance today.
-  const freeMint = await store.claimFreeNftWhitelistMint(body.collectionSlug, wallet.id, quantity);
-  if (freeMint.ok) {
-    app.log.info(`NFT free whitelist mint: wallet ${wallet.id} -> ${freeMint.collectionSlug} x${freeMint.itemIds.length} (#${freeMint.editionNumbers.join(", #")})`);
+  const walletService = walletServiceFor(collection.currency);
+
+  // Brai, 2026-09-19: "inclusive los que hacen free mint tienen que hacer
+  // una tx con su wallet y cobrarle muy poco, que cubran la transaccion y
+  // un poquito mas ... sino no tiene sentido solo son nfts en mi base de
+  // datos" -- a whitelist free claim used to skip straight to assigning a
+  // piece (claimFreeNftWhitelistMint, now unused here). It goes through
+  // the exact same address/QR/poll payment flow as a paid mint instead,
+  // just for NFT_FREE_MINT_FEE_ZEC (a few cents) instead of the real
+  // price -- see getWhitelistFreeClaimEligibility's comment for why the
+  // free allowance itself isn't touched until that fee payment actually
+  // confirms. Anything other than eligible (not whitelisted, free
+  // allowance used up) falls through to the normal paid flow below --
+  // "not approved" is by far the common case (most buyers never applied).
+  const freeEligibility = await store.getWhitelistFreeClaimEligibility(wallet.id, quantity);
+  if (freeEligibility.ok) {
+    const pending = await store.createPendingNftMint({
+      collectionId: collection.id,
+      internalWalletId: wallet.id,
+      currency: collection.currency,
+      expectedZecAmount: NFT_FREE_MINT_FEE_ZEC * freeEligibility.quantity,
+      quantity: freeEligibility.quantity,
+      freeClaimWhitelistEntryId: freeEligibility.entryId,
+    });
+    let zecAddress: string;
+    let zecAmount: number;
+    let saplingDiversifierHex: string | null = null;
+    let orchardDiversifierHex: string | null = null;
+    try {
+      const res = await walletService.generateOrderAddress(pending.id, NFT_FREE_MINT_FEE_ZEC * freeEligibility.quantity);
+      zecAddress = res.address;
+      zecAmount = res.expectedZecAmount;
+      saplingDiversifierHex = (res as { saplingDiversifierHex?: string | null }).saplingDiversifierHex ?? null;
+      orchardDiversifierHex = (res as { orchardDiversifierHex?: string | null }).orchardDiversifierHex ?? null;
+    } catch (err) {
+      app.log.error(err, `couldn't generate a free-claim fee address for pending NFT mint ${pending.id}`);
+      await store.failPendingNftMint(pending.id).catch(() => {});
+      return reply.code(502).send({ error: "couldn't generate a payment address, try again" });
+    }
+    await store.setPendingNftMintAddress(pending.id, zecAddress, zecAmount, saplingDiversifierHex, orchardDiversifierHex);
+    app.log.info(`NFT free whitelist mint: wallet ${wallet.id} -> ${body.collectionSlug} x${freeEligibility.quantity} awaiting ${zecAmount} ${collection.currency} fee (pending ${pending.id})`);
     return reply.send({
-      free: true,
-      status: "CREATED",
-      collectionSlug: freeMint.collectionSlug,
-      itemId: freeMint.itemId,
-      editionNumber: freeMint.editionNumber,
-      itemIds: freeMint.itemIds,
-      editionNumbers: freeMint.editionNumbers,
-      quantity: freeMint.itemIds.length,
+      mintId: pending.id,
+      currency: collection.currency,
+      zecAddress,
+      zecAmount,
+      quantity: freeEligibility.quantity,
+      memo: walletService.buildPaymentMemoBase64(pending.id),
+      status: "PENDING",
+      freeClaim: true,
     });
   }
 
@@ -1624,14 +1661,13 @@ app.post("/api/nft/mint", async (req, reply) => {
         editionNumber: ownerFreeMint.editionNumber,
         itemIds: ownerFreeMint.itemIds,
         editionNumbers: ownerFreeMint.editionNumbers,
+        tiers: ownerFreeMint.tiers,
         quantity: ownerFreeMint.itemIds.length,
       });
     }
     if (ownerFreeMint.error === "sold_out") return reply.code(409).send({ error: "sold out" });
     return reply.code(404).send({ error: "collection not found" });
   }
-
-  const walletService = walletServiceFor(collection.currency);
 
   const pending = await store.createPendingNftMint({
     collectionId: collection.id,
@@ -1812,6 +1848,25 @@ app.get("/api/admin/nft-whitelist", async (req, reply) => {
   const q = nftWhitelistListQuerySchema.parse(req.query);
   const entries = await store.listNftWhitelistEntries(q.status);
   return reply.send({ entries });
+});
+
+// Brai, 2026-09-19: "arregla eso, solo que haya una lista, APROBADO, si esta,
+// automaticamente APROBADO sino UNDER REVIEW" -- the plain listing above only
+// reads NftWhitelistEntry, so a handle that was preapproved (via the
+// endpoint below) but hasn't gone through the wizard yet was invisible even
+// though it's genuinely approved. This merges NftWhitelistPreapproved +
+// NftWhitelistEntry into one list: on the preapproved list = APPROVED,
+// otherwise PENDING entries show as UNDER_REVIEW (see listNftWhitelistUnified).
+const nftWhitelistUnifiedQuerySchema = z.object({
+  status: z.enum(["APPROVED", "UNDER_REVIEW", "REJECTED"]).optional(),
+});
+
+app.get("/api/admin/nft-whitelist/unified", async (req, reply) => {
+  if (!ADMIN_TOKEN) return reply.code(503).send({ error: "ADMIN_TOKEN is not configured" });
+  if (req.headers["x-admin-token"] !== ADMIN_TOKEN) return reply.code(401).send({ error: "unauthorized" });
+  const q = nftWhitelistUnifiedQuerySchema.parse(req.query);
+  const rows = await store.listNftWhitelistUnified(q.status);
+  return reply.send({ rows });
 });
 
 const nftWhitelistReviewSchema = z.object({
