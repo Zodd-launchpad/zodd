@@ -17,9 +17,14 @@ const TABS = [
 export default function LaunchpadNav() {
   const pathname = usePathname();
   const { t } = useLanguage();
+  // Brai, 2026-09-19: "no quiero que puedan acceder a la piramide desde
+  // portfolio" -- the pyramid tab stays visible on the other launchpad
+  // pages (see the comment on TABS above for why it's otherwise always
+  // shown), but drops out of the nav bar specifically while on Portfolio.
+  const tabs = pathname?.startsWith("/launchpad/portfolio") ? TABS.filter((tab) => tab.href !== "/launchpad/pyramid") : TABS;
   return (
     <div className="sub-nav">
-      {TABS.map((tab) => {
+      {tabs.map((tab) => {
         const active = tab.href === "/launchpad" ? pathname === "/launchpad" : pathname?.startsWith(tab.href);
         return (
           <Link key={tab.href} href={tab.href} className={active ? "sub-nav-item active" : "sub-nav-item"}>
