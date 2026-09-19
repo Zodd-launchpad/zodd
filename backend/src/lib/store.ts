@@ -443,6 +443,98 @@ export async function reversePhantomBuyOrder(
   return { ok: true, orderId, symbol: token.symbol, tokenAmount: String(tokenAmountNum), netZecReversed: net, balanceNote };
 }
 
+// Brai, 2026-09-19: "esa WALLET no es mia la que vendio, ese monto se
+// perdio ... que realices una venta FANTASMA tambien para compensar la
+// cantidad de ZEC en la curva para que no haya otra venta con el precio
+// inflado que se lleve ZEC que no existe" -- follow-up to
+// reversePhantomBuyOrder above. Reversing the 24 phantom buy credits fixed
+// the curve for the phantom volume that was NEVER real, but a separate,
+// unrelated wallet (confirmed by Brai to not be his own) had already sold
+// some of the phantom ZODD tokens it received and been paid REAL ZEC for
+// them, while the curve was still inflated by that phantom volume. That ZEC
+// genuinely left the platform's real Zcash wallet -- it cannot be recovered
+// by running another real sell (a real sell only sends MORE real ZEC out,
+// it never brings any back in). What can be fixed is that the curve's
+// bookkeeping still claims to hold ZEC that no longer exists in the wallet,
+// which would let a future real seller be quoted and paid against a
+// shortfall. This function runs the curve side of exactly the trade that
+// already happened -- inverting quoteSell's own constant-product formula to
+// find how many tokens a real sell would have had to return to the curve to
+// produce `zecAmount` of zecOut, then applies that same (tokensSold,
+// realZecReserves) delta -- so price/marketcap stay internally consistent
+// with the curve's own model instead of just subtracting a flat ZEC number.
+// There is no real seller here, so unlike a real sell (or the phantom-buy
+// reversal above) this never pays out ZEC and never touches any wallet
+// balance -- it only corrects the two curve fields on Token.
+export async function applyPhantomSellAdjustment(
+  tokenId: string,
+  zecAmount: number
+): Promise<
+  | {
+      ok: true;
+      tokenId: string;
+      symbol: string;
+      tokensRemovedFromSupply: string;
+      zecRemovedFromReserve: number;
+      reserveBefore: number;
+      reserveAfter: number;
+      priceBefore: number;
+      priceAfter: number;
+    }
+  | { ok: false; reason: string }
+> {
+  if (!(zecAmount > 0)) return { ok: false, reason: "zecAmount must be > 0" };
+
+  const token = await prisma.token.findUnique({ where: { id: tokenId } });
+  if (!token) return { ok: false, reason: "token not found" };
+
+  const state: CurveState = { realZecReserves: num(token.curveReserveZec), tokensSold: num(token.curveSoldTokens) };
+  if (zecAmount > state.realZecReserves) {
+    return { ok: false, reason: `zecAmount (${zecAmount}) exceeds current curveReserveZec (${state.realZecReserves})` };
+  }
+
+  const cfg = DEFAULT_CURVE_CONFIG;
+  const zecBefore = cfg.virtualZecReserves + state.realZecReserves;
+  const tokensBefore = cfg.virtualTokenReserves - state.tokensSold;
+  const k = zecBefore * tokensBefore;
+
+  // Inverse of quoteSell: given the zecOut we need, solve for tokensIn.
+  const zecAfter = zecBefore - zecAmount;
+  const tokensAfter = k / zecAfter;
+  const tokensIn = tokensAfter - tokensBefore;
+
+  if (!(tokensIn > 0) || tokensIn > state.tokensSold) {
+    return { ok: false, reason: `computed tokensIn (${tokensIn}) is invalid against current tokensSold (${state.tokensSold})` };
+  }
+
+  const priceBefore = currentPrice(state, cfg);
+  const newState: CurveState = {
+    realZecReserves: Math.max(0, state.realZecReserves - zecAmount),
+    tokensSold: Math.max(0, state.tokensSold - tokensIn),
+  };
+  const priceAfter = currentPrice(newState, cfg);
+
+  await prisma.token.update({
+    where: { id: token.id },
+    data: {
+      curveReserveZec: newState.realZecReserves,
+      curveSoldTokens: BigInt(Math.round(newState.tokensSold)),
+    },
+  });
+
+  return {
+    ok: true,
+    tokenId: token.id,
+    symbol: token.symbol,
+    tokensRemovedFromSupply: String(Math.round(tokensIn)),
+    zecRemovedFromReserve: zecAmount,
+    reserveBefore: state.realZecReserves,
+    reserveAfter: newState.realZecReserves,
+    priceBefore,
+    priceAfter,
+  };
+}
+
 /** Brai, 2026-09-07: "los fee [de la plataforma], como claimeo" -- the
  * platform's 1% never gets paid out anywhere (it just sits in the real
  * wallet balance), so unlike the creator side there's no per-token

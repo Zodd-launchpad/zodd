@@ -1061,6 +1061,39 @@ app.post("/api/admin/reverse-phantom-buys", async (req, reply) => {
   return reply.send({ ok: true, results });
 });
 
+// Brai, 2026-09-19: "que realices una venta FANTASMA tambien para compensar
+// la cantidad de ZEC en la curva" -- follow-up to reverse-phantom-buys
+// above. A separate wallet (not Brai's) had already sold some of the
+// phantom ZODD tokens for real ZEC before the reversal ran, and that real
+// ZEC is genuinely gone -- unrecoverable by any real sell. This route only
+// corrects the curve's own bookkeeping (curveReserveZec/curveSoldTokens) by
+// the exact amount a real sell would have moved them, with no payout and no
+// wallet balance touched -- see store.applyPhantomSellAdjustment's comment.
+// Same ADMIN_TOKEN gate and per-token lock as every other curve mutation.
+const applyPhantomSellSchema = z.object({ tokenId: z.string().min(1), zecAmount: z.number().positive() });
+app.post("/api/admin/apply-phantom-sell", async (req, reply) => {
+  if (!ADMIN_TOKEN) return reply.code(503).send({ error: "ADMIN_TOKEN is not configured" });
+  if (req.headers["x-admin-token"] !== ADMIN_TOKEN) return reply.code(401).send({ error: "unauthorized" });
+  const body = applyPhantomSellSchema.safeParse(req.body);
+  if (!body.success) return reply.code(400).send({ error: "expected { tokenId: string, zecAmount: number }" });
+  try {
+    const result = await withTokenLock(body.data.tokenId, () =>
+      store.applyPhantomSellAdjustment(body.data.tokenId, body.data.zecAmount)
+    );
+    if (result.ok === true) {
+      app.log.warn(
+        `[admin] phantom sell adjustment on ${result.symbol}: -${result.zecRemovedFromReserve} ZEC, -${result.tokensRemovedFromSupply} tokens from curve (reserve ${result.reserveBefore} -> ${result.reserveAfter}, price ${result.priceBefore} -> ${result.priceAfter})`
+      );
+      return reply.send(result);
+    } else {
+      app.log.warn(`[admin] apply-phantom-sell rejected: ${result.reason}`);
+      return reply.code(400).send(result);
+    }
+  } catch (err) {
+    return reply.code(500).send({ ok: false, reason: String((err as Error).message ?? err) });
+  }
+});
+
 app.post("/api/admin/set-token-links", async (req, reply) => {
   if (!ADMIN_TOKEN) return reply.code(503).send({ error: "ADMIN_TOKEN is not configured" });
   if (req.headers["x-admin-token"] !== ADMIN_TOKEN) return reply.code(401).send({ error: "unauthorized" });
