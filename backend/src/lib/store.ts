@@ -379,6 +379,70 @@ export async function accrueFees(tokenId: string, creatorFeeZec: number, platfor
   });
 }
 
+// Brai, 2026-09-19: "solucionalo con una venta como si alguien vendiera esa
+// cantidad" -- incident recovery for the phantom "repeat buy" credits (see
+// the big comment on isNoteFreshEnoughFor in zcashReal.ts for the root
+// cause: stale, already-spent notes got re-matched as if they were fresh
+// payments, once per poll tick). This is NOT a real sell -- there is no
+// real seller and no real ZEC to pay out, so running an actual sell order
+// would either fail or, worse, send real ZEC out of the platform wallet for
+// nothing. Instead this un-does exactly what the phantom buy did, using the
+// exact numbers that were recorded at credit time (order.tokenAmount,
+// splitFee(order.zecAmount)) rather than re-quoting the curve -- an exact
+// inverse, not an approximation: curveSoldTokens and curveReserveZec go
+// back down by precisely what they went up by, the fee accrual this buy
+// added is subtracted back out, the buyer's wallet loses the tokens it was
+// never paid for, and the fabricated order row is removed so it stops
+// showing up in trade history. Only ever touches a FILLED BUY -- refuses
+// anything else outright rather than guess.
+export async function reversePhantomBuyOrder(
+  orderId: string
+): Promise<
+  | { ok: true; orderId: string; symbol: string; tokenAmount: string; netZecReversed: number; balanceNote: string }
+  | { ok: false; orderId: string; reason: string }
+> {
+  const order = await prisma.order.findUnique({ where: { id: orderId } });
+  if (!order) return { ok: false, orderId, reason: "order not found" };
+  if (order.side !== "BUY") return { ok: false, orderId, reason: `refusing: not a BUY order (side=${order.side})` };
+  if (order.status !== "FILLED") return { ok: false, orderId, reason: `refusing: not FILLED (status=${order.status})` };
+
+  const token = await prisma.token.findUnique({ where: { id: order.tokenId } });
+  if (!token) return { ok: false, orderId, reason: "token not found" };
+
+  const tokenAmountNum = num(order.tokenAmount);
+  const { net, creatorFee, platformFee } = splitFee(order.zecAmount);
+
+  const newSold = Math.max(0, num(token.curveSoldTokens) - tokenAmountNum);
+  const newReserve = Math.max(0, token.curveReserveZec - net);
+  const newCreatorAccrued = Math.max(0, token.creatorFeeAccruedZec - creatorFee);
+  const newPlatformTotal = Math.max(0, token.platformFeeTotalZec - platformFee);
+
+  await prisma.token.update({
+    where: { id: token.id },
+    data: {
+      curveSoldTokens: BigInt(Math.round(newSold)),
+      curveReserveZec: newReserve,
+      creatorFeeAccruedZec: newCreatorAccrued,
+      platformFeeTotalZec: newPlatformTotal,
+    },
+  });
+
+  let balanceNote = "ok";
+  try {
+    await debitBalance(order.internalWalletId, token.id, tokenAmountNum);
+  } catch (err) {
+    // The wallet may have already moved/sold some of the phantom tokens --
+    // the curve/fee correction above still happened (that's the part that
+    // actually matters for solvency); this is just a heads-up for manual
+    // follow-up on that specific wallet.
+    balanceNote = `balance NOT fully debited (curve/fees were still corrected): ${(err as Error).message}`;
+  }
+
+  await prisma.order.delete({ where: { id: orderId } });
+
+  return { ok: true, orderId, symbol: token.symbol, tokenAmount: String(tokenAmountNum), netZecReversed: net, balanceNote };
+}
+
 /** Brai, 2026-09-07: "los fee [de la plataforma], como claimeo" -- the
  * platform's 1% never gets paid out anywhere (it just sits in the real
  * wallet balance), so unlike the creator side there's no per-token

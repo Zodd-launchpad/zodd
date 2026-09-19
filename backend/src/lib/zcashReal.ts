@@ -165,6 +165,36 @@ export function seedConsumedTxids(txids: string[]) {
   for (const t of txids) consumedTxids.add(t);
 }
 
+// Brai, 2026-09-19: incident -- NOVA (and apparently ZODD earlier the same
+// day) got a string of phantom "repeat buy" credits, one per poll tick,
+// with zero real payment behind them. Root cause traced to consumedTxids:
+// notes are NEVER actually spent on-chain when "consumed" here (see the
+// big comment on this Set above -- the platform wallet just remembers the
+// txid internally), so a note that should be permanently excluded relies
+// entirely on consumedTxids actually containing its txid. Something left
+// gaps in that seeding (exact mechanism still under investigation -- not
+// waiting on that to close the hole), so several-day-old notes that had
+// already paid for OTHER tokens (ZOOKCAT 09-07, ZODD 09-08, 0ONE earlier
+// today) got re-treated as fresh incoming payments for NOVA, once per
+// 20s tick, for as long as a watcher stayed in its repeat-payment window.
+//
+// This is a second, independent line of defense that doesn't depend on
+// consumedTxids being complete: a note can only satisfy a given watcher if
+// zingo-cli's own reported observation time for it is at or after that
+// watcher's original creation time (minus a grace window for clock/index
+// skew). A note that's already days old cannot possibly be the payment for
+// an order that didn't exist yet when the note was first seen -- no matter
+// what consumedTxids does or doesn't contain. `time` is missing on some
+// notes in practice, so a note with no usable timestamp is neither
+// accepted nor rejected here -- it falls through to the existing
+// consumedTxids guard unchanged, same as before this patch.
+const NOTE_FRESHNESS_GRACE_MS = 5 * 60_000;
+function isNoteFreshEnoughFor(note: any, pending: PendingPayment): boolean {
+  const t = Number(note?.time);
+  if (!Number.isFinite(t) || t <= 0) return true;
+  return t * 1000 >= pending.originalCreatedAt - NOTE_FRESHNESS_GRACE_MS;
+}
+
 let pollingStarted = false;
 function startPolling() {
   if (pollingStarted) return;
@@ -220,7 +250,8 @@ function startPolling() {
           (n: any) =>
             typeof n.diversifier === "string" &&
             ((n.pool === "sapling" && n.diversifier === pending.saplingDiversifierHex) ||
-              ((n.pool === "orchard" || n.pool === "ironwood") && n.diversifier === pending.orchardDiversifierHex))
+              ((n.pool === "orchard" || n.pool === "ironwood") && n.diversifier === pending.orchardDiversifierHex)) &&
+            isNoteFreshEnoughFor(n, pending)
         );
         if (idx === -1) continue;
         const note = available[idx];
@@ -246,7 +277,7 @@ function startPolling() {
       // is for. Runs before the amount pass so a memo-carrying note is
       // never accidentally claimed by amount from an unrelated watcher.
       for (const pending of [...watchers.values()]) {
-        const idx = available.findIndex((n: any) => typeof n.memo === "string" && n.memo.trim() === pending.orderId);
+        const idx = available.findIndex((n: any) => typeof n.memo === "string" && n.memo.trim() === pending.orderId && isNoteFreshEnoughFor(n, pending));
         if (idx === -1) continue;
         const note = available[idx];
         available.splice(idx, 1);
@@ -296,7 +327,7 @@ function startPolling() {
         if ((countByZats.get(expectedZats) ?? 0) > 1) {
           continue; // ambiguous right now -- see comment above, don't guess
         }
-        const idx = available.findIndex((n: any) => Number(n.valueZatoshis) === expectedZats);
+        const idx = available.findIndex((n: any) => Number(n.valueZatoshis) === expectedZats && isNoteFreshEnoughFor(n, pending));
         if (idx === -1) continue;
         const note = available[idx];
         available.splice(idx, 1); // don't let a second pending order for the same amount claim it too, this tick

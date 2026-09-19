@@ -1024,6 +1024,43 @@ app.post("/api/admin/recompute-curve", async (req, reply) => {
 // "www." with no DNS record). Pure data edit, not a fund transfer, but
 // gated behind ADMIN_TOKEN anyway since it's an admin-only write. Pass an
 // empty string for a field to clear it; omit a field to leave it as-is.
+// Brai, 2026-09-19: "confirma zec faltante, solucionalo con una venta como
+// si alguien vendiera esa cantidad" -- incident recovery route for the
+// phantom "repeat buy" credits (see the big comment on
+// isNoteFreshEnoughFor in zcashReal.ts). Takes the specific order IDs
+// identified via /api/admin/orders-by-amount as phantom (stale notes
+// re-matched with no real payment behind them) and reverses each one's
+// exact effect on the curve/fees/wallet balance -- see
+// store.reversePhantomBuyOrder's own comment for why this isn't a real
+// sell order. Each reversal runs under the same per-token lock as every
+// other curve-mutating route, so it can't race a real trade landing at the
+// same moment.
+const reversePhantomBuysSchema = z.object({ orderIds: z.array(z.string()).min(1).max(200) });
+app.post("/api/admin/reverse-phantom-buys", async (req, reply) => {
+  if (!ADMIN_TOKEN) return reply.code(503).send({ error: "ADMIN_TOKEN is not configured" });
+  if (req.headers["x-admin-token"] !== ADMIN_TOKEN) return reply.code(401).send({ error: "unauthorized" });
+  const body = reversePhantomBuysSchema.safeParse(req.body);
+  if (!body.success) return reply.code(400).send({ error: "expected { orderIds: string[] }" });
+  const results = [];
+  for (const orderId of body.data.orderIds) {
+    try {
+      const order = await store.getOrder(orderId);
+      const result: Awaited<ReturnType<typeof store.reversePhantomBuyOrder>> = order
+        ? await withTokenLock(order.tokenId, () => store.reversePhantomBuyOrder(orderId))
+        : { ok: false, orderId, reason: "order not found" };
+      results.push(result);
+      if (result.ok === true) {
+        app.log.warn(`[admin] reversed phantom buy ${orderId}: ${result.symbol} -${result.tokenAmount} tokens, -${result.netZecReversed} ZEC from curve (${result.balanceNote})`);
+      } else {
+        app.log.warn(`[admin] skipped ${orderId}: ${result.reason}`);
+      }
+    } catch (err) {
+      results.push({ ok: false as const, orderId, reason: String((err as Error).message ?? err) });
+    }
+  }
+  return reply.send({ ok: true, results });
+});
+
 app.post("/api/admin/set-token-links", async (req, reply) => {
   if (!ADMIN_TOKEN) return reply.code(503).send({ error: "ADMIN_TOKEN is not configured" });
   if (req.headers["x-admin-token"] !== ADMIN_TOKEN) return reply.code(401).send({ error: "unauthorized" });
