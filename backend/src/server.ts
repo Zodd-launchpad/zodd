@@ -1070,15 +1070,17 @@ app.post("/api/admin/reverse-phantom-buys", async (req, reply) => {
 // the exact amount a real sell would have moved them, with no payout and no
 // wallet balance touched -- see store.applyPhantomSellAdjustment's comment.
 // Same ADMIN_TOKEN gate and per-token lock as every other curve mutation.
-const applyPhantomSellSchema = z.object({ tokenId: z.string().min(1), zecAmount: z.number().positive() });
+const applyPhantomSellSchema = z.object({ symbol: z.string().min(1), zecAmount: z.number().positive() });
 app.post("/api/admin/apply-phantom-sell", async (req, reply) => {
   if (!ADMIN_TOKEN) return reply.code(503).send({ error: "ADMIN_TOKEN is not configured" });
   if (req.headers["x-admin-token"] !== ADMIN_TOKEN) return reply.code(401).send({ error: "unauthorized" });
   const body = applyPhantomSellSchema.safeParse(req.body);
-  if (!body.success) return reply.code(400).send({ error: "expected { tokenId: string, zecAmount: number }" });
+  if (!body.success) return reply.code(400).send({ error: "expected { symbol: string, zecAmount: number }" });
+  const token = await store.getToken(body.data.symbol.toUpperCase());
+  if (!token) return reply.code(404).send({ ok: false, reason: `token ${body.data.symbol} not found` });
   try {
-    const result = await withTokenLock(body.data.tokenId, () =>
-      store.applyPhantomSellAdjustment(body.data.tokenId, body.data.zecAmount)
+    const result = await withTokenLock(token.id, () =>
+      store.applyPhantomSellAdjustment(token.id, body.data.zecAmount)
     );
     if (result.ok === true) {
       app.log.warn(
