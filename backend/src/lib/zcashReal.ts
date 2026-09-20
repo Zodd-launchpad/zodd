@@ -196,10 +196,42 @@ function isNoteFreshEnoughFor(note: any, pending: PendingPayment): boolean {
 }
 
 let pollingStarted = false;
+// ZODD (2026-09-20, incident: "pulso en comprar y se queda en wait y no me
+// abre el qr"): setInterval fires every POLL_INTERVAL_MS regardless of
+// whether the previous tick's async body has finished. Every tick's
+// call(`/wallet/notes`) is one more CLI invocation queued behind whatever's
+// already running in zcash-wallet-service's single-file cliQueue (see
+// cli.js's runCli comment) -- the SAME queue that POST /wallet/address
+// (the buy/sell "generate QR" call) has to wait in line behind. Once a
+// single sync genuinely takes longer than 20s (confirmed live: responseTime
+// on /wallet/notes climbed 20s -> 40s -> 76s -> 134s+ across a few minutes
+// once orders were open), each new tick piles ANOTHER slow job onto the
+// queue faster than it drains, so the backlog only grows -- and a real buy
+// click landing in that queue can end up waiting minutes with the frontend
+// stuck on the "WAIT" button and no QR, exactly this bug. Fix: track
+// whether a tick is still in flight and skip starting a new one if so, so
+// the queue never carries more than one background payment-detection job
+// at once -- an interactive request then waits behind at most one of these,
+// not an ever-growing pile.
+let pollInFlight = false;
 function startPolling() {
   if (pollingStarted) return;
   pollingStarted = true;
   setInterval(async () => {
+    if (pollInFlight) {
+      console.warn("[zcashReal] skipping this poll tick -- the previous one is still running (avoids piling up the zcash-wallet-service queue)");
+      return;
+    }
+    pollInFlight = true;
+    try {
+    await pollOnce();
+    } finally {
+      pollInFlight = false;
+    }
+  }, POLL_INTERVAL_MS);
+}
+
+async function pollOnce() {
     for (const pending of [...watchers.values()]) {
       // Already matched once: it's in its repeat-payment grace window, not
       // subject to the normal unpaid-order expiry rules below -- it just
@@ -344,7 +376,6 @@ function startPolling() {
     } catch (err) {
       console.error(`[zcashReal] poll failed:`, err);
     }
-  }, POLL_INTERVAL_MS);
 }
 
 // Brai, 2026-09-07: "esto tiene que ir por frase semilla ... para q no haya
