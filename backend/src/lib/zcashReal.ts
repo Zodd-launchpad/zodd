@@ -549,7 +549,7 @@ export async function generateOrderAddress(
 // warming the pool up well ahead of time, not raising this number alone.
 // Safe to bump later once this has run for a while and Brai has a feel for
 // real traffic -- nothing else needs to change to raise or lower it.
-const ADDRESS_POOL_TARGET = 25;
+const ADDRESS_POOL_TARGET = 100;
 
 let topUpInFlight = false;
 async function maybeTopUpAddressPool() {
