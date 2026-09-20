@@ -4,6 +4,211 @@ import { getNoirWallet, isNoirWalletInstalled } from "@noir-wallet/sdk";
 import { api, type NftWhitelistEntry, type NftWhitelistPublicStatus } from "@/lib/api";
 import { useLanguage } from "@/lib/i18n";
 
+// Brai, 2026-09-20: "listo cerramos la whitelist, pon esa foto en el medio
+// de la pantalla en grande y abajo que diga en ingles, ha terminado el
+// tiempo para la whitelist. Abajo deja la caja para que puedan chequear si
+// han sido aprobados o no... solo con poner el handle escribiendolo, sin
+// conectar con el autenticador. Entonces escriben y les dice si estan
+// aprobados o no. Pon que sera anunciado en twitter el dia y la fecha de
+// minteo." -- the application wizard below (X OAuth, address, tasks) is
+// done accepting new entries. Flip WHITELIST_CLOSED back to false to
+// reopen it exactly as it was -- nothing else needs to change, same
+// pattern as SHOW_NFT_IN_ACTIVITY/ADDRESS_ONLY_MODE elsewhere in this repo.
+//
+// The status-check box below intentionally reuses
+// api.getNftWhitelistStatusByHandle -- the SAME unauthenticated,
+// wallet-free by-handle lookup the wizard already used internally (v8/v9
+// above) to recognize a returning applicant. It was already designed to
+// be safe for "anyone can type anyone's handle" (see
+// NftWhitelistPublicStatus's comment in lib/api.ts -- no wallet address is
+// ever returned), which is exactly what "sin conectar con el autenticador"
+// calls for here.
+//
+// Brai, 2026-09-20 (cont.): "lo de la whitelist lo preparas pero no lo
+// hagas aun, no lo vamos a mandar hasta la noche dentro de 5 horas" -- code
+// ready, flag left OFF. Flip this to true (and push/deploy) when he says go.
+const WHITELIST_CLOSED = false;
+
+export default function NftWhitelistPage() {
+  return WHITELIST_CLOSED ? <NftWhitelistClosedView /> : <NftWhitelistWizard />;
+}
+
+function NftWhitelistClosedView() {
+  const { t } = useLanguage();
+  const [handleInput, setHandleInput] = useState("");
+  const [result, setResult] = useState<NftWhitelistPublicStatus | null | undefined>(undefined); // undefined = not checked yet, null = not found
+  const [checking, setChecking] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function checkStatus() {
+    const handle = handleInput.trim().replace(/^@/, "");
+    if (!handle) {
+      setError(t("nftWhitelist.closed.enterHandle"));
+      return;
+    }
+    setError(null);
+    setChecking(true);
+    setResult(undefined);
+    try {
+      const { entry } = await api.getNftWhitelistStatusByHandle(handle);
+      setResult(entry ?? null);
+    } catch (e: any) {
+      setError(e?.message ?? "error");
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  return (
+    <div className="zw-page">
+      <div className="zw-closed-layout">
+        <img src="/zodd-whitelist-closed-scroll.jpg" alt="" className="zw-closed-img" />
+
+        <div className="zw-closed-card card">
+          <div className="badge">{t("nftWhitelist.badge")}</div>
+          <h1 className="zw-closed-title">{t("nftWhitelist.closed.title")}</h1>
+          <p className="muted">{t("nftWhitelist.closed.body")}</p>
+          <p className="zw-closed-announce">{t("nftWhitelist.closed.announce")}</p>
+
+          <div className="zw-rule" />
+
+          <div className="zw-step-label">{t("nftWhitelist.closed.checkTitle")}</div>
+          <p className="muted" style={{ marginBottom: 12 }}>{t("nftWhitelist.closed.checkBody")}</p>
+
+          <div className="zw-closed-check-row">
+            <div className="field" style={{ flex: 1, marginBottom: 0 }}>
+              <input
+                value={handleInput}
+                onChange={(e) => {
+                  setHandleInput(e.target.value);
+                  setResult(undefined);
+                  setError(null);
+                }}
+                onKeyDown={(e) => e.key === "Enter" && checkStatus()}
+                placeholder={t("nftWhitelist.closed.handlePlaceholder")}
+                className="mono"
+              />
+            </div>
+            <button className="btn btn-gold" disabled={checking} onClick={checkStatus}>
+              {checking ? t("nftWhitelist.closed.checking") : t("nftWhitelist.closed.checkButton")}
+            </button>
+          </div>
+
+          {error && <p style={{ color: "var(--red)", fontSize: 13, marginTop: 10 }}>{error}</p>}
+
+          {result !== undefined && (
+            <div className="zw-share-card" style={{ marginTop: 16 }}>
+              {result === null ? (
+                <p className="muted" style={{ margin: 0 }}>{t("nftWhitelist.closed.notFound")}</p>
+              ) : (
+                <div className={`zw-status-big zw-status-${result.status.toLowerCase()}`}>
+                  <span className="zw-status-handle">@{result.twitterHandle}</span>
+                  <span className="zw-status-word">{t(`nftWhitelist.status.${result.status}`)}</span>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <style jsx>{`
+        .zw-page {
+          background: var(--bg);
+          min-height: calc(100vh - 60px);
+          padding: 48px 16px;
+          display: flex;
+          justify-content: center;
+          align-items: flex-start;
+        }
+        .zw-closed-layout {
+          width: 100%;
+          max-width: 680px;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 24px;
+        }
+        .zw-closed-img {
+          width: 100%;
+          max-width: 560px;
+          height: auto;
+          border-radius: 14px;
+          border: 1px solid var(--border);
+          box-shadow: 0 0 30px var(--glow-soft);
+        }
+        .zw-closed-card {
+          width: 100%;
+          text-align: center;
+          box-shadow: 0 0 30px var(--glow-soft);
+        }
+        .zw-closed-title {
+          margin: 10px 0 12px;
+          font-size: 24px;
+          font-weight: 700;
+          letter-spacing: 0.02em;
+          color: var(--accent);
+          text-shadow: 0 0 20px var(--glow);
+        }
+        .zw-closed-announce {
+          margin: 10px 0 0;
+          font-size: 13px;
+          font-weight: 600;
+          color: var(--text);
+        }
+        .zw-rule {
+          border-top: 1px solid var(--border);
+          margin: 20px 0 16px;
+        }
+        .zw-step-label {
+          font-size: 11px;
+          color: var(--text-dim);
+          text-transform: uppercase;
+          letter-spacing: 0.06em;
+          margin-bottom: 4px;
+        }
+        .zw-closed-check-row {
+          display: flex;
+          gap: 10px;
+          align-items: flex-start;
+        }
+        @media (max-width: 480px) {
+          .zw-closed-check-row {
+            flex-direction: column;
+          }
+          .zw-closed-check-row .btn {
+            width: 100%;
+          }
+        }
+        .zw-share-card {
+          padding: 20px;
+          border-radius: 12px;
+          border: 1px solid var(--border);
+          background: var(--panel);
+          text-align: left;
+        }
+        .zw-status-big {
+          display: flex;
+          flex-wrap: wrap;
+          align-items: baseline;
+          gap: 10px;
+          font-size: 22px;
+          font-weight: 800;
+          letter-spacing: 0.01em;
+          line-height: 1.15;
+        }
+        .zw-status-handle {
+          color: var(--accent);
+          text-shadow: 0 0 20px var(--glow);
+        }
+        .zw-status-word { text-transform: uppercase; }
+        .zw-status-pending .zw-status-word { color: var(--text-dim); }
+        .zw-status-approved .zw-status-word { color: var(--green); text-shadow: 0 0 16px var(--green-glow); }
+        .zw-status-rejected .zw-status-word { color: var(--red); text-shadow: 0 0 16px var(--red-glow); }
+      `}</style>
+    </div>
+  );
+}
+
 // Brai, 2026-09-18: "necesito que me hagas la parte de la whitelist de los
 // nft ... la gente ingrese su handle de twitter y que le haga retwitear un
 // twit ... likear y seguir nuestro twitter, esto lo deje en revision, una
@@ -83,12 +288,16 @@ import { useLanguage } from "@/lib/i18n";
 // that proxy can read the verified-handle cookie; the backend's own
 // POST /api/nft/whitelist is locked down separately (WHITELIST_INTERNAL_TOKEN)
 // so it can no longer be called directly with a made-up handle either.
+//
+// Brai, 2026-09-20: closed to new applications -- see WHITELIST_CLOSED
+// above. This wizard is left fully intact so reopening it is a one-line
+// flip, not a rebuild.
 const ADDRESS_STORAGE_KEY = "zodd-nft-whitelist-address";
 const TOTAL_STEPS = 4;
 
 type Tasks = { follow: boolean; likeRepost: boolean; quote: boolean };
 
-export default function NftWhitelistPage() {
+function NftWhitelistWizard() {
   const { t } = useLanguage();
   const [config, setConfig] = useState<{ tweetUrl: string | null; twitterHandle: string | null; quoteCaption: string } | null>(null);
   // Brai, 2026-09-18 (v9, URGENT PRIVACY FIX): entry can come from the

@@ -179,6 +179,29 @@ export const translations = {
 
   // Brai, 2026-09-18: "necesito que me hagas la parte de la whitelist de
   // los nft" -- public submission page (frontend/app/nft/whitelist).
+  //
+  // Brai, 2026-09-20: "cerramos la whitelist" -- the closed-state screen
+  // (scroll image, English closing note, handle-only status check). See
+  // WHITELIST_CLOSED in app/nft/whitelist/page.tsx.
+  "nftWhitelist.closed.title": { en: "Whitelist Applications Have Closed", zh: "白名单申请已截止" },
+  "nftWhitelist.closed.body": {
+    en: "Thank you to everyone who applied. Submissions are now closed and under final review.",
+    zh: "感谢所有申请者。提交现已截止，正在进行最终审核。",
+  },
+  "nftWhitelist.closed.announce": {
+    en: "The mint day and date will be announced on X (Twitter).",
+    zh: "铸造日期将在 X（推特）上公布。",
+  },
+  "nftWhitelist.closed.checkTitle": { en: "Check your status", zh: "查询你的状态" },
+  "nftWhitelist.closed.checkBody": {
+    en: "Type your X (Twitter) handle below — no wallet connection needed.",
+    zh: "在下方输入你的 X（推特）账号——无需连接钱包。",
+  },
+  "nftWhitelist.closed.handlePlaceholder": { en: "yourhandle", zh: "你的账号" },
+  "nftWhitelist.closed.checkButton": { en: "CHECK STATUS", zh: "查询状态" },
+  "nftWhitelist.closed.checking": { en: "Checking…", zh: "查询中…" },
+  "nftWhitelist.closed.notFound": { en: "No application found for that handle.", zh: "未找到该账号的申请记录。" },
+  "nftWhitelist.closed.enterHandle": { en: "Enter a handle first.", zh: "请先输入账号。" },
   "nftWhitelist.badge": { en: "NFT WHITELIST", zh: "NFT 白名单" },
   "nftWhitelist.title": { en: "Apply for free mint", zh: "申请免费铸造资格" },
   "nftWhitelist.body": {
