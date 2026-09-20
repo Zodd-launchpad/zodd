@@ -731,11 +731,26 @@ export interface PricePointView {
   createdAt: string;
 }
 
+// ZODD (2026-09-20, Brai: el egress de Railway no paraba de crecer
+// "independientemente de cuanta gente esta entrando"): esta consulta no
+// tenia limite -- devolvia TODOS los price points de un token desde que
+// existe, y la pagina del token la pide entera cada 3 segundos (ver
+// page.tsx). Cuantos mas trades tiene un token con el tiempo, mas grande se
+// pone esta respuesta, para SIEMPRE, sin importar cuantos usuarios nuevos
+// entren hoy -- justo el patron de "crece cada hora, no para de crecer"
+// que Brai señalo. Tope duro a los ultimos 2000 puntos: de sobra para
+// dibujar cualquiera de los intervalos del grafico (5m/15m/1h/4h/all, ver
+// Chart.tsx), y ahora la respuesta tiene un techo real en vez de crecer sin
+// limite.
+const PRICE_HISTORY_MAX_POINTS = 2000;
+
 export async function getPriceHistory(tokenId: string): Promise<PricePointView[]> {
   const points = await prisma.pricePoint.findMany({
     where: { tokenId },
-    orderBy: { createdAt: "asc" },
+    orderBy: { createdAt: "desc" },
+    take: PRICE_HISTORY_MAX_POINTS,
   });
+  points.reverse(); // back to ascending order, same as before
   return points.map((p) => ({ priceZec: num(p.priceZec), mcapZec: num(p.mcapZec), createdAt: p.createdAt.toISOString() }));
 }
 

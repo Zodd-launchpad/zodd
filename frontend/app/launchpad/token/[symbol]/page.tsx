@@ -66,7 +66,13 @@ export default function TokenPage() {
       }
     }
     load();
-    const id = setInterval(load, 3000);
+    // ZODD (2026-09-20, Brai: gasto de egress en Railway crecia sin parar):
+    // esto pedia el token + TODO su historial de precio + trades cada 3
+    // segundos. El historial ahora tiene techo en el backend (ver
+    // PRICE_HISTORY_MAX_POINTS en store.ts), pero igual no hace falta
+    // refrescar tan seguido -- 15s se sigue sintiendo "en vivo" para un
+    // precio, a una fraccion del trafico.
+    const id = setInterval(load, 15000);
     return () => {
       stop = true;
       clearInterval(id);
