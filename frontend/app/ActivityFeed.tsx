@@ -4,7 +4,13 @@ import Link from "next/link";
 import { api, GlobalTrade, NftActivity, nftItemPath, nftItemLabel } from "@/lib/api";
 import { useLanguage } from "@/lib/i18n";
 
-const POLL_MS = 4000;
+// ZODD (2026-09-20, Brai: gasto de egress en Railway se disparaba sin
+// parar -- este polling a /api/trades cada 4s en TODAS las paginas, todo
+// el tiempo que alguien tenga la pestana abierta, era el principal
+// responsable (306GB / $15 de los $21.85 del proyecto en 14 dias). 20s
+// sigue viendose "vivo" para un feed de actividad, a una fraccion del
+// trafico.
+const POLL_MS = 20000;
 const MAX_ROWS = 18;
 
 // Brai, 2026-09-18 (v2, URGENT): "sacame del live activity todo lo
