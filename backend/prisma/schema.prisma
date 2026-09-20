@@ -687,3 +687,41 @@ model NftWhitelistPreapproved {
   note          String?
   createdAt     DateTime @default(now())
 }
+
+// ZODD (2026-09-20, incident: "antes habia el qr en 2 o 3 segundos... ahora
+// tarda mas de 15... vamos a tener 500 o 600 pedidos de qr a la vez"):
+// generating a single fresh Zcash address costs ~15-20s no matter what --
+// zcash-wallet-service spins up a whole zingo-cli process, connects, and
+// runs a sync/save cycle for every single call (see the big comment on
+// runCli in zcash-wallet-service/src/cli.js), and only one of those can run
+// at a time (single wallet.dat file). That's tolerable for one buyer, but
+// it means every BUY click pays that ~15-20s cost synchronously, and it
+// cannot be parallelized -- exactly what breaks under "500-600 pedidos a la
+// vez". Fix: a background job (maybeTopUpAddressPool in zcashReal.ts) keeps
+// a stock of already-generated, never-yet-used addresses sitting here ahead
+// of time; generateOrderAddress claims one INSTANTLY (a single indexed DB
+// query, milliseconds) instead of generating on demand, and only falls back
+// to the old slow synchronous path if this pool is ever empty. Concurrency
+// safety is the same FOR UPDATE SKIP LOCKED pattern as
+// claimRandomUnmintedNftItem in store.ts -- two buyers claiming at the same
+// instant always get two different rows, never a race on the same one.
+model PregeneratedZcashAddress {
+  id                    String    @id @default(cuid())
+  address               String    @unique
+  // Same per-order-diversifier fields as PendingPayment in zcashReal.ts --
+  // carried straight through from the same newAddress() call that would
+  // otherwise have run synchronously inside generateOrderAddress, so a
+  // pooled address is matched by the poll loop exactly the same way
+  // (diversifier-first, see Pass 0) as one generated on demand.
+  saplingDiversifierHex String?
+  orchardDiversifierHex String?
+  createdAt             DateTime  @default(now())
+  // Null while sitting unclaimed in the pool. Set the instant it's handed
+  // to an order -- claimPregeneratedZcashAddress sets both fields in the
+  // same atomic UPDATE that claims the row, so an address is never visible
+  // as "available" and "already given to someone" at the same time.
+  claimedAt             DateTime?
+  claimedByOrderId      String?
+
+  @@index([claimedAt])
+}

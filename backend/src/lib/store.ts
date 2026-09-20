@@ -3137,3 +3137,58 @@ export async function fillNftPurchase(
   await prisma.nftPurchaseOrder.update({ where: { id: purchaseId }, data: { status: "FILLED", executionTxid: txid, filledAt: new Date(), platformFeeZec } });
   return getNftItemById(itemId);
 }
+
+// ---------- Zcash address pool (see PregeneratedZcashAddress in schema.prisma) ----------
+// ZODD (2026-09-20): lets zcashReal.ts's generateOrderAddress hand out a
+// BUY/SELL address instantly instead of paying the ~15-20s zingo-cli cost
+// on every single click -- see the big comment on the model itself for why.
+
+/** Atomically claims one never-yet-used address from the pool, same
+ * FOR UPDATE SKIP LOCKED-inside-a-CTE pattern as claimRandomUnmintedNftItem
+ * above: two orders claiming in the same instant always land on two
+ * different rows, never race for the same one. Oldest-first (not random --
+ * unlike NftItem there's no reason to shuffle these) so the pool behaves
+ * like a plain queue. Returns null if the pool is empty; the caller falls
+ * back to generating one on demand in that case. */
+export async function claimPregeneratedZcashAddress(orderId: string): Promise<{
+  address: string;
+  saplingDiversifierHex: string | null;
+  orchardDiversifierHex: string | null;
+} | null> {
+  const rows = await prisma.$queryRaw<
+    Array<{ address: string; saplingDiversifierHex: string | null; orchardDiversifierHex: string | null }>
+  >`
+    WITH picked AS (
+      SELECT id FROM "PregeneratedZcashAddress"
+      WHERE "claimedAt" IS NULL
+      ORDER BY "createdAt" ASC
+      LIMIT 1
+      FOR UPDATE SKIP LOCKED
+    )
+    UPDATE "PregeneratedZcashAddress" AS p
+    SET "claimedAt" = now(), "claimedByOrderId" = ${orderId}
+    FROM picked
+    WHERE p.id = picked.id
+    RETURNING p.address, p."saplingDiversifierHex", p."orchardDiversifierHex"
+  `;
+  return rows[0] ?? null;
+}
+
+/** Adds one freshly-generated (still fully valid, just not yet claimed by
+ * an order) address to the pool. Called only by maybeTopUpAddressPool's
+ * background refill loop in zcashReal.ts -- never on the interactive
+ * buy/sell path, which only ever reads via claimPregeneratedZcashAddress
+ * above. */
+export async function addPregeneratedZcashAddress(
+  address: string,
+  saplingDiversifierHex: string | null,
+  orchardDiversifierHex: string | null
+): Promise<void> {
+  await prisma.pregeneratedZcashAddress.create({ data: { address, saplingDiversifierHex, orchardDiversifierHex } });
+}
+
+/** How many unclaimed addresses are currently sitting in the pool -- what
+ * the background top-up loop checks against its target stock level. */
+export async function countUnclaimedPregeneratedZcashAddresses(): Promise<number> {
+  return prisma.pregeneratedZcashAddress.count({ where: { claimedAt: null } });
+}

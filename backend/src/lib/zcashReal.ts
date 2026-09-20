@@ -10,6 +10,8 @@
  * care whether payments are real.
  */
 
+import { addPregeneratedZcashAddress, claimPregeneratedZcashAddress, countUnclaimedPregeneratedZcashAddresses } from "./store.js";
+
 const WALLET_SERVICE_URL = process.env.ZCASH_WALLET_SERVICE_URL ?? "http://zcash-wallet.railway.internal:8080";
 const INTERNAL_TOKEN = process.env.ZCASH_WALLET_SERVICE_TOKEN;
 
@@ -214,6 +216,13 @@ let pollingStarted = false;
 // at once -- an interactive request then waits behind at most one of these,
 // not an ever-growing pile.
 let pollInFlight = false;
+// ZODD (2026-09-20): idle top-up cadence for the address pool -- shorter
+// than POLL_INTERVAL_MS since maybeTopUpAddressPool's own first line
+// (countUnclaimedPregeneratedZcashAddresses) is a cheap indexed count that
+// costs nothing extra when the pool's already full; this just makes sure
+// the pool keeps refilling even during a stretch with no buy/sell clicks
+// to trigger the post-claim nudge in generateOrderAddress.
+const ADDRESS_POOL_CHECK_INTERVAL_MS = 10_000;
 function startPolling() {
   if (pollingStarted) return;
   pollingStarted = true;
@@ -229,6 +238,9 @@ function startPolling() {
       pollInFlight = false;
     }
   }, POLL_INTERVAL_MS);
+  setInterval(() => {
+    maybeTopUpAddressPool().catch((err) => console.error(`[zcashReal] address pool top-up (idle tick) failed:`, err));
+  }, ADDRESS_POOL_CHECK_INTERVAL_MS);
 }
 
 async function pollOnce() {
@@ -459,17 +471,29 @@ function pickAndReserveAmount(orderId: string, expectedZecAmount: number): numbe
   return expectedZecAmount;
 }
 
-/** Generates a real one-time address for a buy order via the wallet
- * service. Returns the address AND the actual expectedZecAmount to charge
- * -- may be a hair above what was requested, see pickAndReserveAmount --
- * which the caller must persist and show to the payer instead of the
- * original request. Also returns the address's own diversifier (per
- * shielded pool, from a patched zingo-cli -- see the ZODD comment on
- * PendingPayment above) so the caller can persist it on the order; that's
- * what lets the poll loop's Pass 0 match this order's payment with zero
- * memo and zero amount-uniqueness requirement. Null on both fields against
- * an unpatched zingo-cli -- the order still works, just via the older
- * memo/amount passes. */
+/** Generates a real one-time address for a buy order. Returns the address
+ * AND the actual expectedZecAmount to charge -- may be a hair above what
+ * was requested, see pickAndReserveAmount -- which the caller must persist
+ * and show to the payer instead of the original request. Also returns the
+ * address's own diversifier (per shielded pool, from a patched zingo-cli --
+ * see the ZODD comment on PendingPayment above) so the caller can persist
+ * it on the order; that's what lets the poll loop's Pass 0 match this
+ * order's payment with zero memo and zero amount-uniqueness requirement.
+ * Null on both fields against an unpatched zingo-cli -- the order still
+ * works, just via the older memo/amount passes.
+ *
+ * ZODD (2026-09-20, incident: "antes habia el qr en 2 o 3 segundos... ahora
+ * tarda mas de 15... vamos a tener 500 o 600 pedidos de qr a la vez"): this
+ * used to always call the wallet service here and wait out its ~15-20s
+ * per-call cost synchronously -- fine for one buyer, but that cost can't be
+ * parallelized (single wallet.dat, one zingo-cli process at a time), so it
+ * doesn't scale to many buyers close together. Now it claims an already-
+ * generated address from the pool (PregeneratedZcashAddress, see
+ * schema.prisma) first -- a single indexed DB read, milliseconds, no matter
+ * how many buyers hit this at once -- and only falls back to the old slow
+ * synchronous path if the pool is ever empty (should only happen if
+ * maybeTopUpAddressPool has fallen behind, e.g. right after a burst bigger
+ * than the pool's current stock). */
 export async function generateOrderAddress(
   orderId: string,
   expectedZecAmount: number
@@ -486,7 +510,16 @@ export async function generateOrderAddress(
   let saplingDiversifierHex: string | null = null;
   let orchardDiversifierHex: string | null = null;
   try {
-    ({ address, saplingDiversifierHex = null, orchardDiversifierHex = null } = await call("/wallet/address", { method: "POST" }));
+    const pooled = await claimPregeneratedZcashAddress(orderId).catch((err) => {
+      console.error(`[zcashReal] address pool claim failed (falling back to generating one on demand):`, err);
+      return null;
+    });
+    if (pooled) {
+      ({ address, saplingDiversifierHex, orchardDiversifierHex } = pooled);
+    } else {
+      console.warn(`[zcashReal] address pool was empty for order ${orderId} -- generating one on demand (~15-20s)`);
+      ({ address, saplingDiversifierHex = null, orchardDiversifierHex = null } = await call("/wallet/address", { method: "POST" }));
+    }
   } catch (err) {
     watchers.delete(orderId); // don't leave a dangling reservation with no address
     throw err;
@@ -498,7 +531,55 @@ export async function generateOrderAddress(
     pending.saplingDiversifierHex = saplingDiversifierHex;
     pending.orchardDiversifierHex = orchardDiversifierHex;
   }
+  // Fire-and-forget: every claim shrinks the pool by one, so nudge the
+  // top-up check right away instead of only on its own timer -- keeps the
+  // pool recovering as fast as the shared CLI queue allows during a burst,
+  // without making THIS buyer wait on it (maybeTopUpAddressPool no-ops
+  // instantly if a refill is already in flight or the pool's already full).
+  maybeTopUpAddressPool().catch((err) => console.error(`[zcashReal] address pool top-up (post-claim nudge) failed:`, err));
   return { address, expectedZecAmount: uniqueAmount, saplingDiversifierHex, orchardDiversifierHex };
+}
+
+// ZODD (2026-09-20): target stock level for the address pool -- how many
+// never-yet-used addresses to try to keep sitting ready. Picked as "a
+// comfortable cushion above ordinary traffic, not a promise to absorb 500
+// simultaneous new buyers instantly" -- the pool can only refill at the
+// wallet service's own pace (one address per ~15-20s, single CLI queue), so
+// truly absorbing a big planned spike (a launch, a marketing push) means
+// warming the pool up well ahead of time, not raising this number alone.
+// Safe to bump later once this has run for a while and Brai has a feel for
+// real traffic -- nothing else needs to change to raise or lower it.
+const ADDRESS_POOL_TARGET = 25;
+
+let topUpInFlight = false;
+async function maybeTopUpAddressPool() {
+  // One refill "session" at a time -- same reasoning as pollInFlight above:
+  // never let two of these pile more work onto the shared zingo-cli queue
+  // than the one already running.
+  if (topUpInFlight) return;
+  topUpInFlight = true;
+  try {
+    let count = await countUnclaimedPregeneratedZcashAddresses();
+    let generated = 0;
+    // Cap how much a single call will generate so a huge deficit (e.g.
+    // right after this feature first ships with an empty pool) fills in
+    // steadily across several ticks instead of hammering the wallet
+    // service with a long unbroken run that would starve real buy/sell
+    // calls behind it for minutes.
+    while (count < ADDRESS_POOL_TARGET && generated < 5) {
+      const { address, saplingDiversifierHex = null, orchardDiversifierHex = null } = await call("/wallet/address", { method: "POST" });
+      await addPregeneratedZcashAddress(address, saplingDiversifierHex, orchardDiversifierHex);
+      generated++;
+      count++;
+    }
+    if (generated > 0) {
+      console.log(`[zcashReal] address pool: generated ${generated} address(es), ~${count}/${ADDRESS_POOL_TARGET} now in stock`);
+    }
+  } catch (err) {
+    console.error(`[zcashReal] address pool top-up failed:`, err);
+  } finally {
+    topUpInFlight = false;
+  }
 }
 
 // Found 2026-09-07: a payer who sends the same order's exact amount more
