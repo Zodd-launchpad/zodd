@@ -127,20 +127,27 @@ export function nftMintPriceZecFor(walletId: string, collectionMintPriceZec: num
 export const NFT_MAX_MINTS_PER_WALLET = Number(process.env.NFT_MAX_MINTS_PER_WALLET ?? 10);
 
 /** Brai, 2026-09-21: "esa wallet que es id: cmu73d1tz0001fclixkabtdo4 puede
- * mintear 500 si quiere, sacale el limite" -- a per-wallet override on the
- * flat 10-per-wallet cap above, same env-gated-set pattern as
- * DISCOUNTED_NFT_MINT_WALLET_IDS. Defaults to just that one dev wallet id
- * so it works immediately without a new Railway variable; add more via
- * HIGH_LIMIT_NFT_WALLET_IDS later if needed. Owner-price eligibility
- * (isOwnerNftWallet) is a separate, independent gate -- this only changes
- * how MANY pieces a wallet can mint, not what it pays per piece. */
+ * mintear 500 si quiere, sacale el limite" -- then, right after: "esta
+ * wallet puede mintear todos si quiere, ilimitado, es el dev" -- a
+ * per-wallet override on the flat 10-per-wallet cap above, same
+ * env-gated-set pattern as DISCOUNTED_NFT_MINT_WALLET_IDS. Defaults to just
+ * that one dev wallet id so it works immediately without a new Railway
+ * variable; add more via HIGH_LIMIT_NFT_WALLET_IDS later if needed.
+ * Owner-price eligibility (isOwnerNftWallet) is a separate, independent
+ * gate -- this only changes how MANY pieces a wallet can mint, not what it
+ * pays per piece. */
 const HIGH_LIMIT_NFT_WALLET_IDS = new Set(
   (process.env.HIGH_LIMIT_NFT_WALLET_IDS ?? "cmu73d1tz0001fclixkabtdo4")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean)
 );
-export const NFT_HIGH_MAX_MINTS_PER_WALLET = Number(process.env.NFT_HIGH_MAX_MINTS_PER_WALLET ?? 500);
+/** "Ilimitado" in practice: a per-request quantity still has to be some
+ * finite number for the request schema to validate, so this is set far
+ * above any collection's realistic totalSupply (ZODD Genesis is 5555)
+ * rather than a literal Infinity -- the real ceiling a raised wallet ever
+ * hits is remaining supply, never this number. */
+export const NFT_HIGH_MAX_MINTS_PER_WALLET = Number(process.env.NFT_HIGH_MAX_MINTS_PER_WALLET ?? 1_000_000);
 
 /** The actual per-wallet mint cap for `walletId` on any one collection:
  * the raised limit if it's in HIGH_LIMIT_NFT_WALLET_IDS, otherwise the
