@@ -7,9 +7,18 @@ function fmtTokens(n: number) {
   return n.toLocaleString("en-US", { maximumFractionDigits: 0 });
 }
 
+// Brai, 2026-09-21: "quiero que te muestre las ultimas 12 nada mas, el
+// resto que desaparezca de la pantalla" -- only render the 12 most recent
+// fills here. `trades` itself stays as the backend sends it (up to 100,
+// newest first, see getRecentTrades in store.ts) because TokenPage still
+// needs the fuller list for its 24h volume stat -- this only trims what's
+// actually drawn in this list widget.
+const VISIBLE_TRADES = 12;
+
 export default function TradesList({ trades }: { trades: Trade[] }) {
   const { t } = useLanguage();
   const usdRate = useZecUsdPrice();
+  const visibleTrades = trades.slice(0, VISIBLE_TRADES);
 
   function timeAgo(iso: string): string {
     const diffMs = Date.now() - new Date(iso).getTime();
@@ -25,11 +34,11 @@ export default function TradesList({ trades }: { trades: Trade[] }) {
   return (
     <div className="card" style={{ marginTop: 16 }}>
       <label className="muted" style={{ fontSize: 11, letterSpacing: 0.5 }}>{t("trades.heading")}</label>
-      {trades.length === 0 && (
+      {visibleTrades.length === 0 && (
         <p className="muted" style={{ fontSize: 13, marginTop: 8 }}>{t("trades.none")}</p>
       )}
       <div style={{ marginTop: 8 }}>
-        {trades.map((tr, i) => (
+        {visibleTrades.map((tr, i) => (
           <div
             key={i}
             style={{
@@ -37,7 +46,7 @@ export default function TradesList({ trades }: { trades: Trade[] }) {
               alignItems: "center",
               justifyContent: "space-between",
               padding: "9px 0",
-              borderBottom: i === trades.length - 1 ? "none" : "1px solid var(--border)",
+              borderBottom: i === visibleTrades.length - 1 ? "none" : "1px solid var(--border)",
               fontSize: 13,
             }}
           >
