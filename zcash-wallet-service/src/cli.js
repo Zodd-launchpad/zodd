@@ -264,3 +264,21 @@ function extractTxidFromText(text) {
   const m = text.match(/[0-9a-f]{64}/i);
   return m?.[0] ?? null;
 }
+
+// Brai, 2026-09-21: incident where a user's sell failed with "insufficient
+// balance" -- root cause turned out to be this wallet's LOCAL sync cache
+// (the note-commitment "shard tree" zingo-cli keeps in wallet.dat)
+// getting into a corrupted/inconsistent state, most likely from a
+// lightwalletd (zec.rocks) reorg or backend-node inconsistency during an
+// incremental sync -- not a loss of funds, and not something this service
+// caused by itself. It had already happened once before (see the
+// ZCASH_FORCE_REWALLET comment on ensureWalletReady, "after several
+// partial/failed syncs ... today"), and every subsequent call just kept
+// failing the exact same way until a human noticed the logs and manually
+// wiped+resynced. This matches that exact signature so server.js can
+// detect it automatically (at boot AND mid-run) and self-heal instead of
+// silently staying broken -- see maybeAutoHeal in server.js. */
+export function isShardTreeCorruption(err) {
+  const msg = String(err?.message ?? err ?? "");
+  return /shard tree error/i.test(msg) || /inserted root conflicts/i.test(msg);
+}
