@@ -336,7 +336,10 @@ export const api = {
   // Brai, 2026-09-19: mint page quantity stepper -- how many this wallet
   // has already minted, so the stepper can cap itself at what's left of
   // the 10-per-wallet limit.
-  getNftWalletMintCount: (collectionSlug: string, walletId: string): Promise<{ count: number }> =>
+  // Brai, 2026-09-21: also returns THIS wallet's own effective limit
+  // (usually 10, but higher for a wallet raised via HIGH_LIMIT_NFT_WALLET_IDS
+  // server-side) -- optional so older cached responses don't break typing.
+  getNftWalletMintCount: (collectionSlug: string, walletId: string): Promise<{ count: number; maxMintsPerWallet?: number }> =>
     req(`/api/nft/mint-count/${collectionSlug}/${encodeURIComponent(walletId)}`),
   listNftItem: (itemId: string, data: { walletId: string; priceZec: number; payoutAddress: string }): Promise<NftItem> =>
     req(`/api/nft/items/${itemId}/list`, { method: "POST", body: JSON.stringify(data) }),

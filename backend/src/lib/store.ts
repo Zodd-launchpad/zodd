@@ -2505,6 +2505,78 @@ export async function seedTieredNftCollectionWithVariants(
   };
 }
 
+// Brai, 2026-09-21: "los nombres de los nft al igual que toda la plataforma
+// EN INGLES" -- the platform's own UI is English by default (see
+// translations.ts), so the ZODD lore names given to the 9 video variants
+// (originally Spanish -- "Papiro del Genesis" etc.) need to match. Renaming
+// a variant does NOT touch its video bytes or its `key` (still built from
+// the ORIGINAL content hash -- see buildTierVariants -- so every
+// already-minted item's streaming URL keeps working unchanged), just the
+// variant's own `name` in the collection's tier JSON and every existing
+// NftItem row's baked `name` ("<variant name> #<editionNumber>") for that
+// variant. Deliberately a separate, lightweight route from
+// seedTieredNftCollectionWithVariants above: re-running the full reseed to
+// fix a label would re-upload the whole ~40MB of video AND wipe every
+// existing item (losing test mints) just to change a name.
+export interface NftVariantRename {
+  tier: "PAPIRO" | "FRAGMENTO" | "RELIQUIA";
+  key: string;
+  newName: string;
+}
+
+export async function renameNftTierVariants(
+  slug: string,
+  renames: NftVariantRename[]
+): Promise<{ collectionId: string; updatedVariants: number; updatedItems: number } | null> {
+  const collection = await prisma.nftCollection.findUnique({
+    where: { slug },
+    select: { id: true, papiroVariants: true, fragmentoVariants: true, reliquiaVariants: true },
+  });
+  if (!collection) return null;
+
+  const fieldByTier: Record<"PAPIRO" | "FRAGMENTO" | "RELIQUIA", "papiroVariants" | "fragmentoVariants" | "reliquiaVariants"> = {
+    PAPIRO: "papiroVariants",
+    FRAGMENTO: "fragmentoVariants",
+    RELIQUIA: "reliquiaVariants",
+  };
+
+  const byTier = new Map<"PAPIRO" | "FRAGMENTO" | "RELIQUIA", NftVariantRename[]>();
+  for (const r of renames) {
+    if (!r.newName?.trim()) throw new Error(`rename for ${r.key} is missing a newName`);
+    const list = byTier.get(r.tier) ?? [];
+    list.push(r);
+    byTier.set(r.tier, list);
+  }
+
+  let updatedVariants = 0;
+  let updatedItems = 0;
+
+  for (const [tier, list] of byTier) {
+    const field = fieldByTier[tier];
+    const current = parseVariants((collection as unknown as Record<string, unknown>)[field]);
+    const byKey = new Map(list.map((r) => [r.key, r.newName.trim()]));
+    const next = current.map((v) => {
+      const newName = byKey.get(v.key);
+      if (newName === undefined) return v;
+      updatedVariants++;
+      return { ...v, name: newName };
+    });
+    await prisma.nftCollection.update({ where: { id: collection.id }, data: { [field]: next as unknown as object } });
+
+    for (const { key, newName } of list) {
+      const trimmed = newName.trim();
+      const affected = await prisma.$executeRaw`
+        UPDATE "NftItem"
+        SET "name" = ${trimmed} || ' #' || "editionNumber"::text
+        WHERE "collectionId" = ${collection.id} AND "mediaVariantKey" = ${key}
+      `;
+      updatedItems += Number(affected);
+    }
+  }
+
+  return { collectionId: collection.id, updatedVariants, updatedItems };
+}
+
 // Brai, 2026-09-19: "la foto se ve toda dañada en colores raros" -- the
 // tiered reseed above went through a manual relay step to get the base64
 // image data into the deploy pipeline, and that step silently corrupted a

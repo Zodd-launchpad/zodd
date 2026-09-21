@@ -4,7 +4,7 @@ import * as store from "./lib/store.js";
 import { generateTwelveWords } from "./lib/wordlist.js";
 import { quoteBuy, quoteSell, currentPrice, marketCapZec } from "./lib/bondingCurve.js";
 import { simulatedInscriptionFor } from "./lib/simulatedChain.js";
-import { splitFee, TRADE_FEE_BPS, CREATOR_FEE_BPS, TOKEN_CREATE_FEE_ZEC, TOKEN_CREATE_FEE_YEC, createFeeFor, computeSellerPayout, NETWORK_FEE_ZEC, MAX_FIRST_BUY_ZEC, splitNftFee, isOwnerNftWallet, nftMintPriceZecFor, NFT_MAX_MINTS_PER_WALLET, NFT_WHITELIST_FREE_MINT_LIMIT, NFT_FREE_MINT_FEE_ZEC } from "./lib/fees.js";
+import { splitFee, TRADE_FEE_BPS, CREATOR_FEE_BPS, TOKEN_CREATE_FEE_ZEC, TOKEN_CREATE_FEE_YEC, createFeeFor, computeSellerPayout, NETWORK_FEE_ZEC, MAX_FIRST_BUY_ZEC, splitNftFee, isOwnerNftWallet, nftMintPriceZecFor, NFT_MAX_MINTS_PER_WALLET, NFT_HIGH_MAX_MINTS_PER_WALLET, maxMintsPerWalletFor, NFT_WHITELIST_FREE_MINT_LIMIT, NFT_FREE_MINT_FEE_ZEC } from "./lib/fees.js";
 import { startFeeDistributor, runFeeDistributionOnce } from "./lib/feeDistributor.js";
 import { startZecPricePolling, getZecUsdPrice } from "./lib/zecPrice.js";
 import { withTokenLock } from "./lib/mutex.js";
@@ -1546,6 +1546,43 @@ app.post("/api/admin/nft-reseed-tiered-variants", async (req, reply) => {
   }
 });
 
+// Brai, 2026-09-21: "los nombres de los nft al igual que toda la plataforma
+// EN INGLES" -- lightweight companion to nft-reseed-tiered-variants above:
+// renames existing variants in place (see store.renameNftTierVariants)
+// without re-uploading any video or wiping already-minted items. Same
+// dual ADMIN_TOKEN/NFT_SEED_TOKEN auth as the reseed route.
+const nftRenameVariantsSchema = z.object({
+  slug: z.string().min(1),
+  renames: z
+    .array(
+      z.object({
+        tier: z.enum(["PAPIRO", "FRAGMENTO", "RELIQUIA"]),
+        key: z.string().min(1),
+        newName: z.string().min(1),
+      })
+    )
+    .min(1),
+});
+
+app.post("/api/admin/nft-rename-variants", async (req, reply) => {
+  if (!ADMIN_TOKEN && !NFT_SEED_TOKEN) {
+    return reply.code(503).send({ error: "ADMIN_TOKEN is not configured" });
+  }
+  const provided = req.headers["x-admin-token"];
+  const authorized =
+    (!!ADMIN_TOKEN && provided === ADMIN_TOKEN) ||
+    (!!NFT_SEED_TOKEN && provided === NFT_SEED_TOKEN);
+  if (!authorized) return reply.code(401).send({ error: "unauthorized" });
+  const body = nftRenameVariantsSchema.parse(req.body);
+  try {
+    const result = await store.renameNftTierVariants(body.slug, body.renames);
+    if (!result) return reply.code(404).send({ error: "collection not found" });
+    return reply.send(result);
+  } catch (err: any) {
+    return reply.code(400).send({ error: err?.message ?? "rename failed" });
+  }
+});
+
 // Brai, 2026-09-21: the actual video bytes for a tier variant, streamed
 // from here instead of being embedded as a data: URL in every item API
 // response (see the long comment on toNftItemView's resolvedImage in
@@ -1628,7 +1665,11 @@ const nftMintSchema = z.object({
   // Brai, 2026-09-19: "la posibilidad de subir la cantidad de nfts a
   // mintear" -- how many pieces to mint in this one call. Optional,
   // defaults to 1 so every pre-existing caller keeps working unchanged.
-  quantity: z.number().int().min(1).max(NFT_MAX_MINTS_PER_WALLET).optional(),
+  // Brai, 2026-09-21: the static ceiling here has to allow the highest any
+  // wallet could ever be permitted to request (see maxMintsPerWalletFor
+  // below) -- the ACTUAL per-wallet cap is enforced further down, once we
+  // know which wallet is asking, not by this schema.
+  quantity: z.number().int().min(1).max(NFT_HIGH_MAX_MINTS_PER_WALLET).optional(),
 });
 
 app.post("/api/nft/mint", async (req, reply) => {
@@ -1667,9 +1708,14 @@ app.post("/api/nft/mint", async (req, reply) => {
   // down to what's left rather than rejected outright -- "mint 10" from a
   // wallet that already has 8 just mints the 2 it still can.
   const mintedSoFar = await store.getWalletNftMintCount(collection.id, wallet.id);
-  const remainingWalletAllowance = NFT_MAX_MINTS_PER_WALLET - mintedSoFar;
+  // Brai, 2026-09-21: "esa wallet ... puede mintear 500 si quiere, sacale
+  // el limite" -- a specific wallet's own cap can be raised above the
+  // normal flat 10 (see maxMintsPerWalletFor/HIGH_LIMIT_NFT_WALLET_IDS in
+  // fees.ts); everyone else keeps the normal limit.
+  const walletMintLimit = maxMintsPerWalletFor(wallet.id);
+  const remainingWalletAllowance = walletMintLimit - mintedSoFar;
   if (remainingWalletAllowance <= 0) {
-    return reply.code(409).send({ error: `you've reached the limit of ${NFT_MAX_MINTS_PER_WALLET} per wallet for this collection` });
+    return reply.code(409).send({ error: `you've reached the limit of ${walletMintLimit} per wallet for this collection` });
   }
   const quantity = Math.min(body.quantity ?? 1, remainingWalletAllowance);
 
@@ -1738,6 +1784,14 @@ app.post("/api/nft/mint", async (req, reply) => {
   // always pay OWNER_NFT_MINT_PRICE_ZEC; everyone else pays the
   // collection's normal mintPriceZec (the "public" price).
   const mintPriceZec = nftMintPriceZecFor(wallet.id, collection.mintPriceZec);
+  // Brai (dev wallet, quantity 10): "Invalid params: amount exceeds maximum
+  // precision of 8 decimal places" -- mintPriceZec * quantity in floating
+  // point can land on something like 0.000009999999999999999 (0.000001 *
+  // 10) instead of a clean 0.00001, which the Noir wallet extension then
+  // rejects outright. Round once here to 8 decimal places (ZEC's own
+  // precision) and reuse that single value everywhere below, instead of
+  // recomputing (and re-drifting) the multiplication a second time.
+  const totalMintZec = Math.round(mintPriceZec * quantity * 1e8) / 1e8;
 
   // Brai, 2026-09-19: "mintea a precio 0" -- when an owner wallet's price
   // is actually 0, there's no real payment to wait for, so skip the
@@ -1767,7 +1821,7 @@ app.post("/api/nft/mint", async (req, reply) => {
     collectionId: collection.id,
     internalWalletId: wallet.id,
     currency: collection.currency,
-    expectedZecAmount: mintPriceZec * quantity,
+    expectedZecAmount: totalMintZec,
     quantity,
   });
 
@@ -1776,7 +1830,7 @@ app.post("/api/nft/mint", async (req, reply) => {
   let saplingDiversifierHex: string | null = null;
   let orchardDiversifierHex: string | null = null;
   try {
-    const res = await walletService.generateOrderAddress(pending.id, mintPriceZec * quantity);
+    const res = await walletService.generateOrderAddress(pending.id, totalMintZec);
     zecAddress = res.address;
     zecAmount = res.expectedZecAmount;
     saplingDiversifierHex = (res as { saplingDiversifierHex?: string | null }).saplingDiversifierHex ?? null;
@@ -1821,12 +1875,17 @@ app.get("/api/nft/mints/:id", async (req, reply) => {
 // (rather than just showing the flat max and letting the mint call reject
 // it), same count getWalletNftMintCount computes and /api/nft/mint itself
 // enforces.
+// Brai, 2026-09-21: also reports THIS wallet's own effective cap
+// (maxMintsPerWallet) instead of always the flat 10 -- a wallet raised via
+// HIGH_LIMIT_NFT_WALLET_IDS (see fees.ts) needs the stepper itself to go
+// past 10, not just have the backend accept a bigger quantity it never
+// gets offered.
 app.get("/api/nft/mint-count/:collectionSlug/:walletId", async (req, reply) => {
   const { collectionSlug, walletId } = req.params as { collectionSlug: string; walletId: string };
   const collection = await store.getNftCollectionBySlug(collectionSlug);
   if (!collection) return reply.code(404).send({ error: "collection not found" });
   const count = await store.getWalletNftMintCount(collection.id, walletId);
-  return reply.send({ count });
+  return reply.send({ count, maxMintsPerWallet: maxMintsPerWalletFor(walletId) });
 });
 
 // ---------- NFT whitelist (Twitter, manually reviewed by Brai) ----------

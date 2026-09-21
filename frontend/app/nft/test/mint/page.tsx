@@ -52,6 +52,11 @@ export default function NftMintPage() {
   // ---- eligibility / limits for the connected wallet ----
   const [whitelistEntry, setWhitelistEntry] = useState<NftWhitelistEntry | null | undefined>(undefined); // undefined = still loading
   const [mintedSoFar, setMintedSoFar] = useState<number | null>(null);
+  // Brai, 2026-09-21: "esa wallet ... puede mintear 500 si quiere, sacale
+  // el limite" -- this wallet's OWN cap, from /api/nft/mint-count (usually
+  // 10, higher for a wallet the backend raised via HIGH_LIMIT_NFT_WALLET_IDS).
+  // null until we've asked, so the stepper doesn't flash a wrong cap first.
+  const [walletMintLimit, setWalletMintLimit] = useState<number | null>(null);
   const [quantity, setQuantity] = useState(1);
 
   // ---- live feed ----
@@ -131,6 +136,7 @@ export default function NftMintPage() {
     if (!wallet) {
       setWhitelistEntry(null);
       setMintedSoFar(null);
+      setWalletMintLimit(null);
       return;
     }
     setWhitelistEntry(undefined);
@@ -140,8 +146,14 @@ export default function NftMintPage() {
       .catch(() => setWhitelistEntry(null));
     api
       .getNftWalletMintCount(COLLECTION_SLUG, wallet.walletId)
-      .then((r) => setMintedSoFar(r.count))
-      .catch(() => setMintedSoFar(null));
+      .then((r) => {
+        setMintedSoFar(r.count);
+        setWalletMintLimit(r.maxMintsPerWallet ?? null);
+      })
+      .catch(() => {
+        setMintedSoFar(null);
+        setWalletMintLimit(null);
+      });
   }, [wallet]);
 
   // Brai, 2026-09-21: checks whether this browser already has a verified X
@@ -212,7 +224,12 @@ export default function NftMintPage() {
     }
   }
 
-  const maxMintsPerWallet = collection?.maxMintsPerWallet ?? 10;
+  // Brai, 2026-09-21: prefer THIS wallet's own limit (walletMintLimit, from
+  // /api/nft/mint-count -- raised for a wallet in HIGH_LIMIT_NFT_WALLET_IDS)
+  // over the collection's generic one, so a raised wallet's stepper can
+  // actually reach past 10 instead of being silently capped by the flat
+  // default the collection endpoint always reports.
+  const maxMintsPerWallet = walletMintLimit ?? collection?.maxMintsPerWallet ?? 10;
   const remainingWalletAllowance =
     mintedSoFar != null ? Math.max(0, maxMintsPerWallet - mintedSoFar) : maxMintsPerWallet;
   const remainingSupply = collection ? Math.max(0, collection.totalSupply - collection.mintedCount) : 0;
