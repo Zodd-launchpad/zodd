@@ -1600,13 +1600,20 @@ app.post("/api/nft/mint", async (req, reply) => {
   // confirms. Anything other than eligible (not whitelisted, free
   // allowance used up) falls through to the normal paid flow below --
   // "not approved" is by far the common case (most buyers never applied).
+  //
+  // Brai, 2026-09-21: "toco 5 free mint y me quiere cobrar 0.005... deberia
+  // cobrarme solo el fee" -- this used to be NFT_FREE_MINT_FEE_ZEC *per
+  // piece* (0.001 x 5 = 0.005 ZEC), which is what he was seeing. He wants
+  // ONE flat fee per free-mint transaction regardless of how many pieces
+  // it covers, so NFT_FREE_MINT_FEE_ZEC is no longer multiplied by
+  // quantity here -- 1 free mint or 5, it's the same single small charge.
   const freeEligibility = await store.getWhitelistFreeClaimEligibility(wallet.id, quantity);
   if (freeEligibility.ok) {
     const pending = await store.createPendingNftMint({
       collectionId: collection.id,
       internalWalletId: wallet.id,
       currency: collection.currency,
-      expectedZecAmount: NFT_FREE_MINT_FEE_ZEC * freeEligibility.quantity,
+      expectedZecAmount: NFT_FREE_MINT_FEE_ZEC,
       quantity: freeEligibility.quantity,
       freeClaimWhitelistEntryId: freeEligibility.entryId,
     });
@@ -1615,7 +1622,7 @@ app.post("/api/nft/mint", async (req, reply) => {
     let saplingDiversifierHex: string | null = null;
     let orchardDiversifierHex: string | null = null;
     try {
-      const res = await walletService.generateOrderAddress(pending.id, NFT_FREE_MINT_FEE_ZEC * freeEligibility.quantity);
+      const res = await walletService.generateOrderAddress(pending.id, NFT_FREE_MINT_FEE_ZEC);
       zecAddress = res.address;
       zecAmount = res.expectedZecAmount;
       saplingDiversifierHex = (res as { saplingDiversifierHex?: string | null }).saplingDiversifierHex ?? null;

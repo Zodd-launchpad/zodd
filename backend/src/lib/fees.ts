@@ -143,7 +143,13 @@ export const NFT_TIER_NUMBERING_START = Number(process.env.NFT_TIER_NUMBERING_ST
  * the normal pay-to-a-generated-address flow (see /api/nft/mint), just at
  * this token price instead of the collection's full mintPriceZec, so a
  * real on-chain tx backs every mint. Fixed ZEC amount (Brai chose this over
- * a live USD conversion) -- small enough to just cover network fees. */
+ * a live USD conversion) -- small enough to just cover network fees.
+ *
+ * Brai, 2026-09-21: "toco 5 free mint y me quiere cobrar 0.005... deberia
+ * cobrarme solo el fee" -- this is now charged ONCE per free-mint
+ * transaction, not once per piece. A wallet claiming 1 free NFT or all 5
+ * at once pays the exact same NFT_FREE_MINT_FEE_ZEC either way -- see
+ * /api/nft/mint in server.ts, which no longer multiplies this by quantity. */
 export const NFT_FREE_MINT_FEE_ZEC = Number(process.env.NFT_FREE_MINT_FEE_ZEC ?? 0.001);
 
 /** Currency-aware version of createFeeZecFor -- dispatches to the right
