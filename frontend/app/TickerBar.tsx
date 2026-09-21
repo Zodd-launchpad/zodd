@@ -1,8 +1,8 @@
 "use client";
-import { useEffect, useState } from "react";
 import Link from "next/link";
-import { api, TokenSummary, formatUsd } from "@/lib/api";
+import { formatUsd } from "@/lib/api";
 import { useZecUsdPrice } from "@/lib/zecPrice";
+import { useTokenList } from "@/lib/tokenList";
 
 // Brai, 2026-09-07: "ARMAME UNA BARRA QUE VAYA CIRCULANDO ARRIBA CON LOS
 // TOKENS... HACELO FARAONICO, COMO DE PIEDRA" -- a scrolling price ticker,
@@ -12,27 +12,15 @@ import { useZecUsdPrice } from "@/lib/zecPrice";
 // own visual register (warm stone + bronze) instead of the site's usual
 // cool chrome/silver, so it reads as a distinct "monument", not just
 // another header row -- see .ticker-bar in globals.css for the styling.
+//
+// Brai, 2026-09-21: "no puede estar consumiendo tanto la pagina" -- this
+// used to poll GET /api/tokens (which inlines every token's logo image,
+// ~307KB for 16 tokens) on its OWN 5s interval, site-wide, on every page --
+// see the egress incident writeup in lib/tokenList.tsx. Now reads from the
+// one shared, slower poll in TokenListProvider (see layout.tsx) instead.
 export default function TickerBar() {
-  const [tokens, setTokens] = useState<TokenSummary[] | null>(null);
+  const tokens = useTokenList();
   const usdRate = useZecUsdPrice();
-
-  useEffect(() => {
-    let stop = false;
-    async function load() {
-      try {
-        const data = await api.listTokens();
-        if (!stop) setTokens(data);
-      } catch {
-        /* silent -- a ticker that briefly can't fetch just keeps showing what it had */
-      }
-    }
-    load();
-    const id = setInterval(load, 5000);
-    return () => {
-      stop = true;
-      clearInterval(id);
-    };
-  }, []);
 
   if (!tokens || tokens.length === 0) return null;
 

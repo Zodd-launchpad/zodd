@@ -2,6 +2,7 @@ import "./globals.css";
 import { WalletProvider } from "@/lib/wallet";
 import { LanguageProvider } from "@/lib/i18n";
 import { ZecPriceProvider } from "@/lib/zecPrice";
+import { TokenListProvider } from "@/lib/tokenList";
 import DemoBanner from "./DemoBanner";
 import TickerBar from "./TickerBar";
 import HeaderBar from "./HeaderBar";
@@ -18,18 +19,20 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <LanguageProvider>
           <ZecPriceProvider>
-            <WalletProvider>
-              <DemoBanner />
-              <TickerBar />
-              <HeaderBar />
-              {/* Brai, 2026-09-08: "el live activity que este siempre
-                  presente, en todas las... [paginas]" / "cuando estas en
-                  un token que tambien este" -- site-wide now, not just the
-                  home page. */}
-              <ActivityFeed />
-              {children}
-              <DisclaimerBanner />
-            </WalletProvider>
+            <TokenListProvider>
+              <WalletProvider>
+                <DemoBanner />
+                <TickerBar />
+                <HeaderBar />
+                {/* Brai, 2026-09-08: "el live activity que este siempre
+                    presente, en todas las... [paginas]" / "cuando estas en
+                    un token que tambien este" -- site-wide now, not just the
+                    home page. */}
+                <ActivityFeed />
+                {children}
+                <DisclaimerBanner />
+              </WalletProvider>
+            </TokenListProvider>
           </ZecPriceProvider>
         </LanguageProvider>
       </body>

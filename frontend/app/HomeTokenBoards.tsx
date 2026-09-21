@@ -1,9 +1,9 @@
 "use client";
-import { useEffect, useState } from "react";
 import Link from "next/link";
-import { api, TokenSummary, formatCompactUsd } from "@/lib/api";
+import { TokenSummary, formatCompactUsd } from "@/lib/api";
 import { useLanguage } from "@/lib/i18n";
 import { useZecUsdPrice } from "@/lib/zecPrice";
+import { useTokenList } from "@/lib/tokenList";
 import { isOfficialToken, OfficialCheckmark } from "./OfficialBadge";
 
 const BOARD_SIZE = 10;
@@ -103,28 +103,15 @@ function TokenCard({
   );
 }
 
+// Brai, 2026-09-21: "no puede estar consumiendo tanto la pagina" -- this
+// used to run its OWN 5s poll of GET /api/tokens, independently of
+// TickerBar doing the exact same thing on the same page at the same time
+// (see the egress incident writeup in lib/tokenList.tsx). Now reads from
+// the one shared, slower poll instead of fetching a second copy.
 export default function HomeTokenBoards() {
   const { t } = useLanguage();
   const usdRate = useZecUsdPrice();
-  const [tokens, setTokens] = useState<TokenSummary[] | null>(null);
-
-  useEffect(() => {
-    let stop = false;
-    async function load() {
-      try {
-        const data = await api.listTokens();
-        if (!stop) setTokens(data);
-      } catch {
-        /* silent -- the home page shouldn't hard-fail if the market list is briefly down */
-      }
-    }
-    load();
-    const id = setInterval(load, 5000);
-    return () => {
-      stop = true;
-      clearInterval(id);
-    };
-  }, []);
+  const tokens = useTokenList();
 
   const graduated = (tokens ?? [])
     .filter((t) => t.graduated)
