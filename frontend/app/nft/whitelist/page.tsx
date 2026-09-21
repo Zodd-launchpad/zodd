@@ -26,8 +26,10 @@ import { useLanguage } from "@/lib/i18n";
 //
 // Brai, 2026-09-20 (cont.): "lo de la whitelist lo preparas pero no lo
 // hagas aun, no lo vamos a mandar hasta la noche dentro de 5 horas" -- code
-// ready, flag left OFF. Flip this to true (and push/deploy) when he says go.
-const WHITELIST_CLOSED = false;
+// ready, flag left OFF until he said go.
+//
+// Brai, 2026-09-21: "activa fin de whitelist" -- flag flipped on.
+const WHITELIST_CLOSED = true;
 
 export default function NftWhitelistPage() {
   return WHITELIST_CLOSED ? <NftWhitelistClosedView /> : <NftWhitelistWizard />;
