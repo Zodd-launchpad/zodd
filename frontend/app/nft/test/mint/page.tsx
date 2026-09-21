@@ -82,6 +82,23 @@ export default function NftMintPage() {
   // in flight, since they're now separate actions instead of one.
   const [submitting, setSubmitting] = useState<"free" | "buy" | null>(null);
 
+  // Brai, 2026-09-21: "programar algo para el mint... que se pueda conectar
+  // autentificador de twitter y si el handle esta en la lista, pasa
+  // directamente a free mint... hay algunos que no conectaron la wallet y
+  // voy a autorizar ahora luego del fin de la whitelist y no tendre forma
+  // de saber quienes son si no tengo autentificador de twitter" -- for a
+  // wallet the site doesn't yet recognize as whitelisted (whitelistEntry
+  // null), lets the visitor prove their X handle via OAuth and, if that
+  // handle is on Brai's approved/preapproved list, self-link it to THIS
+  // wallet right here (see claim-by-x proxy route + claimNftWhitelistByVerifiedHandle
+  // in store.ts). undefined = still checking whether this browser already
+  // has a verified X session; null = not connected yet.
+  const [xHandle, setXHandle] = useState<string | null | undefined>(undefined);
+  const [claimAddress, setClaimAddress] = useState("");
+  const [claimNoirBusy, setClaimNoirBusy] = useState(false);
+  const [claiming, setClaiming] = useState(false);
+  const [claimError, setClaimError] = useState<string | null>(null);
+
   useEffect(() => {
     api.getMode().then((m) => setIsRealMode(m.currencies.ZEC.mode === "real")).catch(() => {});
   }, []);
@@ -125,6 +142,74 @@ export default function NftMintPage() {
       .then((r) => setMintedSoFar(r.count))
       .catch(() => setMintedSoFar(null));
   }, [wallet]);
+
+  // Brai, 2026-09-21: checks whether this browser already has a verified X
+  // session (either from before, or right after the OAuth redirect lands
+  // back here with ?verified=1 -- see /api/auth/twitter/start's returnTo).
+  // Same session-check call the whitelist wizard makes; it's a plain
+  // signed-cookie read, safe to call regardless of wallet state, but only
+  // useful once a wallet is connected.
+  useEffect(() => {
+    if (!wallet) {
+      setXHandle(undefined);
+      return;
+    }
+    fetch("/api/auth/twitter/session")
+      .then((r) => r.json())
+      .then((body: { handle: string | null }) => setXHandle(body.handle))
+      .catch(() => setXHandle(null));
+  }, [wallet]);
+
+  // A Noir-connected wallet already has a real address on file
+  // (wallet.noirAddress) -- prefill it so most people never have to type
+  // anything, same as the whitelist wizard's own Noir autofill button.
+  useEffect(() => {
+    if (wallet?.noirAddress) setClaimAddress(wallet.noirAddress);
+  }, [wallet]);
+
+  async function autofillClaimAddress() {
+    setClaimError(null);
+    setClaimNoirBusy(true);
+    try {
+      if (!isNoirWalletInstalled()) {
+        setClaimError(t("onboard.noir.notInstalled"));
+        return;
+      }
+      const noirWallet = getNoirWallet();
+      if (!noirWallet) {
+        setClaimError(t("onboard.noir.notInstalled"));
+        return;
+      }
+      const connection = await noirWallet.zcash.connect();
+      setClaimAddress(connection.shielded);
+    } catch (e: any) {
+      setClaimError(e?.code === 4001 || /reject/i.test(e?.message ?? "") ? t("onboard.noir.rejected") : e?.message ?? "connect failed");
+    } finally {
+      setClaimNoirBusy(false);
+    }
+  }
+
+  async function claimByX() {
+    if (!wallet || !claimAddress.trim()) return;
+    setClaimError(null);
+    setClaiming(true);
+    try {
+      const res = await fetch("/api/nft/whitelist/claim-by-x", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ walletId: wallet.walletId, address: claimAddress.trim() }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body?.error ?? `error ${res.status}`);
+      // Same entry shape getNftWhitelistStatusByWallet returns -- this
+      // instantly unlocks the FREE MINT button below, no page reload.
+      setWhitelistEntry(body);
+    } catch (e: any) {
+      setClaimError(e.message);
+    } finally {
+      setClaiming(false);
+    }
+  }
 
   const maxMintsPerWallet = collection?.maxMintsPerWallet ?? 10;
   const remainingWalletAllowance =
@@ -351,6 +436,71 @@ export default function NftMintPage() {
                         ? t("nftMint.stage.freeRemaining", { count: freeRemaining })
                         : t("nftMint.stage.freeUsedUp")}
                     </p>
+                  )}
+
+                  {/* Brai, 2026-09-21: connected wallet has no whitelist
+                      entry on file yet -- offer the X-verify self-link
+                      instead of just saying NOT ELIGIBLE, for the people
+                      Brai preapproved after the whitelist closed and who
+                      never went through the old wallet+handle wizard. */}
+                  {freeRemaining == null && (
+                    <div
+                      style={{
+                        marginBottom: 14,
+                        padding: 12,
+                        border: "1px solid var(--border)",
+                        borderRadius: 8,
+                        background: "var(--panel)",
+                      }}
+                    >
+                      <p className="muted" style={{ fontSize: 12, margin: "0 0 8px" }}>
+                        {t("nftMint.xClaim.intro")}
+                      </p>
+                      {xHandle === undefined ? null : xHandle ? (
+                        <>
+                          <p className="zw-connected" style={{ fontSize: 12, color: "var(--green)", margin: "0 0 8px" }}>
+                            &gt; {t("nftWhitelist.wizard.xConnected", { handle: xHandle })}
+                          </p>
+                          <div className="field" style={{ marginBottom: 8 }}>
+                            <input
+                              value={claimAddress}
+                              onChange={(e) => setClaimAddress(e.target.value)}
+                              placeholder="u1… / zs1… / t1…"
+                              className="mono"
+                            />
+                          </div>
+                          <div style={{ display: "flex", gap: 8 }}>
+                            <button
+                              className="btn btn-outline"
+                              style={{ flex: 1, fontSize: 12, padding: "6px 10px" }}
+                              disabled={claimNoirBusy}
+                              onClick={autofillClaimAddress}
+                            >
+                              {claimNoirBusy ? t("nftWhitelist.wizard.noirAutofilling") : t("nftWhitelist.wizard.noirAutofill")}
+                            </button>
+                            <button
+                              className="btn btn-gold"
+                              style={{ flex: 1, fontSize: 12, padding: "6px 10px" }}
+                              disabled={claiming || !claimAddress.trim()}
+                              onClick={claimByX}
+                            >
+                              {claiming ? t("common.wait") : t("nftMint.xClaim.checkButton")}
+                            </button>
+                          </div>
+                          {claimError && (
+                            <p style={{ color: "var(--red)", fontSize: 12, marginTop: 8, marginBottom: 0 }}>{claimError}</p>
+                          )}
+                        </>
+                      ) : (
+                        <a
+                          className="btn btn-gold"
+                          href={`/api/auth/twitter/start?returnTo=${encodeURIComponent("/nft/test/mint")}`}
+                          style={{ display: "inline-block" }}
+                        >
+                          {t("nftWhitelist.wizard.connectX")}
+                        </a>
+                      )}
+                    </div>
                   )}
 
                   {freeMintQuantity > 0 && (

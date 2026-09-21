@@ -2687,6 +2687,79 @@ export async function preapproveNftWhitelistHandles(
   return results;
 }
 
+/** Brai, 2026-09-21: "programar algo para el mint... que se pueda conectar
+ * autentificador de twitter y si el handle esta en la lista, pasa
+ * directamente a free mint... hay algunos que no conectaron la wallet y
+ * voy a autorizar ahora luego del fin de la whitelist y no tendre forma de
+ * saber quienes son si no tengo autentificador de twitter" -- the
+ * self-service counterpart to submitNftWhitelistEntry, for exactly the
+ * case the old wizard can't cover anymore now that it's closed: a handle
+ * Brai preapproved (see preapproveNftWhitelistHandles above) that never
+ * went through the wallet+handle wizard, so there's no NftWhitelistEntry
+ * row -- and therefore no walletAddress -- for it at all. Called from the
+ * mint page (frontend/app/nft/test/mint/page.tsx) once X OAuth has proven
+ * which handle the visitor owns; the caller (the same-origin
+ * /api/nft/whitelist/claim-by-x proxy route, gated by
+ * WHITELIST_INTERNAL_TOKEN below just like /api/nft/whitelist) supplies
+ * that verified handle, never anything the client could type.
+ *
+ * Deliberately narrow: a handle that already has ANY NftWhitelistEntry row
+ * (PENDING, REJECTED, or APPROVED-with-a-different-wallet) is left for
+ * Brai to sort out by hand rather than silently reassigned here -- this
+ * only ever fills in the gap of "preapproved, never applied at all". */
+export async function claimNftWhitelistByVerifiedHandle(
+  walletId: string,
+  rawHandle: string,
+  rawAddress: string
+): Promise<NftWhitelistEntryView | { error: string }> {
+  const handle = normalizeTwitterHandle(rawHandle);
+  if (!/^[a-z0-9_]{1,15}$/.test(handle)) return { error: "that doesn't look like a valid X/Twitter handle" };
+
+  const wallet = await prisma.internalWallet.findUnique({ where: { id: walletId } });
+  if (!wallet) return { error: "wallet not found" };
+
+  const existingByHandle = await prisma.nftWhitelistEntry.findFirst({ where: { twitterHandle: handle } });
+  if (existingByHandle) {
+    // Same "both addresses this wallet is known by" match as
+    // findApprovedNftWhitelistEntryForWallet -- if this exact wallet is
+    // already the one behind that entry, treat it as a success (idempotent
+    // re-click of the CHECK button) instead of an error.
+    const candidateAddresses = [wallet.noirAddress, wallet.defaultRefundAddress].filter(
+      (a): a is string => !!a
+    );
+    if (existingByHandle.status === "APPROVED" && candidateAddresses.includes(existingByHandle.walletAddress)) {
+      return toNftWhitelistEntryView(existingByHandle);
+    }
+    return { error: "this X account already has a whitelist application on file -- contact Brai" };
+  }
+
+  const preapproved = await prisma.nftWhitelistPreapproved.findUnique({ where: { twitterHandle: handle } });
+  if (!preapproved) return { error: "this X account isn't on the whitelist" };
+
+  const address = rawAddress.trim();
+  if (!looksLikeZcashAddress(address)) return { error: "that doesn't look like a valid Zcash wallet address" };
+  const takenByAnotherAddress = await prisma.nftWhitelistEntry.findUnique({ where: { walletAddress: address } });
+  if (takenByAnotherAddress) return { error: "that wallet address is already registered to a different whitelist entry" };
+
+  const created = await prisma.nftWhitelistEntry.create({
+    data: {
+      walletAddress: address,
+      twitterHandle: handle,
+      status: "APPROVED",
+      reviewedAt: new Date(),
+      reviewNote: "auto-approved: X-verified handle matched the preapproved list",
+    },
+  });
+  // Same bookkeeping connectOrCreateNoirWallet/setDefaultRefundAddress do
+  // elsewhere -- keeps this wallet's OWN address record in sync too, so
+  // findApprovedNftWhitelistEntryForWallet keeps matching even if this
+  // specific NftWhitelistEntry row is ever touched independently later.
+  if (!wallet.noirAddress && !wallet.defaultRefundAddress) {
+    await prisma.internalWallet.update({ where: { id: walletId }, data: { defaultRefundAddress: address } });
+  }
+  return toNftWhitelistEntryView(created);
+}
+
 export async function getNftWhitelistEntry(walletAddress: string): Promise<NftWhitelistEntryView | null> {
   const entry = await prisma.nftWhitelistEntry.findUnique({ where: { walletAddress: walletAddress.trim() } });
   return entry ? toNftWhitelistEntryView(entry) : null;

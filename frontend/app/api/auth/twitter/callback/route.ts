@@ -18,8 +18,14 @@ import {
 // client typed or sent.
 export const dynamic = "force-dynamic"; // reads cookies + query params per-request, must never be cached
 
-function redirectToWizard(status: "verified" | "error", detail?: string) {
-  const url = new URL("https://zodd.fun/nft/whitelist");
+// Brai, 2026-09-21: reads the caller back OUT of the signed pending cookie
+// (see start/route.ts) instead of always landing on /nft/whitelist, so the
+// mint page's "connect X" round-trip lands the visitor back on the mint
+// page instead of bouncing them somewhere else. Falls back to the old
+// default whenever there's no usable pending cookie (expired, tampered,
+// or simply not present), which is also the previous behavior verbatim.
+function redirectTo(returnTo: string, status: "verified" | "error", detail?: string) {
+  const url = new URL(`https://zodd.fun${returnTo}`);
   if (status === "verified") url.searchParams.set("verified", "1");
   else url.searchParams.set("oauthError", detail ?? "unknown");
   return NextResponse.redirect(url.toString());
@@ -27,20 +33,24 @@ function redirectToWizard(status: "verified" | "error", detail?: string) {
 
 export async function GET(req: NextRequest) {
   const config = getOAuthConfig();
-  if (!config) return redirectToWizard("error", "not_configured");
+  const pendingCookie = req.cookies.get(PENDING_COOKIE)?.value;
+  const pending = config
+    ? verifyToken<{ state: string; verifier: string; returnTo?: string }>(pendingCookie, config.sessionSecret)
+    : null;
+  const returnTo = pending?.returnTo && pending.returnTo.startsWith("/") ? pending.returnTo : "/nft/whitelist";
+
+  if (!config) return redirectTo(returnTo, "error", "not_configured");
 
   const code = req.nextUrl.searchParams.get("code");
   const state = req.nextUrl.searchParams.get("state");
   const oauthDenied = req.nextUrl.searchParams.get("error"); // X sets this if the user hit "Cancel"
-  if (oauthDenied) return redirectToWizard("error", "denied");
-  if (!code || !state) return redirectToWizard("error", "missing_code");
+  if (oauthDenied) return redirectTo(returnTo, "error", "denied");
+  if (!code || !state) return redirectTo(returnTo, "error", "missing_code");
 
-  const pendingCookie = req.cookies.get(PENDING_COOKIE)?.value;
-  const pending = verifyToken<{ state: string; verifier: string }>(pendingCookie, config.sessionSecret);
   if (!pending || pending.state !== state) {
     // Expired, tampered, or a state that doesn't match -- refuse rather
     // than proceed, this is exactly the CSRF check PKCE/state exists for.
-    return redirectToWizard("error", "state_mismatch");
+    return redirectTo(returnTo, "error", "state_mismatch");
   }
 
   let handle: string;
@@ -61,7 +71,7 @@ export async function GET(req: NextRequest) {
     });
     if (!tokenRes.ok) {
       console.error("twitter oauth token exchange failed", tokenRes.status, await tokenRes.text());
-      return redirectToWizard("error", "token_exchange_failed");
+      return redirectTo(returnTo, "error", "token_exchange_failed");
     }
     const tokenBody = (await tokenRes.json()) as { access_token: string };
 
@@ -70,18 +80,18 @@ export async function GET(req: NextRequest) {
     });
     if (!meRes.ok) {
       console.error("twitter /2/users/me failed", meRes.status, await meRes.text());
-      return redirectToWizard("error", "profile_fetch_failed");
+      return redirectTo(returnTo, "error", "profile_fetch_failed");
     }
     const meBody = (await meRes.json()) as { data?: { username?: string } };
-    if (!meBody.data?.username) return redirectToWizard("error", "no_username");
+    if (!meBody.data?.username) return redirectTo(returnTo, "error", "no_username");
     handle = meBody.data.username;
   } catch (e) {
     console.error("twitter oauth callback error", e);
-    return redirectToWizard("error", "network");
+    return redirectTo(returnTo, "error", "network");
   }
 
   const verified = signToken({ handle }, config.sessionSecret, VERIFIED_TTL_SECONDS);
-  const res = redirectToWizard("verified");
+  const res = redirectTo(returnTo, "verified");
   res.cookies.set(VERIFIED_COOKIE, verified, {
     httpOnly: true,
     secure: true,

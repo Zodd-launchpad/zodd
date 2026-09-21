@@ -511,6 +511,17 @@ export const translations = {
   "nftMint.live.mints": { en: "Live Mints", zh: "实时铸造" },
   "nftMint.live.sales": { en: "Live Sales", zh: "实时成交" },
   "nftMint.live.empty": { en: "Nothing yet.", zh: "暂无记录。" },
+  // Brai, 2026-09-21: "programar algo para el mint... conectar
+  // autentificador de twitter" -- self-service link for a preapproved
+  // handle that never went through the (now closed) wallet+handle wizard.
+  // Shown on the mint page only while the connected wallet has no free
+  // mint eligibility yet. Reuses nftWhitelist.wizard.connectX/xConnected
+  // and nftWhitelist.wizard.noirAutofill(ing) for the shared bits.
+  "nftMint.xClaim.intro": {
+    en: "Already approved but never linked a wallet? Connect your X account to check.",
+    zh: "已获批但从未关联钱包？连接你的 X 账号进行核实。",
+  },
+  "nftMint.xClaim.checkButton": { en: "CHECK ELIGIBILITY", zh: "核实资格" },
   "nftItem.notFound": { en: "Piece not found.", zh: "未找到该作品。" },
   "nftItem.price": { en: "Price", zh: "价格" },
   "nftItem.listPriceLabel": { en: "List price ({currency})", zh: "上架价格（{currency}）" },

@@ -1808,6 +1808,32 @@ app.post("/api/nft/whitelist", async (req, reply) => {
   return reply.send(result);
 });
 
+// Brai, 2026-09-21: "programar algo para el mint... conectar autentificador
+// de twitter y si el handle esta en la lista, pasa directamente a free
+// mint" -- see claimNftWhitelistByVerifiedHandle's big comment in store.ts
+// for the full story. Same lockdown pattern as POST /api/nft/whitelist
+// right above: the ONLY caller allowed to reach this directly is the
+// frontend's /api/nft/whitelist/claim-by-x proxy, which supplies
+// twitterHandle itself from the signed, X-OAuth-verified cookie -- never
+// from anything the client typed.
+const nftWhitelistClaimByXSchema = z.object({
+  walletId: z.string().min(1),
+  twitterHandle: z.string().trim().min(1).max(20),
+  address: z.string().trim().min(1).max(200),
+});
+
+app.post("/api/nft/whitelist/claim-by-x", async (req, reply) => {
+  if (WHITELIST_INTERNAL_TOKEN) {
+    if (req.headers["x-internal-token"] !== WHITELIST_INTERNAL_TOKEN) {
+      return reply.code(401).send({ error: "this endpoint requires going through the mint page" });
+    }
+  }
+  const body = nftWhitelistClaimByXSchema.parse(req.body);
+  const result = await store.claimNftWhitelistByVerifiedHandle(body.walletId, body.twitterHandle, body.address);
+  if ("error" in result) return reply.code(400).send({ error: result.error });
+  return reply.send(result);
+});
+
 app.get("/api/nft/whitelist/status/:walletAddress", async (req, reply) => {
   const { walletAddress } = req.params as { walletAddress: string };
   const entry = await store.getNftWhitelistEntry(walletAddress);
