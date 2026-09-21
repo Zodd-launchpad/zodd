@@ -16,6 +16,7 @@ import { useLanguage } from "@/lib/i18n";
 import type { TranslationKey } from "@/lib/translations";
 import { useZecUsdPrice } from "@/lib/zecPrice";
 import { useWallet } from "@/lib/wallet";
+import { NftMedia } from "@/lib/nftMedia";
 
 // Brai, 2026-09-18: "empeza a deployar el marketplace ... te envio una
 // pagina que me gustaria copiar, sencilla: zecrocks.cash/market" -- original
@@ -292,7 +293,7 @@ export default function NftMarketTestPage() {
                   <Link key={it.id} href={nftItemPath(it.editionNumber, it.tier)} className="nft-card">
                     <div className="nft-card-img-wrap">
                       {it.imageDataUrl ? (
-                        <img src={it.imageDataUrl} alt={it.name ?? nftItemLabel(it.tier, it.editionNumber)} className="nft-card-img" />
+                        <NftMedia src={it.imageDataUrl} alt={it.name ?? nftItemLabel(it.tier, it.editionNumber)} className="nft-card-img" />
                       ) : (
                         <div className="nft-card-img-placeholder">?</div>
                       )}

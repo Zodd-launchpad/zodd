@@ -42,8 +42,24 @@ const { sendPayout, MAX_PAYOUT_ZEC } = zcashModule;
 // default, so that route stays refused until Brai deliberately sets this in
 // Railway's variables and only he knows the value.
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
+// One-off alternate credential ONLY for the video-variant reseed route below
+// (/api/admin/nft-reseed-tiered-variants). That call ships a large payload
+// from an operator machine that may not have ADMIN_TOKEN on hand; rather than
+// pass the real admin secret around for a single migration-style call, this
+// lets Brai (or whoever runs the reseed) set a throwaway token, use it once,
+// then unset it. Leave unset in normal operation -- ADMIN_TOKEN alone still
+// works for this route too.
+const NFT_SEED_TOKEN = process.env.NFT_SEED_TOKEN;
 
-const app = Fastify({ logger: true, maxParamLength: 512 });
+// Brai, 2026-09-21: "los nfts seran esos videos" -- the tiered-variant
+// reseed admin call (see nftReseedTieredVariantsSchema below) carries
+// several base64-encoded video clips in one JSON body, which for the
+// first real use of this (1 papiro + 3 fragmento + 5 reliquia clips, a few
+// MB each) adds up to ~40MB+. Fastify's default bodyLimit is 1MB, which
+// would reject that outright with a 413 before it ever reaches the route
+// handler -- raised well above what's needed today so a modest future
+// tier-variant collection doesn't hit this ceiling again.
+const app = Fastify({ logger: true, maxParamLength: 512, bodyLimit: 200 * 1024 * 1024 });
 app.log.info(`ZCASH_MODE=${ZCASH_MODE} -- ${ZCASH_MODE === "real" ? "REAL ZEC IS LIVE ON THIS DEPLOYMENT" : "using the simulated zcash service, no real funds move"}`);
 
 app.register(import("@fastify/cors"), { origin: true });
@@ -1479,6 +1495,77 @@ app.post("/api/admin/nft-collection-tier-image", async (req, reply) => {
   } catch (err: any) {
     return reply.code(400).send({ error: err?.message ?? "update failed" });
   }
+});
+
+// Brai, 2026-09-21: "los nfts seran esos videos que son loops... invéntale
+// el nombre en base a la historia de ZODD" -- v2 of the tiered reseed
+// above, for a collection whose tiers get several named VIDEO variants
+// instead of one shared static image (see seedTieredNftCollectionWithVariants
+// in store.ts). Accepts either ADMIN_TOKEN or the one-off NFT_SEED_TOKEN
+// (see its definition above) in the same x-admin-token header -- this route
+// only, for moving a big media payload without needing the real admin
+// secret on the machine doing the reseed. Each variant carries its own
+// expectedMd5 -- store.buildTierVariants rejects the whole call if any one
+// of them got corrupted in transit, rather than silently seeding a broken
+// clip for people to mint.
+const nftVariantSchema = z.object({
+  name: z.string().min(1),
+  videoDataUrl: z.string().min(1),
+  expectedMd5: z.string().optional(),
+});
+const nftReseedTieredVariantsSchema = z.object({
+  slug: z.string().min(1),
+  name: z.string().min(1),
+  description: z.string().max(2000).optional(),
+  currency: z.enum(["ZEC", "YEC"]).optional(),
+  mintPriceZec: z.number().positive(),
+  papiroVariants: z.array(nftVariantSchema),
+  fragmentoVariants: z.array(nftVariantSchema),
+  reliquiaVariants: z.array(nftVariantSchema),
+  tier1Count: z.number().int().nonnegative(),
+  tier2Count: z.number().int().nonnegative(),
+  tier3Count: z.number().int().nonnegative(),
+  wipeExisting: z.boolean(),
+});
+
+app.post("/api/admin/nft-reseed-tiered-variants", async (req, reply) => {
+  if (!ADMIN_TOKEN && !NFT_SEED_TOKEN) {
+    return reply.code(503).send({ error: "ADMIN_TOKEN is not configured" });
+  }
+  const provided = req.headers["x-admin-token"];
+  const authorized =
+    (!!ADMIN_TOKEN && provided === ADMIN_TOKEN) ||
+    (!!NFT_SEED_TOKEN && provided === NFT_SEED_TOKEN);
+  if (!authorized) return reply.code(401).send({ error: "unauthorized" });
+  const body = nftReseedTieredVariantsSchema.parse(req.body) as store.TieredSeedWithVariantsInput;
+  try {
+    const result = await store.seedTieredNftCollectionWithVariants(body);
+    return reply.send(result);
+  } catch (err: any) {
+    return reply.code(400).send({ error: err?.message ?? "reseed failed" });
+  }
+});
+
+// Brai, 2026-09-21: the actual video bytes for a tier variant, streamed
+// from here instead of being embedded as a data: URL in every item API
+// response (see the long comment on toNftItemView's resolvedImage in
+// store.ts -- inlining a multi-MB clip on every row of a 48-item listing
+// page would balloon that one response to hundreds of MB). Deliberately
+// public/unauthenticated: this is marketing media for a public mint page,
+// same trust level as any other asset already served from frontend/public.
+// immutable + a 1-year cache is safe because the key embeds a content hash
+// (see buildTierVariants) -- the video at a given key never changes; a
+// reseed that swaps the clip always mints a brand-new key.
+app.get("/api/nft/media/:key", async (req, reply) => {
+  const { key } = req.params as { key: string };
+  const variant = await store.getMediaVariantByKey(key);
+  if (!variant) return reply.code(404).send({ error: "not found" });
+  const match = variant.videoDataUrl.match(/^data:([^;]+);base64,(.+)$/s);
+  if (!match) return reply.code(500).send({ error: "stored variant is not a valid data URL, needs a look" });
+  const [, mime, base64] = match;
+  reply.header("Cache-Control", "public, max-age=31536000, immutable");
+  reply.type(mime || "video/mp4");
+  return reply.send(Buffer.from(base64, "base64"));
 });
 
 app.get("/api/wallets/:id/nfts", async (req, reply) => {

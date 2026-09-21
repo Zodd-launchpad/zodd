@@ -9,6 +9,7 @@ import type { TranslationKey } from "@/lib/translations";
 import { useZecUsdPrice } from "@/lib/zecPrice";
 import { useWallet } from "@/lib/wallet";
 import { getNoirWallet, isNoirWalletInstalled } from "@noir-wallet/sdk";
+import { NftMedia } from "@/lib/nftMedia";
 
 // Brai, 2026-09-18: item detail + the secondary-market half of "que la
 // gente pueda LISTAR o no listar, comprar y vender" -- owner sees
@@ -212,7 +213,7 @@ export default function NftItemPage() {
       </Link>
       <div className="nft-item-layout">
         <div className="nft-item-img-wrap">
-          {item.imageDataUrl ? <img src={item.imageDataUrl} alt={item.name ?? ""} className="nft-item-img" /> : <div className="nft-card-img-placeholder">?</div>}
+          {item.imageDataUrl ? <NftMedia src={item.imageDataUrl} alt={item.name ?? ""} className="nft-item-img" /> : <div className="nft-card-img-placeholder">?</div>}
         </div>
         <div className="card nft-item-panel">
           <h1 style={{ marginTop: 0 }}>

@@ -1716,19 +1716,75 @@ export interface NftItemView {
 // per-tier fallback, resolved once per query and applied to every row that
 // has no imageDataUrl of its own. Forged pieces (forgeCraft) don't set one
 // either, so they fall back the same way.
-export type NftTierImages = { PAPIRO: string | null; FRAGMENTO: string | null; RELIQUIA: string | null };
+//
+// Brai, 2026-09-21: "los nfts seran esos videos que son loops" -- v2, each
+// tier can now have several named video VARIANTS instead of one flat
+// image (see NftCollection.papiroVariants et al). `default` is the old
+// single-image fallback (kept for a tier with no variants configured);
+// `variants` is looked up by NftItem.mediaVariantKey in toNftItemView.
+export interface NftTierVariant {
+  key: string;
+  name: string;
+  videoDataUrl: string;
+}
+export type NftTierMedia = {
+  PAPIRO: { default: string | null; variants: NftTierVariant[] };
+  FRAGMENTO: { default: string | null; variants: NftTierVariant[] };
+  RELIQUIA: { default: string | null; variants: NftTierVariant[] };
+};
+/** @deprecated shape, kept as an alias so any external reference to the old
+ * name still resolves -- prefer NftTierMedia in new code. */
+export type NftTierImages = NftTierMedia;
 
-export async function getCollectionTierImages(collectionId: string): Promise<NftTierImages> {
+function parseVariants(v: unknown): NftTierVariant[] {
+  if (!Array.isArray(v)) return [];
+  return v.filter(
+    (x): x is NftTierVariant => !!x && typeof x === "object" && typeof (x as any).key === "string" && typeof (x as any).videoDataUrl === "string"
+  );
+}
+
+export async function getCollectionTierImages(collectionId: string): Promise<NftTierMedia> {
   const c = await prisma.nftCollection.findUnique({
     where: { id: collectionId },
-    select: { papiroImageDataUrl: true, fragmentoImageDataUrl: true, reliquiaImageDataUrl: true },
+    select: {
+      papiroImageDataUrl: true,
+      fragmentoImageDataUrl: true,
+      reliquiaImageDataUrl: true,
+      papiroVariants: true,
+      fragmentoVariants: true,
+      reliquiaVariants: true,
+    },
   });
   return {
-    PAPIRO: c?.papiroImageDataUrl ?? null,
-    FRAGMENTO: c?.fragmentoImageDataUrl ?? null,
-    RELIQUIA: c?.reliquiaImageDataUrl ?? null,
+    PAPIRO: { default: c?.papiroImageDataUrl ?? null, variants: parseVariants(c?.papiroVariants) },
+    FRAGMENTO: { default: c?.fragmentoImageDataUrl ?? null, variants: parseVariants(c?.fragmentoVariants) },
+    RELIQUIA: { default: c?.reliquiaImageDataUrl ?? null, variants: parseVariants(c?.reliquiaVariants) },
   };
 }
+
+// Brai, 2026-09-21: the streaming media route (/api/nft/media/:key in
+// server.ts) needs to go straight from a key to a video, without knowing
+// which collection it belongs to -- so a variant's `key` is always built as
+// `${collectionId}.${tier}.${slug}-${contentHash}` (see
+// buildTieredVariants below) and this just splits it back apart, fetches
+// THAT collection's tier variants, and finds the match. Returns null for
+// any malformed/unknown key rather than throwing -- a bad/old cached URL
+// should 404, not 500.
+export async function getMediaVariantByKey(key: string): Promise<NftTierVariant | null> {
+  const [collectionId, tier] = key.split(".");
+  if (!collectionId || !tier || !["PAPIRO", "FRAGMENTO", "RELIQUIA"].includes(tier)) return null;
+  const media = await getCollectionTierImages(collectionId);
+  const variant = media[tier as keyof NftTierMedia].variants.find((v) => v.key === key);
+  return variant ?? null;
+}
+
+// Brai, 2026-09-21: PUBLIC_BACKEND_URL is how a variant's key turns into an
+// actual fetchable URL for a <video> tag -- see server.ts, same env var
+// used by the /api/nft/media/:key route it points at. Falls back to
+// NEXT_PUBLIC_API_URL's value if that's ever set here too (same underlying
+// backend), and finally to the known production domain so this never
+// silently emits a broken relative path.
+const PUBLIC_BACKEND_URL = (process.env.PUBLIC_BACKEND_URL ?? process.env.BACKEND_PUBLIC_URL ?? "https://backend-production-e195.up.railway.app").replace(/\/$/, "");
 
 function toNftItemView(
   i: {
@@ -1737,6 +1793,7 @@ function toNftItemView(
     editionNumber: number;
     name: string | null;
     imageDataUrl: string | null;
+    mediaVariantKey?: string | null;
     traits: unknown;
     mintedAt: Date | null;
     mintPaymentTxid: string | null;
@@ -1747,14 +1804,23 @@ function toNftItemView(
     listedPayoutAddress: string | null;
     tier: string;
   },
-  tierImages?: NftTierImages
+  tierImages?: NftTierMedia
 ): NftItemView {
+  const tierEntry = tierImages ? tierImages[i.tier as keyof NftTierMedia] : undefined;
+  const variant = i.mediaVariantKey ? tierEntry?.variants.find((v) => v.key === i.mediaVariantKey) : undefined;
+  // Brai, 2026-09-21: a variant resolves to a small STREAMING URL
+  // (/api/nft/media/:key), never the raw base64 video itself -- inlining a
+  // multi-MB data: URL on every item of a 48-item listing page would balloon
+  // that one response to hundreds of MB. The old single-image tier fallback
+  // (tierEntry.default) is still a real small data: URL, inlined directly,
+  // same as always -- only video variants get the URL treatment.
+  const resolvedImage = i.imageDataUrl ?? (variant ? `${PUBLIC_BACKEND_URL}/api/nft/media/${encodeURIComponent(variant.key)}` : (tierEntry?.default ?? null));
   return {
     id: i.id,
     collectionId: i.collectionId,
     editionNumber: i.editionNumber,
     name: i.name,
-    imageDataUrl: i.imageDataUrl ?? (tierImages ? tierImages[i.tier as keyof NftTierImages] ?? null : null),
+    imageDataUrl: resolvedImage,
     traits: i.traits ?? null,
     mintedAt: i.mintedAt ? i.mintedAt.toISOString() : null,
     mintPaymentTxid: i.mintPaymentTxid,
@@ -2000,11 +2066,21 @@ export async function forgeCraft(walletId: string, collectionId: string, fromTie
       // never jumps into RELIQUIA's or PAPIRO's number range.
       const agg = await tx.nftItem.aggregate({ where: { collectionId, tier: recipe.toTier }, _max: { editionNumber: true } });
       const nextEdition = (agg._max.editionNumber ?? NFT_TIER_NUMBERING_START - 1) + 1;
+      // Brai, 2026-09-21: a crafted piece should look like it belongs to the
+      // same named-relic pool as everything else, not a generic "TIER X
+      // #N" -- so it gets a uniformly-random variant of its target tier too
+      // (same as a directly-seeded piece), falling back to the old generic
+      // name only for a collection with no variants configured on that
+      // tier yet (e.g. still on the single-shared-image scheme).
+      const tierImages = await getCollectionTierImages(collectionId);
+      const targetVariants = tierImages[recipe.toTier].variants;
+      const variant = targetVariants.length ? targetVariants[Math.floor(Math.random() * targetVariants.length)] : null;
       const created = await tx.nftItem.create({
         data: {
           collectionId,
           editionNumber: nextEdition,
-          name: `${recipe.toTier === "FRAGMENTO" ? "TIER 2" : "TIER 3"} #${nextEdition}`,
+          name: variant ? `${variant.name} #${nextEdition}` : `${recipe.toTier === "FRAGMENTO" ? "TIER 2" : "TIER 3"} #${nextEdition}`,
+          mediaVariantKey: variant?.key ?? null,
           tier: recipe.toTier,
           mintedAt: new Date(),
           mintPaymentTxid: "FORGED",
@@ -2012,7 +2088,6 @@ export async function forgeCraft(walletId: string, collectionId: string, fromTie
         },
         include: { ownerInternalWallet: { select: { walletTag: true } } },
       });
-      const tierImages = await getCollectionTierImages(collectionId);
       return { ok: true, item: toNftItemView(created, tierImages) } as const;
     });
   } catch (err) {
@@ -2250,6 +2325,184 @@ export async function seedTieredNftCollection(
   }
 
   return { collectionId: collection.id, totalSupply, wipedItems };
+}
+
+// Brai, 2026-09-21: "los nfts seran esos videos que son loops... invéntale
+// el nombre en base a la historia de ZODD y las reliquias" -- v2 of
+// seedTieredNftCollection above: instead of exactly one shared image per
+// tier, each tier gets a small POOL of named video variants (papiro 1,
+// fragmento 3, reliquia 5 in the first real use of this), and every seeded
+// piece is randomly assigned one variant of its own tier at seed time --
+// its display name becomes "<variant lore name> #<editionNumber>" instead
+// of the generic "TIER X #NNNN". Sibling function, not a replacement:
+// seedTieredNftCollection (single image per tier) stays for a collection
+// that doesn't need per-piece variety.
+export interface TieredVariantInput {
+  name: string;
+  videoDataUrl: string; // data:video/mp4;base64,... -- a LOOPING clip, muted client-side regardless of whether it has an audio track (see the <video> rendering in frontend/lib/nftMedia.tsx)
+  // md5 of videoDataUrl computed on the source side -- optional, but should
+  // always be sent for anything this size (a multi-MB payload silently
+  // corrupted in transit is exactly the incident that produced
+  // updateNftCollectionTierImage below, and it's far more likely with video
+  // than it was with the small images that first triggered it).
+  expectedMd5?: string;
+}
+
+export interface TieredSeedWithVariantsInput {
+  slug: string;
+  name: string;
+  description?: string | null;
+  currency?: "ZEC" | "YEC";
+  mintPriceZec: number;
+  papiroVariants: TieredVariantInput[];
+  fragmentoVariants: TieredVariantInput[];
+  reliquiaVariants: TieredVariantInput[];
+  tier1Count: number;
+  tier2Count: number;
+  tier3Count: number;
+  wipeExisting: boolean;
+}
+
+function slugifyVariantName(name: string, fallbackIndex: number): string {
+  const slug = name
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "") // strip accents (á->a etc.) -- key is used in a URL path
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-+|-+$)/g, "");
+  return slug || `variant-${fallbackIndex}`;
+}
+
+/** Validates + hashes a tier's variant inputs into stored NftTierVariant
+ * rows. Throws (aborting the whole reseed -- see the transaction below) on
+ * an empty payload or an md5 mismatch, rather than silently writing a
+ * corrupted or blank video for anyone to mint. `key` embeds the first 8
+ * hex chars of the content hash so a later reseed that changes a variant's
+ * video always gets a fresh URL -- no stale browser/CDN cache of the old
+ * clip under the same key. */
+function buildTierVariants(collectionId: string, tier: "PAPIRO" | "FRAGMENTO" | "RELIQUIA", inputs: TieredVariantInput[]): NftTierVariant[] {
+  return inputs.map((v, idx) => {
+    if (!v.name?.trim()) throw new Error(`${tier} variant #${idx + 1} is missing a name`);
+    if (!v.videoDataUrl || !v.videoDataUrl.startsWith("data:video/")) {
+      throw new Error(`${tier} variant "${v.name}" must be a data:video/... URL`);
+    }
+    const hash = createHash("md5").update(v.videoDataUrl).digest("hex");
+    if (v.expectedMd5 && v.expectedMd5.toLowerCase() !== hash) {
+      throw new Error(
+        `${tier} variant "${v.name}" failed its md5 check (expected ${v.expectedMd5}, computed ${hash}) -- the video got corrupted on the way here, don't retry blindly, re-send it`
+      );
+    }
+    const slug = slugifyVariantName(v.name, idx + 1);
+    return { key: `${collectionId}.${tier}.${slug}-${hash.slice(0, 8)}`, name: v.name.trim(), videoDataUrl: v.videoDataUrl };
+  });
+}
+
+export async function seedTieredNftCollectionWithVariants(
+  input: TieredSeedWithVariantsInput
+): Promise<{ collectionId: string; totalSupply: number; wipedItems: number; variantCounts: { PAPIRO: number; FRAGMENTO: number; RELIQUIA: number } }> {
+  if (!input.slug || !input.name) throw new Error("slug and name are required");
+  if (!(input.mintPriceZec > 0)) throw new Error("mintPriceZec must be a positive number");
+  for (const [k, v] of Object.entries({ tier1Count: input.tier1Count, tier2Count: input.tier2Count, tier3Count: input.tier3Count })) {
+    if (!Number.isInteger(v) || v < 0) throw new Error(`${k} must be a non-negative integer`);
+  }
+  if (input.tier3Count > RELIQUIA_MAX_SUPPLY) {
+    throw new Error(`tier3Count (${input.tier3Count}) can't exceed RELIQUIA_MAX_SUPPLY (${RELIQUIA_MAX_SUPPLY})`);
+  }
+  if (input.tier1Count > 0 && !input.papiroVariants?.length) throw new Error("papiroVariants can't be empty when tier1Count > 0");
+  if (input.tier2Count > 0 && !input.fragmentoVariants?.length) throw new Error("fragmentoVariants can't be empty when tier2Count > 0");
+  if (input.tier3Count > 0 && !input.reliquiaVariants?.length) throw new Error("reliquiaVariants can't be empty when tier3Count > 0");
+
+  const totalSupply = input.tier1Count + input.tier2Count + input.tier3Count;
+  if (totalSupply <= 0) throw new Error("tier1Count + tier2Count + tier3Count must be greater than zero");
+
+  // Upsert first (without variants -- those embed the collection's OWN id
+  // in their key, so they can only be built once we know it) so both a
+  // brand-new slug and an existing one land on the same collection.id
+  // either way.
+  const collection = await prisma.nftCollection.upsert({
+    where: { slug: input.slug },
+    create: {
+      slug: input.slug,
+      name: input.name,
+      description: input.description ?? null,
+      currency: input.currency ?? "ZEC",
+      totalSupply,
+      mintPriceZec: input.mintPriceZec,
+      hidden: true,
+      mintedCount: 0,
+    },
+    update: {
+      name: input.name,
+      description: input.description ?? null,
+      currency: input.currency ?? undefined,
+      totalSupply,
+      mintPriceZec: input.mintPriceZec,
+      mintedCount: 0,
+    },
+  });
+
+  const papiroVariants = buildTierVariants(collection.id, "PAPIRO", input.papiroVariants ?? []);
+  const fragmentoVariants = buildTierVariants(collection.id, "FRAGMENTO", input.fragmentoVariants ?? []);
+  const reliquiaVariants = buildTierVariants(collection.id, "RELIQUIA", input.reliquiaVariants ?? []);
+
+  await prisma.nftCollection.update({
+    where: { id: collection.id },
+    data: {
+      papiroVariants: papiroVariants as unknown as object,
+      fragmentoVariants: fragmentoVariants as unknown as object,
+      reliquiaVariants: reliquiaVariants as unknown as object,
+    },
+  });
+
+  let wipedItems = 0;
+  if (input.wipeExisting) {
+    const existing = await prisma.nftItem.findMany({ where: { collectionId: collection.id }, select: { id: true } });
+    const ids = existing.map((r) => r.id);
+    if (ids.length) {
+      await prisma.nftPurchaseOrder.deleteMany({ where: { itemId: { in: ids } } });
+    }
+    await prisma.pendingNftMint.deleteMany({ where: { collectionId: collection.id } });
+    const del = await prisma.nftItem.deleteMany({ where: { collectionId: collection.id } });
+    wipedItems = del.count;
+  }
+
+  // Brai, 2026-09-19 (carried over): each tier keeps its own edition
+  // counter starting at NFT_TIER_NUMBERING_START. Every piece gets a
+  // uniformly-random variant of its own tier -- not round-robin -- so the
+  // mix feels organic across a 3000+ piece pool instead of a visible
+  // repeating pattern every N items.
+  const pick = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
+  const rows: { collectionId: string; editionNumber: number; tier: "PAPIRO" | "FRAGMENTO" | "RELIQUIA"; name: string; mediaVariantKey: string }[] = [];
+  let papiroEdition = NFT_TIER_NUMBERING_START;
+  let fragmentoEdition = NFT_TIER_NUMBERING_START;
+  let reliquiaEdition = NFT_TIER_NUMBERING_START;
+  for (let i = 0; i < input.tier1Count; i++) {
+    const v = pick(papiroVariants);
+    rows.push({ collectionId: collection.id, editionNumber: papiroEdition, tier: "PAPIRO", name: `${v.name} #${papiroEdition}`, mediaVariantKey: v.key });
+    papiroEdition++;
+  }
+  for (let i = 0; i < input.tier2Count; i++) {
+    const v = pick(fragmentoVariants);
+    rows.push({ collectionId: collection.id, editionNumber: fragmentoEdition, tier: "FRAGMENTO", name: `${v.name} #${fragmentoEdition}`, mediaVariantKey: v.key });
+    fragmentoEdition++;
+  }
+  for (let i = 0; i < input.tier3Count; i++) {
+    const v = pick(reliquiaVariants);
+    rows.push({ collectionId: collection.id, editionNumber: reliquiaEdition, tier: "RELIQUIA", name: `${v.name} #${reliquiaEdition}`, mediaVariantKey: v.key });
+    reliquiaEdition++;
+  }
+
+  const CHUNK = 1000;
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    await prisma.nftItem.createMany({ data: rows.slice(i, i + CHUNK) });
+  }
+
+  return {
+    collectionId: collection.id,
+    totalSupply,
+    wipedItems,
+    variantCounts: { PAPIRO: papiroVariants.length, FRAGMENTO: fragmentoVariants.length, RELIQUIA: reliquiaVariants.length },
+  };
 }
 
 // Brai, 2026-09-19: "la foto se ve toda dañada en colores raros" -- the

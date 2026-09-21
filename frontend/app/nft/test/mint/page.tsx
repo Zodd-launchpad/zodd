@@ -9,6 +9,7 @@ import type { TranslationKey } from "@/lib/translations";
 import { useZecUsdPrice } from "@/lib/zecPrice";
 import { useWallet } from "@/lib/wallet";
 import { getNoirWallet, isNoirWalletInstalled } from "@noir-wallet/sdk";
+import { NftMedia } from "@/lib/nftMedia";
 
 // Brai, 2026-09-18: "generar una pagina para el mint, donde clickeas, te da
 // una pagina para pagar, pagas y te asigne un NFT aleatorio entre los que
@@ -698,14 +699,14 @@ export default function NftMintPage() {
           <div className="nft-reveal-badge">{t("nftMint.revealed.badge")}</div>
           {resultItems.length === 1 ? (
             <>
-              {resultItems[0].imageDataUrl && <img src={resultItems[0].imageDataUrl} alt={resultItems[0].name ?? ""} className="nft-reveal-img" />}
+              {resultItems[0].imageDataUrl && <NftMedia src={resultItems[0].imageDataUrl} alt={resultItems[0].name ?? ""} className="nft-reveal-img" />}
               <h2 style={{ margin: "12px 0 4px" }}>{resultItems[0].name ?? nftItemLabel(resultItems[0].tier, resultItems[0].editionNumber)}</h2>
             </>
           ) : (
             <div className="nft-mintpage-reveal-grid">
               {resultItems.map((item) => (
                 <div key={item.id} className="nft-mintpage-reveal-item">
-                  {item.imageDataUrl && <img src={item.imageDataUrl} alt={item.name ?? ""} />}
+                  {item.imageDataUrl && <NftMedia src={item.imageDataUrl} alt={item.name ?? ""} />}
                   <span>{item.name ?? nftItemLabel(item.tier, item.editionNumber)}</span>
                 </div>
               ))}

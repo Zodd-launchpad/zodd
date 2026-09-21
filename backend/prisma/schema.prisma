@@ -376,6 +376,23 @@ model NftCollection {
   papiroImageDataUrl    String? @db.Text
   fragmentoImageDataUrl String? @db.Text
   reliquiaImageDataUrl  String? @db.Text
+  // Brai, 2026-09-21: "los nfts seran esos videos que son loops... ninguno
+  // tiene que reproducirse con audio" -- v2 of the tier-media idea above:
+  // instead of exactly ONE shared image per tier, a tier can now have
+  // SEVERAL named video variants (papirus tier1 got 1, fragmento tier2 got
+  // 3, reliquia tier3 got 5 -- rarer tier, more distinct lore pieces).
+  // Each array element is { key, name, videoDataUrl }, JSON on purpose (no
+  // new table) since there are only ever a handful of these per tier, never
+  // one per NftItem -- same "don't store the same blob thousands of times"
+  // reasoning as the single-image fields above. Videos are NOT inlined into
+  // every item API response the way the single-image fields are (that would
+  // balloon a 48-item listing response to hundreds of MB) -- resolved
+  // instead to a small streaming URL, see getMediaVariantByKey/the
+  // /api/nft/media/:key route in server.ts. papiro/fragmento/reliquiaImageDataUrl
+  // above stay as the fallback for a tier with no variants configured yet.
+  papiroVariants    Json?
+  fragmentoVariants Json?
+  reliquiaVariants  Json?
   // Igual que Token.hidden: reservado para cuando exista un índice público
   // de colecciones (hoy hay una sola, alcanzada directo por slug, así que
   // esto todavía no filtra nada en las rutas -- ver server.ts).
@@ -435,6 +452,13 @@ model NftItem {
   editionNumber  Int
   name           String? // ej. "ZODD #61" -- opcional, si falta se muestra "#<editionNumber>"
   imageDataUrl   String?   @db.Text
+  // Brai, 2026-09-21: which of the collection's tier-level video variants
+  // (see NftCollection.papiroVariants/fragmentoVariants/reliquiaVariants)
+  // THIS piece got assigned, set once at seed/craft time and never
+  // recomputed -- see seedTieredNftCollectionWithVariants and forgeCraft in
+  // store.ts. Null for a piece from a tier with no variants configured
+  // (falls back to the tier's single default image, same as before).
+  mediaVariantKey String?
   traits         Json? // mapa opcional {trait: valor}, se muestra en la página del item si existe
   mintedAt       DateTime?
   mintPaymentTxid String? // txid real que pagó el mint, o "FORGED" si esta pieza nació de un crafteo en la forja (ver forgeCraft)

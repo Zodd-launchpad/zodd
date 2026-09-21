@@ -5,6 +5,7 @@ import { useWallet } from "@/lib/wallet";
 import { api, formatUsd, nftItemPath, nftItemLabel, type NftItem } from "@/lib/api";
 import { useLanguage } from "@/lib/i18n";
 import { useZecUsdPrice } from "@/lib/zecPrice";
+import { NftMedia } from "@/lib/nftMedia";
 
 export default function PortfolioPage() {
   const { wallet, loading } = useWallet();
@@ -69,7 +70,7 @@ export default function PortfolioPage() {
               <Link key={it.id} href={nftItemPath(it.editionNumber, it.tier)} className="nft-card">
                 <div className="nft-card-img-wrap">
                   {it.imageDataUrl ? (
-                    <img src={it.imageDataUrl} alt={it.name ?? nftItemLabel(it.tier, it.editionNumber)} className="nft-card-img" />
+                    <NftMedia src={it.imageDataUrl} alt={it.name ?? nftItemLabel(it.tier, it.editionNumber)} className="nft-card-img" />
                   ) : (
                     <div className="nft-card-img-placeholder">?</div>
                   )}
