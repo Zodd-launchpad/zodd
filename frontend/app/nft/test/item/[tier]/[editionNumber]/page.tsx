@@ -322,7 +322,7 @@ export default function NftItemPage() {
                       {noirTxid ? (
                         <p style={{ color: "var(--green)", fontSize: 12, textAlign: "center" }}>{t("payment.noir.sent")}</p>
                       ) : (
-                        <button className="btn btn-outline" style={{ width: "100%" }} disabled={noirSending} onClick={payWithNoir}>
+                        <button className="btn btn-gold" style={{ width: "100%" }} disabled={noirSending} onClick={payWithNoir}>
                           {noirSending ? t("payment.noir.sending") : t("payment.noir.payButton")}
                         </button>
                       )}

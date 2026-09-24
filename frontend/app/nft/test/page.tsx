@@ -484,7 +484,6 @@ export default function NftMarketTestPage() {
                   <th>{t("nftMarket.activity.col.event")}</th>
                   <th>{t("nftMarket.activity.col.item")}</th>
                   <th>{t("nftMarket.activity.col.price")}</th>
-                  <th>{t("nftMarket.activity.col.when")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -501,7 +500,6 @@ export default function NftMarketTestPage() {
                     <td>
                       {formatZec(a.priceZec)} {a.currency}
                     </td>
-                    <td className="muted">{new Date(a.createdAt).toLocaleString()}</td>
                   </tr>
                 ))}
               </tbody>
