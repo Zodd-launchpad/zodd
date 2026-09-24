@@ -293,6 +293,19 @@ export const api = {
       headers: { "x-admin-token": adminToken },
       body: JSON.stringify({ status, note }),
     }),
+  // Brai, 2026-09-24: "puedes llevar la contabilidad de la venta de nfts?"
+  // -- see getNftSalesAccounting's comment on the backend for what each
+  // number means.
+  adminNftSalesSummary: (
+    adminToken: string
+  ): Promise<{
+    ok: true;
+    mintGrossZec: number;
+    mintCount: number;
+    secondaryGrossZec: number;
+    secondarySalesCount: number;
+    platformFeeZec: number;
+  }> => req(`/api/admin/nft-sales-summary`, { headers: { "x-admin-token": adminToken } }),
 
   // ---------- NFT marketplace ----------
   // Brai, 2026-09-18: "empeza a deployar la pagina" -- mint (pay -> random
@@ -375,6 +388,11 @@ export interface NftWhitelistEntry {
   reviewNote: string | null;
   claimedAt: string | null;
   claimedCount: number;
+  // Brai, 2026-09-24: COLAB (5 free mints) or APROBBED (1 free mint) -- see
+  // NftWhitelistTier on the backend. freeMintLimit is this entry's actual
+  // allowance, precomputed server-side.
+  tier: "COLAB" | "APROBBED";
+  freeMintLimit: number;
 }
 
 // Brai, 2026-09-18 (v9, URGENT PRIVACY FIX): the by-handle lookup is
@@ -420,6 +438,13 @@ export interface NftCollection {
   // lifetime/never-decreasing counter (used for the per-wallet cap) and is
   // NOT what the SUPPLY display should show.
   aliveSupply: number;
+  // Brai, 2026-09-24: "quiero que diga 14/5551 porque se han minteado pero
+  // tambien quemado" -- mintedCount (the lifetime counter, unaffected by
+  // forging) over THIS instead of totalSupply -- totalSupply is the real,
+  // unchanging pool cap (still used for remaining/soldOut); supplyTotal is
+  // adjusted downward for every piece forging has ever consumed. See
+  // serializeNftCollection's comment on the backend.
+  supplyTotal: number;
 }
 
 export interface NftTraitCount {
@@ -445,6 +470,11 @@ export interface NftItem {
   listedPriceZec: number | null;
   listedAt: string | null;
   listedPayoutAddress: string | null;
+  // Brai, 2026-09-24: non-null AND in the future = someone else already
+  // has an open purchase order on this piece -- see NftItem.reservedUntil's
+  // comment on the backend. Used to gray out / disable Buy for everyone but
+  // whoever holds the reservation.
+  reservedUntil: string | null;
   // Brai, 2026-09-19: "habra 3 tipos de nfts.. los papiros, los fragmentos
   // y las reliquias" -- see the Forge tab.
   tier: "PAPIRO" | "FRAGMENTO" | "RELIQUIA";

@@ -42,6 +42,20 @@ function NftWhitelistClosedView() {
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Brai, 2026-09-24: "cuando dice aprobbed que haya un boton para hacer
+  // el SHARE con el handle ... e ingresa un cartel que diga, una ultima
+  // tarea te pedimos, comparte!" -- reuses the exact same per-handle share
+  // page + fresh-token cache-busting the wizard's own shareStatus() uses
+  // (see that function's comment further down in this file) so the tweet
+  // card still picks up the mascot image instead of a stale/blank one.
+  function shareStatus(handle: string) {
+    const caption = t("nftWhitelist.share.approved");
+    const freshToken = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const shareUrl = `https://zodd.fun/nft/whitelist/share/${encodeURIComponent(handle)}?t=${freshToken}`;
+    const intentUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(caption)}&url=${encodeURIComponent(shareUrl)}`;
+    window.open(intentUrl, "_blank", "noopener,noreferrer");
+  }
+
   async function checkStatus() {
     const handle = handleInput.trim().replace(/^@/, "");
     if (!handle) {
@@ -103,10 +117,20 @@ function NftWhitelistClosedView() {
               {result === null ? (
                 <p className="muted" style={{ margin: 0 }}>{t("nftWhitelist.closed.notFound")}</p>
               ) : (
-                <div className={`zw-status-big zw-status-${result.status.toLowerCase()}`}>
-                  <span className="zw-status-handle">@{result.twitterHandle}</span>
-                  <span className="zw-status-word">{t(`nftWhitelist.status.${result.status}`)}</span>
-                </div>
+                <>
+                  <div className={`zw-status-big zw-status-${result.status.toLowerCase()}`}>
+                    <span className="zw-status-handle">@{result.twitterHandle}</span>
+                    <span className="zw-status-word">{t(`nftWhitelist.status.${result.status}`)}</span>
+                  </div>
+                  {result.status === "APPROVED" && (
+                    <div style={{ marginTop: 14, textAlign: "center" }}>
+                      <p style={{ fontWeight: 700, marginBottom: 8 }}>{t("nftWhitelist.closed.shareBanner")}</p>
+                      <button className="btn btn-outline" onClick={() => shareStatus(result.twitterHandle)}>
+                        {t("nftWhitelist.closed.shareButton")}
+                      </button>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           )}

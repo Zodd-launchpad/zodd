@@ -240,7 +240,7 @@ export default function NftMintPage() {
   }, [quantityCap]);
 
   const freeRemaining =
-    whitelistEntry && collection ? Math.max(0, collection.whitelistFreeMintLimit - whitelistEntry.claimedCount) : null;
+    whitelistEntry && collection ? Math.max(0, whitelistEntry.freeMintLimit - whitelistEntry.claimedCount) : null;
   // Brai, 2026-09-19: how many the FREE MINT button actually grabs -- capped
   // by whatever's left of the wallet's 5 free claims, the overall
   // per-wallet cap, and remaining supply. No stepper for this one on
@@ -395,7 +395,7 @@ export default function NftMintPage() {
             <div className="nft-mintpage-header">
               <div>
                 <h1 className="nft-mintpage-title">{collection.name}</h1>
-                <p className="muted nft-mintpage-supply">{t("nftMint.supply", { supply: collection.aliveSupply, total: collection.totalSupply })}</p>
+                <p className="muted nft-mintpage-supply">{t("nftMint.supply", { supply: collection.mintedCount, total: collection.supplyTotal })}</p>
               </div>
               <span className={badgeClass}>{t(badgeKey)}</span>
             </div>
@@ -585,7 +585,7 @@ export default function NftMintPage() {
 
                   {error && <p style={{ color: "var(--red)", fontSize: 13 }}>{error}</p>}
                   <button
-                    className="btn btn-outline"
+                    className="btn btn-gold"
                     style={{ width: "100%", marginTop: 10 }}
                     onClick={() => startMint(quantity, "buy")}
                     disabled={submitting !== null}

@@ -30,6 +30,14 @@ function isShieldedAddress(addr: string): boolean {
   return /^(u1|zs1|ys1)/.test(addr.trim());
 }
 
+// Brai, 2026-09-24: "si cada nft hace una transaccion, necesito que esa
+// transaccion pongas el link ... para que la gente vea que es una
+// inscripcion que vive en la blockchain" -- same explorer URL patterns
+// already used elsewhere in this repo for real on-chain txids.
+function explorerTxUrl(currency: "ZEC" | "YEC", txid: string): string {
+  return currency === "YEC" ? `https://explorer.ycash.xyz/tx/${txid}` : `https://mainnet.zcashexplorer.app/transactions/${txid}`;
+}
+
 type BuyPhase = "idle" | "waiting" | "filled" | "failed";
 
 const VALID_TIER_SLUGS = new Set(["papiro", "fragmento", "reliquia"]);
@@ -247,7 +255,23 @@ export default function NftItemPage() {
                 </span>
               </div>
 
+              {item.mintPaymentTxid && item.mintPaymentTxid !== "FORGED" && (
+                <a
+                  href={explorerTxUrl(currency, item.mintPaymentTxid)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mono-break"
+                  style={{ display: "block", fontSize: 11, color: "var(--accent)", marginTop: 6 }}
+                >
+                  {t("nftItem.viewOnChain")}
+                </a>
+              )}
+
               {error && <p style={{ color: "var(--red)", fontSize: 13 }}>{error}</p>}
+
+              {!isOwner && item.listedPriceZec != null && item.reservedUntil && new Date(item.reservedUntil) > new Date() && buyPhase === "idle" && (
+                <p style={{ color: "var(--yellow)", fontSize: 13 }}>{t("nftItem.reservedByOther")}</p>
+              )}
 
               {isOwner && item.listedPriceZec == null && buyPhase === "idle" && (
                 <div className="nft-item-list-form">
@@ -271,17 +295,20 @@ export default function NftItemPage() {
                 </button>
               )}
 
-              {!isOwner && item.listedPriceZec != null && buyPhase === "idle" && (
-                <>
-                  {!wallet ? (
-                    <p className="muted">{t("portfolio.connectFirst")}</p>
-                  ) : (
-                    <button className="btn btn-gold" style={{ width: "100%" }} onClick={startBuy} disabled={isSubmitting}>
-                      {isSubmitting ? t("common.wait") : t("nftItem.buyButton")}
-                    </button>
-                  )}
-                </>
-              )}
+              {!isOwner &&
+                item.listedPriceZec != null &&
+                buyPhase === "idle" &&
+                !(item.reservedUntil && new Date(item.reservedUntil) > new Date()) && (
+                  <>
+                    {!wallet ? (
+                      <p className="muted">{t("portfolio.connectFirst")}</p>
+                    ) : (
+                      <button className="btn btn-gold" style={{ width: "100%" }} onClick={startBuy} disabled={isSubmitting}>
+                        {isSubmitting ? t("common.wait") : t("nftItem.buyButton")}
+                      </button>
+                    )}
+                  </>
+                )}
 
               {!isOwner && item.listedPriceZec == null && <p className="muted">{t("nftMarket.notListed")}</p>}
 

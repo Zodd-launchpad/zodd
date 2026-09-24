@@ -43,6 +43,46 @@ async function call(path: string, opts: RequestInit = {}) {
   return body;
 }
 
+// ZODD (2026-09-20, Brai: "es el minteo de nft... todos juntos van" -- a
+// real drop, not gradual traffic): parallel "address-only" workers used to
+// multiply how fast fresh receiving addresses can be minted during a burst.
+// Each worker is a full extra deploy of zcash-wallet-service, restored from
+// the SAME seed but running ADDRESS_ONLY_MODE=true (see server.js there) --
+// it can generate addresses (pure math off the seed, no balance involved)
+// but is hard-blocked from ever sending funds, so this carries no fund-
+// safety risk no matter how many are added. Comma-separated internal
+// Railway URLs; empty/unset means no extra workers are provisioned yet,
+// which behaves exactly like before this existed (WALLET_SERVICE_URL alone).
+const ADDRESS_WORKER_URLS = (process.env.ZCASH_ADDRESS_WORKER_URLS ?? "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+let nextAddressWorker = 0;
+
+/** Only ever used for POST /wallet/address -- never balance/notes/send,
+ * which must stay on the one wallet service that actually tracks funds.
+ * Round-robins across WALLET_SERVICE_URL plus every configured address-only
+ * worker, so address-generation throughput scales with how many workers are
+ * deployed instead of being capped by the single shared zingo-cli queue. */
+async function callAddressWorker(path: string, opts: RequestInit = {}) {
+  const pool = [WALLET_SERVICE_URL, ...ADDRESS_WORKER_URLS];
+  const url = pool[nextAddressWorker % pool.length];
+  nextAddressWorker++;
+  if (!INTERNAL_TOKEN) throw new Error("ZCASH_WALLET_SERVICE_TOKEN is not set");
+  const res = await fetch(`${url}${path}`, {
+    ...opts,
+    headers: {
+      "x-internal-token": INTERNAL_TOKEN,
+      ...(opts.body ? { "Content-Type": "application/json" } : {}),
+      ...(opts.headers ?? {}),
+    },
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error ?? `zcash address worker error ${res.status}`);
+  return body;
+}
+
 export interface PendingPayment {
   orderId: string;
   address: string;
@@ -517,8 +557,8 @@ export async function generateOrderAddress(
     if (pooled) {
       ({ address, saplingDiversifierHex, orchardDiversifierHex } = pooled);
     } else {
-      console.warn(`[zcashReal] address pool was empty for order ${orderId} -- generating one on demand (~15-20s)`);
-      ({ address, saplingDiversifierHex = null, orchardDiversifierHex = null } = await call("/wallet/address", { method: "POST" }));
+      console.warn(`[zcashReal] address pool was empty for order ${orderId} -- generating one on demand (~15-20s, spread across ${1 + ADDRESS_WORKER_URLS.length} worker(s))`);
+      ({ address, saplingDiversifierHex = null, orchardDiversifierHex = null } = await callAddressWorker("/wallet/address", { method: "POST" }));
     }
   } catch (err) {
     watchers.delete(orderId); // don't leave a dangling reservation with no address
@@ -566,11 +606,20 @@ async function maybeTopUpAddressPool() {
     // steadily across several ticks instead of hammering the wallet
     // service with a long unbroken run that would starve real buy/sell
     // calls behind it for minutes.
+    // One batch of up to 5 fired at once across all workers (each worker
+    // still processes its own share serially, so this doesn't overload any
+    // single one) instead of one at a time, so top-up speed actually scales
+    // with worker count instead of being paced by round-trips.
     while (count < ADDRESS_POOL_TARGET && generated < 5) {
-      const { address, saplingDiversifierHex = null, orchardDiversifierHex = null } = await call("/wallet/address", { method: "POST" });
-      await addPregeneratedZcashAddress(address, saplingDiversifierHex, orchardDiversifierHex);
-      generated++;
-      count++;
+      const batchSize = Math.min(1 + ADDRESS_WORKER_URLS.length, ADDRESS_POOL_TARGET - count, 5 - generated);
+      const results = await Promise.all(
+        Array.from({ length: Math.max(1, batchSize) }, () => callAddressWorker("/wallet/address", { method: "POST" }))
+      );
+      for (const { address, saplingDiversifierHex = null, orchardDiversifierHex = null } of results) {
+        await addPregeneratedZcashAddress(address, saplingDiversifierHex, orchardDiversifierHex);
+        generated++;
+        count++;
+      }
     }
     if (generated > 0) {
       console.log(`[zcashReal] address pool: generated ${generated} address(es), ~${count}/${ADDRESS_POOL_TARGET} now in stock`);

@@ -56,6 +56,18 @@ export default function HeaderBar() {
       <div className="nav">
         {NAV.map((item) => {
           const active = pathname?.startsWith(item.href);
+          // Brai, 2026-09-24: "La solapa de Bridge borra la actual pagina y
+          // linkea que te envie directamente a esta url:
+          // https://app.zknoir.com/swap" -- Bridge is the only NAV item
+          // that now leaves the site entirely, so it's a plain external
+          // <a> instead of Next's client-side <Link>.
+          if (item.href === "/bridge") {
+            return (
+              <a key={item.href} href="https://app.zknoir.com/swap" target="_blank" rel="noreferrer" className="nav-item">
+                {t(item.key)}
+              </a>
+            );
+          }
           return (
             <Link key={item.href} href={item.href} className={active ? "nav-item active" : "nav-item"}>
               {t(item.key)}
@@ -126,6 +138,21 @@ export default function HeaderBar() {
           {t("launchpad.nav.portfolio")}
         </Link>
       )}
+
+      {/* Brai, 2026-09-24: "Crea un boton grande arriba a la derecha al
+          lado de la conexion a la wallet que diga SUPPORT y te envie
+          directamente al telegram" -- right before the wallet chip so it
+          always lands next to it regardless of connected/disconnected
+          state. */}
+      <a
+        href="https://t.me/zodd_zcash"
+        target="_blank"
+        rel="noreferrer"
+        className="btn btn-gold"
+        style={{ fontSize: 13, padding: "8px 16px", marginRight: 8, fontWeight: 700 }}
+      >
+        {t("nav.support")}
+      </a>
 
       {!loading && wallet && (
         <div className="wallet-chip mono" onClick={() => setShowDetail(true)}>

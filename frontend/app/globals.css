@@ -918,6 +918,49 @@ tr:hover td { background: #151517; cursor: pointer; }
 .nft-card-tier-fragmento { color: var(--yellow); border-color: var(--yellow); text-shadow: 0 0 6px var(--yellow-glow); }
 .nft-card-tier-reliquia { color: var(--red); border-color: var(--red); text-shadow: 0 0 6px var(--red-glow); }
 
+/* Brai, 2026-09-24: multi-select buy + reservation-lock UI (see
+   nft/test/page.tsx's MultiBuyModal and NftItem.reservedUntil). Checkbox,
+   reserved badge and the unminted badge all share the same top-left slot
+   on a card -- they're mutually exclusive per item, so that's safe. */
+.nft-card-select-wrap { position: absolute; top: 8px; left: 8px; z-index: 2; }
+.nft-card-select-checkbox { width: 20px; height: 20px; accent-color: var(--accent); cursor: pointer; }
+.nft-card-reserved-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  background: rgba(0, 0, 0, 0.75);
+  border: 1px solid var(--yellow);
+  color: var(--yellow);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 3px 6px;
+  border-radius: 4px;
+}
+.nft-card-selected { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+.nft-multibuy-bar {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 18px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+  z-index: 40;
+}
+
+.nft-multibuy-modal { width: 560px; max-width: 94vw; max-height: 84vh; overflow-y: auto; }
+.nft-multibuy-row { display: flex; gap: 12px; align-items: flex-start; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.nft-multibuy-row:last-child { border-bottom: none; }
+.nft-multibuy-thumb { width: 52px; height: 52px; border-radius: 6px; object-fit: cover; background: #000; flex-shrink: 0; }
+.nft-multibuy-qr { width: 96px; height: 96px; background: #fff; padding: 4px; border-radius: 4px; }
+
 .nft-sales-table { width: 100%; border-collapse: collapse; }
 .nft-sales-table a { color: var(--accent); text-decoration: none; }
 .nft-sales-table a:hover { text-decoration: underline; }

@@ -1,0 +1,41 @@
+warning: in the working copy of 'frontend/app/nft/test/item/[editionNumber]/page.tsx', LF will be replaced by CRLF the next time Git touches it
+[1mdiff --git a/frontend/app/nft/test/item/[editionNumber]/page.tsx b/frontend/app/nft/test/item/[editionNumber]/page.tsx[m
+[1mindex f50492a..6449839 100644[m
+[1m--- a/frontend/app/nft/test/item/[editionNumber]/page.tsx[m
+[1m+++ b/frontend/app/nft/test/item/[editionNumber]/page.tsx[m
+[36m@@ -49,6 +49,7 @@[m [mexport default function NftItemPage() {[m
+   const [listing, setListing] = useState(false);[m
+ [m
+   // Buy flow (non-owner, listed piece)[m
+[32m+[m[32m  const [isSubmitting, setIsSubmitting] = useState(false);[m
+   const [buyPhase, setBuyPhase] = useState<BuyPhase>("idle");[m
+   const [purchaseId, setPurchaseId] = useState<string | null>(null);[m
+   const [address, setAddress] = useState<string | null>(null);[m
+[36m@@ -131,6 +132,7 @@[m [mexport default function NftItemPage() {[m
+   async function startBuy() {[m
+     if (!wallet || !item) return;[m
+     setError(null);[m
+[32m+[m[32m    setIsSubmitting(true);[m
+     try {[m
+       const result = await api.buyNftItem(item.id, wallet.walletId);[m
+       setPurchaseId(result.purchaseId);[m
+[36m@@ -142,6 +144,8 @@[m [mexport default function NftItemPage() {[m
+       setBuyPhase("waiting");[m
+     } catch (e: any) {[m
+       setError(e.message);[m
+[32m+[m[32m    } finally {[m
+[32m+[m[32m      setIsSubmitting(false);[m
+     }[m
+   }[m
+ [m
+[36m@@ -260,8 +264,8 @@[m [mexport default function NftItemPage() {[m
+                   {!wallet ? ([m
+                     <p className="muted">{t("portfolio.connectFirst")}</p>[m
+                   ) : ([m
+[31m-                    <button className="btn btn-gold" style={{ width: "100%" }} onClick={startBuy}>[m
+[31m-                      {t("nftItem.buyButton")}[m
+[32m+[m[32m                    <button className="btn btn-gold" style={{ width: "100%" }} onClick={startBuy} disabled={isSubmitting}>[m
+[32m+[m[32m                      {isSubmitting ? t("common.wait") : t("nftItem.buyButton")}[m
+                     </button>[m
+                   )}[m
+                 </>[m

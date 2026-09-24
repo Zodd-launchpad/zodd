@@ -4,7 +4,7 @@ import * as store from "./lib/store.js";
 import { generateTwelveWords } from "./lib/wordlist.js";
 import { quoteBuy, quoteSell, currentPrice, marketCapZec } from "./lib/bondingCurve.js";
 import { simulatedInscriptionFor } from "./lib/simulatedChain.js";
-import { splitFee, TRADE_FEE_BPS, CREATOR_FEE_BPS, TOKEN_CREATE_FEE_ZEC, TOKEN_CREATE_FEE_YEC, createFeeFor, computeSellerPayout, NETWORK_FEE_ZEC, MAX_FIRST_BUY_ZEC, splitNftFee, isOwnerNftWallet, nftMintPriceZecFor, NFT_MAX_MINTS_PER_WALLET, NFT_HIGH_MAX_MINTS_PER_WALLET, maxMintsPerWalletFor, NFT_WHITELIST_FREE_MINT_LIMIT, NFT_FREE_MINT_FEE_ZEC } from "./lib/fees.js";
+import { splitFee, TRADE_FEE_BPS, CREATOR_FEE_BPS, TOKEN_CREATE_FEE_ZEC, TOKEN_CREATE_FEE_YEC, createFeeFor, computeSellerPayout, NETWORK_FEE_ZEC, MAX_FIRST_BUY_ZEC, splitNftFee, isOwnerNftWallet, nftMintPriceZecFor, NFT_MAX_MINTS_PER_WALLET, NFT_HIGH_MAX_MINTS_PER_WALLET, maxMintsPerWalletFor, NFT_WHITELIST_FREE_MINT_LIMIT, NFT_FREE_MINT_FEE_ZEC, NFT_MIN_LISTING_PRICE_ZEC } from "./lib/fees.js";
 import { startFeeDistributor, runFeeDistributionOnce } from "./lib/feeDistributor.js";
 import { startZecPricePolling, getZecUsdPrice } from "./lib/zecPrice.js";
 import { withTokenLock } from "./lib/mutex.js";
@@ -1300,12 +1300,22 @@ const listNftItemsQuerySchema = z.object({
 
 async function serializeNftCollection(c: store.NftCollectionView) {
   const stats = await store.getNftCollectionStats(c.id);
+  // Brai, 2026-09-24: "estaba 14/5555 y ahora dice 10/5555, yo quiero que
+  // diga 14/5551 porque se han minteado pero tambien quemado" -- the
+  // header's SUPPLY denominator, adjusted for forging: totalSupply (the
+  // real, unchanging pool cap -- still used below for remaining/soldOut,
+  // and never touched by a craft, see forgeCraft's comment) minus every
+  // piece ever burned, plus every piece forging itself created. See
+  // getNftCollectionStats' comment on burnedCount/forgedCount for the full
+  // reasoning and a worked example.
+  const supplyTotal = Math.max(0, c.totalSupply - stats.burnedCount + stats.forgedCount);
   return {
     slug: c.slug,
     name: c.name,
     description: c.description,
     currency: c.currency,
     totalSupply: c.totalSupply,
+    supplyTotal,
     mintPriceZec: c.mintPriceZec,
     coverImageDataUrl: c.coverImageDataUrl,
     mintedCount: c.mintedCount,
@@ -2072,21 +2082,38 @@ app.post("/api/admin/nft-whitelist/:id/review", async (req, reply) => {
 const nftWhitelistPreapproveSchema = z.object({
   handles: z.array(z.string().trim().min(1).max(20)).min(1).max(2000),
   note: z.string().max(200).optional(),
+  // Brai, 2026-09-24: COLAB (5 free mints) or APROBBED (1 free mint) -- see
+  // NftWhitelistTier in schema.prisma. Defaults to APROBBED.
+  tier: z.enum(["COLAB", "APROBBED"]).optional(),
 });
 
 app.post("/api/admin/nft-whitelist/preapprove", async (req, reply) => {
   if (!ADMIN_TOKEN) return reply.code(503).send({ error: "ADMIN_TOKEN is not configured" });
   if (req.headers["x-admin-token"] !== ADMIN_TOKEN) return reply.code(401).send({ error: "unauthorized" });
   const body = nftWhitelistPreapproveSchema.parse(req.body);
-  const results = await store.preapproveNftWhitelistHandles(body.handles, body.note);
+  const results = await store.preapproveNftWhitelistHandles(body.handles, body.note, body.tier);
   return reply.send({ count: results.length, results });
+});
+
+// Brai, 2026-09-24: "puedes llevar la contabilidad de la venta de nfts?
+// para saber que monto se recaudo" -- see getNftSalesAccounting's comment
+// in store.ts for exactly what each number means. Same ADMIN_TOKEN gate as
+// every other admin route -- financial info.
+app.get("/api/admin/nft-sales-summary", async (req, reply) => {
+  if (!ADMIN_TOKEN) return reply.code(503).send({ error: "ADMIN_TOKEN is not configured" });
+  if (req.headers["x-admin-token"] !== ADMIN_TOKEN) return reply.code(401).send({ error: "unauthorized" });
+  const summary = await store.getNftSalesAccounting();
+  return reply.send({ ok: true, ...summary });
 });
 
 // ---------- NFT: list / unlist / buy (secondary market, no offers) ----------
 
 const nftListSchema = z.object({
   walletId: z.string(),
-  priceZec: z.number().positive(),
+  // Brai, 2026-09-24: "haz una regla que no se puede listar el precio de un
+  // NFT por debajo de 0.0025 ZEC" -- a hard floor, on top of (not instead
+  // of) the "must clear the platform fee + network fee" check right below.
+  priceZec: z.number().positive().min(NFT_MIN_LISTING_PRICE_ZEC, `list price must be at least ${NFT_MIN_LISTING_PRICE_ZEC} ZEC`),
   payoutAddress: z
     .string()
     .trim()
@@ -2147,12 +2174,21 @@ app.post("/api/nft/items/:id/buy", async (req, reply) => {
   if (item.ownerInternalWalletId === body.walletId) {
     return reply.code(400).send({ error: "you already own this piece" });
   }
+  // Brai, 2026-09-24: "una vez que se selecciona un nft ... no pueden
+  // comprarse, hasta que no se cae la transaccion" -- a friendly early
+  // check off the row we already fetched, before ever touching the wallet
+  // service. The REAL guard against two buyers racing for the same piece
+  // is the atomic conditional update inside createNftPurchaseOrder just
+  // below -- this is just a faster, clearer rejection for the common case.
+  if (item.reservedUntil && new Date(item.reservedUntil) > new Date()) {
+    return reply.code(409).send({ error: "this piece is currently reserved by another buyer -- try again shortly" });
+  }
   const collection = await store.getNftCollectionById(item.collectionId);
   if (!collection) return reply.code(404).send({ error: "collection not found" });
   if (!item.listedPayoutAddress) return reply.code(409).send({ error: "this piece isn't listed for sale" });
   const walletService = walletServiceFor(collection.currency);
 
-  const purchase = await store.createNftPurchaseOrder({
+  const purchaseResult = await store.createNftPurchaseOrder({
     itemId: id,
     buyerInternalWalletId: body.walletId,
     sellerInternalWalletId: item.ownerInternalWalletId,
@@ -2160,6 +2196,10 @@ app.post("/api/nft/items/:id/buy", async (req, reply) => {
     payoutAddress: item.listedPayoutAddress,
     expectedZecAmount: item.listedPriceZec,
   });
+  if ("error" in purchaseResult) {
+    return reply.code(409).send({ error: "this piece is currently reserved by another buyer -- try again shortly" });
+  }
+  const purchase = purchaseResult;
 
   let zecAddress: string;
   let zecAmount: number;

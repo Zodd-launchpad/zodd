@@ -12,6 +12,10 @@ export const translations = {
   "nav.bridge": { en: "Bridge", zh: "跨链桥" },
   "nav.nft": { en: "NFT", zh: "NFT" },
   "nav.connect": { en: "Connect", zh: "连接钱包" },
+  // Brai, 2026-09-24: "Crea un boton grande arriba a la derecha al lado de
+  // la conexion a la wallet que diga SUPPORT y te envie directamente al
+  // telegram" -- header button, always visible, next to the wallet chip.
+  "nav.support": { en: "SUPPORT", zh: "支持" },
 
   // ---------- Demo banner ----------
   "demo.banner": {
@@ -221,7 +225,9 @@ export const translations = {
   "nftWhitelist.error.empty": { en: "Enter your X handle first.", zh: "请先输入你的 X 账号。" },
   "nftWhitelist.error.emptyAddress": { en: "Enter your Zcash wallet address first.", zh: "请先输入你的 Zcash 钱包地址。" },
   "nftWhitelist.status.PENDING": { en: "Under review", zh: "审核中" },
-  "nftWhitelist.status.APPROVED": { en: "Approved", zh: "已通过" },
+  // Brai, 2026-09-24: "Todos figuran en la whitelist cuando consultan su
+  // estado como APROBBED" -- literal word he wants shown, not "Approved".
+  "nftWhitelist.status.APPROVED": { en: "APROBBED", zh: "APROBBED" },
   "nftWhitelist.status.REJECTED": { en: "Not approved", zh: "未通过" },
   "nftWhitelist.pendingNote": { en: "We'll review your follow/like/retweet by hand. No need to resubmit.", zh: "我们会人工审核你的关注/点赞/转发。无需重复提交。" },
   "nftWhitelist.approvedNote": { en: "You're whitelisted — your next mint on this collection will be free.", zh: "你已进入白名单——本系列下一次铸造将免费。" },
@@ -306,6 +312,12 @@ export const translations = {
     en: "I'm whitelisted for the ZODD NFT drop 🎉 — free mint locked in via @zodd_zcash",
     zh: "我已进入 ZODD NFT 白名单 🎉 —— 通过 @zodd_zcash 锁定免费铸造",
   },
+  // Brai, 2026-09-24: "que haya un boton para hacer el SHARE ... e ingresa
+  // un cartel que diga, una ultima tarea te pedimos, comparte!" -- for the
+  // closed-whitelist status-check box (a returning visitor typing their own
+  // handle, not the full wizard), shown only once their status is APROBBED.
+  "nftWhitelist.closed.shareBanner": { en: "One last thing — share it!", zh: "最后一件事 —— 分享出去！" },
+  "nftWhitelist.closed.shareButton": { en: "SHARE", zh: "分享" },
 
   // ---------- NFT marketplace (Brai, 2026-09-18: "empeza a deployar el
   // marketplace" -- reference to copy: zecrocks.cash/market, minus its
@@ -371,6 +383,26 @@ export const translations = {
   "nftMarket.status.listed": { en: "Listed", zh: "在售" },
   "nftMarket.status.notListed": { en: "Not listed", zh: "未上架" },
   "nftMarket.status.owned": { en: "Owned by you", zh: "你拥有的" },
+
+  // Brai, 2026-09-24: "seleccionar varios nfts y comprarlos todos juntos
+  // ... tiene que haber un aviso ... que esos nfts estan tomados" --
+  // multi-select buy + the reservation-lock badge/bar.
+  "nftMarket.select.reserved": { en: "Reserved", zh: "已锁定" },
+  "nftMarket.select.selectedCount": { en: "{count} selected", zh: "已选择 {count} 件" },
+  "nftMarket.select.total": { en: "Total", zh: "总计" },
+  "nftMarket.select.buySelected": { en: "Buy selected", zh: "购买所选" },
+  "nftMarket.select.clear": { en: "Clear", zh: "清空" },
+  "nftMultiBuy.title": { en: "Buying {count} pieces", zh: "购买 {count} 件作品" },
+  "nftMultiBuy.notice": {
+    en: "Each piece is reserved for you while its payment is pending — up to 30 minutes — so no one else can buy it out from under you.",
+    zh: "在付款确认期间（最长 30 分钟），每件作品都已为你锁定，其他人无法购买。",
+  },
+  "nftMultiBuy.preparing": { en: "Preparing payment…", zh: "正在准备付款…" },
+  "nftMultiBuy.paid": { en: "Paid", zh: "已付款" },
+  "nftMultiBuy.failed": { en: "Failed", zh: "失败" },
+  "nftMultiBuy.reserved": { en: "Already taken by another buyer", zh: "已被其他买家锁定" },
+  "nftMultiBuy.close": { en: "Close", zh: "关闭" },
+  "nftMultiBuy.doneAll": { en: "All done — these pieces are now yours.", zh: "全部完成 —— 这些作品现在属于你了。" },
 
   "nftMarket.sort.edition": { en: "Edition #", zh: "编号" },
   "nftMarket.sort.priceAsc": { en: "Price low to high", zh: "价格从低到高" },
@@ -455,7 +487,7 @@ export const translations = {
   // as "it's charging me" despite the backend actually giving those free.
   // Split into two explicit buttons instead of one ambiguous one.
   "nftMint.freeMintButton": { en: "FREE MINT ({count})", zh: "免费铸造（{count}）" },
-  "nftMint.buyButton": { en: "BUY", zh: "购买" },
+  "nftMint.buyButton": { en: "MINT", zh: "铸造" },
   "nftMint.total.free": { en: "FREE", zh: "免费" },
   "nftMint.waitingBody": { en: "Send the exact amount below. Your piece is revealed automatically once payment is detected.", zh: "请发送下方准确金额。检测到付款后将自动为你揭示作品。" },
   // Brai, 2026-09-19: "inclusive los que hacen free mint tienen que hacer
@@ -529,6 +561,15 @@ export const translations = {
   "nftItem.unlistButton": { en: "Remove listing", zh: "取消上架" },
   "nftItem.buyButton": { en: "Buy now", zh: "立即购买" },
   "nftItem.buyFilled": { en: "Purchase complete — this piece is now yours.", zh: "购买完成 —— 这件作品现在属于你了。" },
+  // Brai, 2026-09-24: "necesito que esa transaccion pongas el link hacia
+  // esa transaccion ... para que la gente vea que es una inscripcion que
+  // vive en la blockchain" -- on-chain proof link, shown when this piece's
+  // mint payment has a real txid (not a forge-created piece).
+  "nftItem.viewOnChain": { en: "View mint transaction on-chain ↗", zh: "在链上查看铸造交易 ↗" },
+  "nftItem.reservedByOther": {
+    en: "This piece is currently reserved by another buyer's pending payment — try again shortly.",
+    zh: "该作品目前正被另一位买家的待处理付款锁定 —— 请稍后再试。",
+  },
   "portfolio.nfts.title": { en: "Your NFTs", zh: "你的 NFT" },
   "portfolio.nfts.listed": { en: "Listed", zh: "已上架" },
   "portfolio.nfts.unlisted": { en: "Not listed", zh: "未上架" },

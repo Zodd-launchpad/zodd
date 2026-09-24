@@ -157,8 +157,25 @@ export function maxMintsPerWalletFor(walletId: string): number {
 }
 
 /** How many pieces an APPROVED whitelist wallet can mint for free before
- * paying the normal price like anyone else. */
+ * paying the normal price like anyone else. Deprecated: this used to be a
+ * single flat limit for every approved entry -- kept only as the COLAB
+ * tier's value below, for anything that hasn't been switched over to
+ * freeMintLimitForTier yet. */
 export const NFT_WHITELIST_FREE_MINT_LIMIT = Number(process.env.NFT_WHITELIST_FREE_MINT_LIMIT ?? 5);
+
+/** Brai, 2026-09-24: "los que ya estan aprobados hasta ahora pasan a ser de
+ * una categoria superior llamada COLAB que tienen 5 free mint. Los otros
+ * handles ... pasan a ser aprobados y tienen derecho a 1 free mint" -- two
+ * whitelist tiers now instead of one flat limit (see NftWhitelistTier in
+ * schema.prisma). COLAB keeps the original 5; the new APROBBED tier gets 1.
+ * Everyone still pays the same NFT_FREE_MINT_FEE_ZEC below regardless of
+ * tier -- only the free-piece COUNT differs. */
+export const NFT_COLAB_FREE_MINT_LIMIT = Number(process.env.NFT_COLAB_FREE_MINT_LIMIT ?? 5);
+export const NFT_APROBBED_FREE_MINT_LIMIT = Number(process.env.NFT_APROBBED_FREE_MINT_LIMIT ?? 1);
+
+export function freeMintLimitForTier(tier: "COLAB" | "APROBBED"): number {
+  return tier === "COLAB" ? NFT_COLAB_FREE_MINT_LIMIT : NFT_APROBBED_FREE_MINT_LIMIT;
+}
 
 /** Brai, 2026-09-19: "todos sigan un numero tipo TIER 1 #1321... si puede
  * empezar en 1300 la cuenta mejor asi no parece que recien empezamos" --
@@ -239,16 +256,19 @@ export function computeSellerPayout(netPayout: number): SellPayoutResult {
  * Brai, 2026-09-19: "el 1% de toda compra y venta de nft es para la
  * plataforma" -- unlike a token trade (TRADE_FEE_BPS above), an NFT
  * collection has no separate creator to split a fee with: it's the
- * platform's own collection, so the whole 1% goes to the platform. Same
+ * platform's own collection, so the whole cut goes to the platform. Same
  * "the seller's side absorbs it, buyer always pays exactly the listed
  * price" philosophy as splitFee/computeSellerPayout: this comes off the
  * gross sale amount FIRST, then computeSellerPayout takes the real network
  * fee off what's left for the seller (see handleNftPurchasePayment in
- * server.ts) -- so the platform's 1% is never affected by how small the
+ * server.ts) -- so the platform's cut is never affected by how small the
  * network fee makes the seller's remainder, same as creatorFee/platformFee
  * for token sells.
+ *
+ * Brai, 2026-09-24: "cambia el 5% de creator fee. O sea la venta y compra
+ * de NFT 5% es para la plataforma" -- raised from the original 1%.
  */
-export const NFT_PLATFORM_FEE_BPS = 100; // 1%
+export const NFT_PLATFORM_FEE_BPS = 500; // 5%
 
 export interface NftFeeSplit {
   /** What's left for the seller after the platform's 1% cut, before the
@@ -262,3 +282,16 @@ export function splitNftFee(grossZec: number): NftFeeSplit {
   const platformFee = (grossZec * NFT_PLATFORM_FEE_BPS) / 10_000;
   return { net: grossZec - platformFee, platformFee };
 }
+
+/** Brai, 2026-09-24: "haz una regla que no se puede listar el precio de un
+ * NFT por debajo de 0.0025 ZEC" -- a hard floor on secondary-market listing
+ * price, enforced at the /api/nft/items/:id/list route (server.ts), on top
+ * of (not instead of) the existing "must clear the platform fee + network
+ * fee" profitability check right below it. */
+export const NFT_MIN_LISTING_PRICE_ZEC = Number(process.env.NFT_MIN_LISTING_PRICE_ZEC ?? 0.0025);
+
+/** Brai, 2026-09-24: "una vez que se selecciona un nft ... no pueden
+ * comprarse, hasta que no se cae la transaccion, que puede tardar hasta 30
+ * minutos" -- how long a piece stays reserved (see NftItem.reservedUntil's
+ * comment in schema.prisma) once a buyer opens a purchase order for it. */
+export const NFT_RESERVATION_MINUTES = Number(process.env.NFT_RESERVATION_MINUTES ?? 30);

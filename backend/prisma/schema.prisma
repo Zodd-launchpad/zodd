@@ -487,6 +487,21 @@ model NftItem {
   // su dirección por defecto en otro lado.
   listedPayoutAddress String?
 
+  // Brai, 2026-09-24: "una vez que se selecciona un nft, tiene que haber un
+  // aviso para el resto de los usuarios que esos nfts estan tomados y no
+  // pueden comprarse, hasta que no se cae la transaccion, que puede tardar
+  // hasta 30 minutos" -- set the instant a buyer opens a purchase order for
+  // this (still-listed) piece (see createNftPurchaseOrder in store.ts),
+  // self-expiring: "reserved" just means reservedUntil is in the future, no
+  // sweep/cron needed. Cleared on a successful fill (fillNftPurchase) or a
+  // failed/abandoned order (failNftPurchaseOrder), but even if neither ever
+  // runs, it simply lapses on its own after NFT_RESERVATION_MINUTES
+  // (fees.ts) and the piece becomes buyable again. reservedByOrderId is
+  // purely so those two "clear on resolve" paths only ever clear a
+  // reservation they themselves hold (never someone else's newer one).
+  reservedUntil       DateTime?
+  reservedByOrderId   String?
+
   collection          NftCollection      @relation(fields: [collectionId], references: [id])
   ownerInternalWallet InternalWallet?    @relation("NftOwner", fields: [ownerInternalWalletId], references: [id])
   purchases           NftPurchaseOrder[]
@@ -632,6 +647,20 @@ enum NftWhitelistStatus {
   REJECTED
 }
 
+// Brai, 2026-09-24: "COLAB que tienen 5 free mint ... los otros handles
+// pasan a ser aprobados y tienen derecho a 1 free mint" -- two tiers of
+// APPROVED whitelist entry, each with its own free-mint allowance (see
+// freeMintLimitForTier in fees.ts). Every entry defaults to APROBBED (the
+// lower tier) unless explicitly promoted to COLAB -- see
+// preapproveNftWhitelistHandles in store.ts, which is how both this field
+// and NftWhitelistPreapproved.tier below get set in bulk from a list Brai
+// hands over. The PUBLIC status word shown to applicants never mentions the
+// tier (both read simply "Approved") -- only the free-mint count differs.
+enum NftWhitelistTier {
+  COLAB
+  APROBBED
+}
+
 // Brai, 2026-09-18: "necesito que me hagas la parte de la whitelist de los
 // nft ... la gente ingrese su handle de twitter y que le haga retwitear un
 // twit ... likear y seguir nuestro twitter, esto lo deje en revision, una
@@ -687,6 +716,10 @@ model NftWhitelistEntry {
   // (fees.ts). Reemplaza el viejo gate "un solo claim por siempre" que
   // claimedAt solo hacía cuando era un booleano de facto.
   claimedCount  Int                @default(0)
+  // Brai, 2026-09-24: see NftWhitelistTier's comment above. Defaults to the
+  // lower tier -- promoted to COLAB only via preapproveNftWhitelistHandles
+  // (bulk, from a list) or a direct admin edit.
+  tier          NftWhitelistTier   @default(APROBBED)
 
   @@index([status])
   @@index([twitterHandle])
@@ -710,6 +743,12 @@ model NftWhitelistPreapproved {
   // 2026-09-18") -- purely for Brai's own bookkeeping, never shown to users.
   note          String?
   createdAt     DateTime @default(now())
+  // Brai, 2026-09-24: which tier a handle on THIS list gets once it goes
+  // through the wizard -- see NftWhitelistTier's comment on
+  // NftWhitelistEntry above. Copied onto the real NftWhitelistEntry row at
+  // submit time (submitNftWhitelistEntry) or immediately if it already has
+  // one (preapproveNftWhitelistHandles).
+  tier          NftWhitelistTier @default(APROBBED)
 }
 
 // ZODD (2026-09-20, incident: "antes habia el qr en 2 o 3 segundos... ahora

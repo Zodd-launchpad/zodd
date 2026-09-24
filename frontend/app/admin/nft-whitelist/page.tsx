@@ -23,6 +23,16 @@ export default function AdminNftWhitelistPage() {
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [notes, setNotes] = useState<Record<string, string>>({});
+  // Brai, 2026-09-24: "Puedes llevar la contabilidad de la venta de nfts?
+  // Para saber que monto se recaudo." -- see api.adminNftSalesSummary /
+  // GET /api/admin/nft-sales-summary and store.getNftSalesAccounting.
+  const [sales, setSales] = useState<{
+    mintGrossZec: number;
+    mintCount: number;
+    secondaryGrossZec: number;
+    secondarySalesCount: number;
+    platformFeeZec: number;
+  } | null>(null);
 
   useEffect(() => {
     try {
@@ -47,6 +57,14 @@ export default function AdminNftWhitelistPage() {
   useEffect(() => {
     if (token) load(token, filter);
   }, [token, filter]);
+
+  useEffect(() => {
+    if (!token) return;
+    api
+      .adminNftSalesSummary(token)
+      .then((r) => setSales(r))
+      .catch(() => setSales(null));
+  }, [token]);
 
   function saveToken() {
     const t = tokenInput.trim();
@@ -108,6 +126,25 @@ export default function AdminNftWhitelistPage() {
           Log out
         </button>
       </div>
+
+      {sales && (
+        <div className="card" style={{ padding: 14, marginBottom: 14, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12 }}>
+          <div>
+            <div className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>Mint revenue</div>
+            <div style={{ fontWeight: 700 }}>{sales.mintGrossZec.toFixed(4)} ZEC</div>
+            <div className="muted" style={{ fontSize: 11 }}>{sales.mintCount} mints</div>
+          </div>
+          <div>
+            <div className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>Secondary volume</div>
+            <div style={{ fontWeight: 700 }}>{sales.secondaryGrossZec.toFixed(4)} ZEC</div>
+            <div className="muted" style={{ fontSize: 11 }}>{sales.secondarySalesCount} sales</div>
+          </div>
+          <div>
+            <div className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>Platform fees earned</div>
+            <div style={{ fontWeight: 700, color: "var(--green)" }}>{sales.platformFeeZec.toFixed(4)} ZEC</div>
+          </div>
+        </div>
+      )}
 
       <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
         {(["PENDING", "APPROVED", "REJECTED"] as StatusFilter[]).map((f) => (

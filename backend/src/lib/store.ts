@@ -6,7 +6,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
 import { CurveState, DEFAULT_CURVE_CONFIG, currentPrice, quoteBuy, quoteSell } from "./bondingCurve.js";
-import { splitFee, NFT_WHITELIST_FREE_MINT_LIMIT, NFT_TIER_NUMBERING_START } from "./fees.js";
+import { splitFee, NFT_WHITELIST_FREE_MINT_LIMIT, NFT_TIER_NUMBERING_START, freeMintLimitForTier, NFT_RESERVATION_MINUTES } from "./fees.js";
 
 export const prisma = new PrismaClient();
 export { DEFAULT_CURVE_CONFIG };
@@ -565,6 +565,53 @@ export async function getPlatformFeeStatus(): Promise<{ totalEarnedZec: number; 
  * balance from then on (see getPlatformFeeStatus). */
 export async function recordPlatformWithdrawal(amountZec: number, toAddress: string, txid: string | null) {
   await prisma.platformWithdrawal.create({ data: { amountZec, toAddress, txid } });
+}
+
+/** Brai, 2026-09-24: "puedes llevar la contabilidad de la venta de nfts?
+ * para saber que monto se recaudo" -- gross ZEC actually collected from NFT
+ * sales, across every collection. Deliberately separate from
+ * getPlatformFeeStatus above: that one tracks the platform's own CUT
+ * (1%/5%), this tracks the full amount that changed hands.
+ *   - mintGrossZec: every CONFIRMED mint payment (PendingNftMint.status ===
+ *     "CREATED" -- that status name is historical, it means "payment
+ *     landed and pieces were claimed", see completePendingNftMint), which
+ *     includes both full-price paid mints AND the small
+ *     NFT_FREE_MINT_FEE_ZEC charged on a whitelist free claim (see its
+ *     comment in fees.ts) -- both are real ZEC that arrived.
+ *   - secondaryGrossZec/secondarySalesCount: every FILLED secondary-market
+ *     purchase (same source getNftCollectionStats' volumeZec already
+ *     reads, summed here across all collections instead of one).
+ *   - platformFeeZec: the platform's own cut of all of the above (mint
+ *     payments never carry a separate fee line -- the whole mint price IS
+ *     the platform's, so this is really just the secondary-market 1%/5%,
+ *     same number getPlatformFeeStatus's totalEarnedZec reports). */
+export async function getNftSalesAccounting(): Promise<{
+  mintGrossZec: number;
+  mintCount: number;
+  secondaryGrossZec: number;
+  secondarySalesCount: number;
+  platformFeeZec: number;
+}> {
+  const [mints, sales, feeStatus] = await Promise.all([
+    prisma.pendingNftMint.aggregate({
+      where: { status: "CREATED" },
+      _sum: { expectedZecAmount: true },
+      _count: true,
+    }),
+    prisma.nftPurchaseOrder.aggregate({
+      where: { status: "FILLED" },
+      _sum: { expectedZecAmount: true },
+      _count: true,
+    }),
+    getPlatformFeeStatus(),
+  ]);
+  return {
+    mintGrossZec: num(mints._sum.expectedZecAmount ?? 0),
+    mintCount: mints._count,
+    secondaryGrossZec: num(sales._sum.expectedZecAmount ?? 0),
+    secondarySalesCount: sales._count,
+    platformFeeZec: feeStatus.totalEarnedZec,
+  };
 }
 
 /**
@@ -1661,9 +1708,26 @@ export async function getNftCollectionStats(collectionId: string): Promise<{
   // comment), across all three tiers, including pieces forgeCraft itself
   // created. A craft burns N pieces to create 1, so aliveSupply drops by
   // (N-1) every time someone forges -- exactly the "va bajando" behavior.
+  //
+  // Brai, 2026-09-24: "cambie 5 tier 1 por 1 tier 2 y el supply no se
+  // redujo... se reduce el minteado, el primer numero pero la idea es que
+  // se reduzca el supply. o sea estaba 14/5555 y ahora dice 10/5555, yo
+  // quiero que diga 14/5551 porque se han minteado pero tambien quemado" --
+  // the opposite of what aliveSupply (above) does: he wants the FIRST
+  // number (how many have ever been minted -- mintedCount) to stay put, and
+  // the SECOND number (the denominator) to shrink by the net amount forging
+  // destroys. burnedCount/forgedCount below are exactly what
+  // serializeNftCollection (server.ts) needs to compute that adjusted
+  // denominator as `totalSupply - burnedCount + forgedCount` without ever
+  // touching NftCollection.totalSupply itself (that field stays the real
+  // pre-seeded pool cap that /api/nft/mint's sold-out gate depends on --
+  // shrinking IT would wrongly lock out pool pieces that were never
+  // touched by forging at all).
   aliveSupply: number;
+  burnedCount: number;
+  forgedCount: number;
 }> {
-  const [floor, listedCount, sales, aliveSupply] = await Promise.all([
+  const [floor, listedCount, sales, aliveSupply, burnedCount, forgedCount] = await Promise.all([
     prisma.nftItem.aggregate({
       where: { collectionId, listedPriceZec: { not: null } },
       _min: { listedPriceZec: true },
@@ -1675,6 +1739,8 @@ export async function getNftCollectionStats(collectionId: string): Promise<{
       _count: true,
     }),
     prisma.nftItem.count({ where: { collectionId, mintedAt: { not: null }, burnedAt: null } }),
+    prisma.nftItem.count({ where: { collectionId, burnedAt: { not: null } } }),
+    prisma.nftItem.count({ where: { collectionId, mintPaymentTxid: "FORGED" } }),
   ]);
   return {
     floorZec: floor._min.listedPriceZec != null ? num(floor._min.listedPriceZec) : null,
@@ -1682,6 +1748,8 @@ export async function getNftCollectionStats(collectionId: string): Promise<{
     salesCount: sales._count,
     volumeZec: num(sales._sum.expectedZecAmount ?? 0),
     aliveSupply,
+    burnedCount,
+    forgedCount,
   };
 }
 
@@ -1707,6 +1775,11 @@ export interface NftItemView {
   listedPayoutAddress: string | null;
   // Brai, 2026-09-19: forge tiers -- see NftTier's comment in schema.prisma.
   tier: "PAPIRO" | "FRAGMENTO" | "RELIQUIA";
+  // Brai, 2026-09-24: see NftItem.reservedUntil's comment in schema.prisma.
+  // Non-null AND in the future means "someone else is mid-purchase, don't
+  // let a second buyer start another order for this piece right now" -- the
+  // frontend computes that from this timestamp, no separate boolean needed.
+  reservedUntil: string | null;
 }
 
 // Brai, 2026-09-19: "hace 5555 de supply con las 3 fotos... uno que sea
@@ -1803,6 +1876,7 @@ function toNftItemView(
     listedAt: Date | null;
     listedPayoutAddress: string | null;
     tier: string;
+    reservedUntil?: Date | null;
   },
   tierImages?: NftTierMedia
 ): NftItemView {
@@ -1830,6 +1904,7 @@ function toNftItemView(
     listedAt: i.listedAt ? i.listedAt.toISOString() : null,
     listedPayoutAddress: i.listedPayoutAddress,
     tier: i.tier as NftItemView["tier"],
+    reservedUntil: i.reservedUntil ? i.reservedUntil.toISOString() : null,
   };
 }
 
@@ -2815,13 +2890,14 @@ export async function completePendingNftMint(
   // than NFT_WHITELIST_FREE_MINT_LIMIT pieces total. Same "partial claim
   // still completes with what it got" philosophy as the sold-out case
   // below, just against the whitelist cap instead of total supply.
-  let freeClaimEntry: { claimedAt: Date | null; claimedCount: number } | null = null;
+  let freeClaimEntry: { claimedAt: Date | null; claimedCount: number; tier: string } | null = null;
   if (p.freeClaimWhitelistEntryId) {
     freeClaimEntry = await prisma.nftWhitelistEntry.findUnique({
       where: { id: p.freeClaimWhitelistEntryId },
-      select: { claimedAt: true, claimedCount: true },
+      select: { claimedAt: true, claimedCount: true, tier: true },
     });
-    const remaining = Math.max(0, NFT_WHITELIST_FREE_MINT_LIMIT - (freeClaimEntry?.claimedCount ?? 0));
+    const limit = freeClaimEntry ? freeMintLimitForTier(freeClaimEntry.tier as NftWhitelistTier) : NFT_WHITELIST_FREE_MINT_LIMIT;
+    const remaining = Math.max(0, limit - (freeClaimEntry?.claimedCount ?? 0));
     requestedQty = Math.min(requestedQty, remaining);
     if (requestedQty === 0) return null;
   }
@@ -2866,6 +2942,7 @@ export async function completePendingNftMint(
 // matches a connected wallet gets that wallet exactly one free mint.
 
 export type NftWhitelistStatus = "PENDING" | "APPROVED" | "REJECTED";
+export type NftWhitelistTier = "COLAB" | "APROBBED";
 
 export interface NftWhitelistEntryView {
   id: string;
@@ -2881,6 +2958,16 @@ export interface NftWhitelistEntryView {
   // without guessing from claimedAt alone (see NFT_WHITELIST_FREE_MINT_LIMIT
   // in fees.ts).
   claimedCount: number;
+  // Brai, 2026-09-24: COLAB (5 free) or APROBBED (1 free) -- see
+  // NftWhitelistTier in schema.prisma. Internal-facing only: the PUBLIC
+  // status word is always just "Approved" regardless of tier (see
+  // NftWhitelistPublicStatusView below), only the mint page's own-wallet
+  // view needs to know the tier, via freeMintLimit.
+  tier: NftWhitelistTier;
+  // This entry's actual free-mint allowance (freeMintLimitForTier(tier)),
+  // precomputed here so callers never have to import fees.ts just to know
+  // how many free mints THIS entry gets.
+  freeMintLimit: number;
 }
 
 function toNftWhitelistEntryView(e: {
@@ -2893,7 +2980,9 @@ function toNftWhitelistEntryView(e: {
   reviewNote: string | null;
   claimedAt: Date | null;
   claimedCount: number;
+  tier: string;
 }): NftWhitelistEntryView {
+  const tier = e.tier as NftWhitelistTier;
   return {
     id: e.id,
     walletAddress: e.walletAddress,
@@ -2904,6 +2993,8 @@ function toNftWhitelistEntryView(e: {
     reviewNote: e.reviewNote,
     claimedAt: e.claimedAt ? e.claimedAt.toISOString() : null,
     claimedCount: e.claimedCount,
+    tier,
+    freeMintLimit: freeMintLimitForTier(tier),
   };
 }
 
@@ -2964,7 +3055,13 @@ export async function submitNftWhitelistEntry(
   // submit their wallet address, same as if Brai had reviewed it himself.
   const preapproved = await prisma.nftWhitelistPreapproved.findUnique({ where: { twitterHandle: handle } });
   const data = preapproved
-    ? { twitterHandle: handle, status: "APPROVED" as const, reviewedAt: new Date(), reviewNote: "pre-approved list" }
+    ? {
+        twitterHandle: handle,
+        status: "APPROVED" as const,
+        reviewedAt: new Date(),
+        reviewNote: "pre-approved list",
+        tier: preapproved.tier,
+      }
     : { twitterHandle: handle, status: "PENDING" as const, reviewedAt: null, reviewNote: null };
   const entry = await prisma.nftWhitelistEntry.upsert({
     where: { walletAddress: address },
@@ -2981,7 +3078,11 @@ export async function submitNftWhitelistEntry(
  * count against the list they pasted in. */
 export async function preapproveNftWhitelistHandles(
   rawHandles: string[],
-  note?: string
+  note?: string,
+  // Brai, 2026-09-24: which tier this batch gets -- see NftWhitelistTier in
+  // schema.prisma. Defaults to APROBBED (1 free mint), the lower tier;
+  // pass "COLAB" for a KOL/giveaway-style list (5 free mints).
+  tier: NftWhitelistTier = "APROBBED"
 ): Promise<{ handle: string; alreadyEntered: boolean }[]> {
   const results: { handle: string; alreadyEntered: boolean }[] = [];
   for (const raw of rawHandles) {
@@ -2989,22 +3090,28 @@ export async function preapproveNftWhitelistHandles(
     if (!/^[a-z0-9_]{1,15}$/.test(handle)) continue;
     await prisma.nftWhitelistPreapproved.upsert({
       where: { twitterHandle: handle },
-      create: { twitterHandle: handle, note: note ?? null },
-      update: { note: note ?? null },
+      create: { twitterHandle: handle, note: note ?? null, tier },
+      update: { note: note ?? null, tier },
     });
     // If they already have a PENDING/REJECTED entry (submitted before Brai
     // handed over the list), flip it to APPROVED right now too -- otherwise
     // someone who already applied would be stuck waiting even though
-    // they're on the list.
+    // they're on the list. An entry that's already APPROVED still gets its
+    // tier upgraded here (e.g. a handle bumped from the APROBBED batch to a
+    // later COLAB one), just not its status/reviewedAt/reviewNote touched
+    // again.
     const existing = await prisma.nftWhitelistEntry.findFirst({ where: { twitterHandle: handle } });
     let alreadyEntered = false;
     if (existing && existing.status !== "APPROVED") {
       await prisma.nftWhitelistEntry.update({
         where: { id: existing.id },
-        data: { status: "APPROVED", reviewedAt: new Date(), reviewNote: "pre-approved list" },
+        data: { status: "APPROVED", reviewedAt: new Date(), reviewNote: "pre-approved list", tier },
       });
       alreadyEntered = true;
     } else if (existing) {
+      if (existing.tier !== tier) {
+        await prisma.nftWhitelistEntry.update({ where: { id: existing.id }, data: { tier } });
+      }
       alreadyEntered = true;
     }
     results.push({ handle, alreadyEntered });
@@ -3327,7 +3434,7 @@ export async function getWhitelistFreeClaimEligibility(
 ): Promise<{ ok: true; entryId: string; quantity: number } | { ok: false; error: "not_approved" | "already_claimed" }> {
   const entry = await findApprovedNftWhitelistEntryForWallet(walletId);
   if (!entry) return { ok: false, error: "not_approved" };
-  const remaining = NFT_WHITELIST_FREE_MINT_LIMIT - entry.claimedCount;
+  const remaining = freeMintLimitForTier(entry.tier as NftWhitelistTier) - entry.claimedCount;
   if (remaining <= 0) return { ok: false, error: "already_claimed" };
   return { ok: true, entryId: entry.id, quantity: Math.min(Math.max(1, quantity), remaining) };
 }
@@ -3355,7 +3462,7 @@ export async function claimFreeNftWhitelistMint(
   // quantity request is clamped down to whatever's left of that allowance
   // -- it never errors out just because someone asked for more than they
   // have left; it just gives them the most it can.
-  const remaining = NFT_WHITELIST_FREE_MINT_LIMIT - entry.claimedCount;
+  const remaining = freeMintLimitForTier(entry.tier as NftWhitelistTier) - entry.claimedCount;
   if (remaining <= 0) return { ok: false, error: "already_claimed" };
   const wantQty = Math.min(Math.max(1, quantity), remaining);
 
@@ -3466,6 +3573,17 @@ function toNftPurchaseOrderView(o: {
   };
 }
 
+/** Brai, 2026-09-24: "una vez que se selecciona un nft, tiene que haber un
+ * aviso para el resto de los usuarios que esos nfts estan tomados y no
+ * pueden comprarse, hasta que no se cae la transaccion" -- opening a
+ * purchase order also claims the reservation lock on the item (see
+ * NftItem.reservedUntil's comment in schema.prisma), atomically: the
+ * conditional UPDATE only succeeds while the piece is still listed AND not
+ * already reserved by a still-live reservation, same "WHERE ... AND
+ * -condition-" race-safety idiom as forgeCraft/fillNftPurchase elsewhere in
+ * this file. Returns { error: "item_reserved" } instead of throwing so
+ * server.ts can turn it into a clean 409, same convention as
+ * forgeCraft/getWhitelistFreeClaimEligibility's tagged-error returns. */
 export async function createNftPurchaseOrder(input: {
   itemId: string;
   buyerInternalWalletId: string;
@@ -3473,18 +3591,37 @@ export async function createNftPurchaseOrder(input: {
   currency?: Currency;
   payoutAddress: string;
   expectedZecAmount: number;
-}) {
-  const o = await prisma.nftPurchaseOrder.create({
-    data: {
-      itemId: input.itemId,
-      buyerInternalWalletId: input.buyerInternalWalletId,
-      sellerInternalWalletId: input.sellerInternalWalletId,
-      currency: input.currency ?? "ZEC",
-      payoutAddress: input.payoutAddress,
-      expectedZecAmount: input.expectedZecAmount,
-    },
+}): Promise<NftPurchaseOrderView | { error: "item_reserved" }> {
+  return prisma.$transaction(async (tx) => {
+    const o = await tx.nftPurchaseOrder.create({
+      data: {
+        itemId: input.itemId,
+        buyerInternalWalletId: input.buyerInternalWalletId,
+        sellerInternalWalletId: input.sellerInternalWalletId,
+        currency: input.currency ?? "ZEC",
+        payoutAddress: input.payoutAddress,
+        expectedZecAmount: input.expectedZecAmount,
+      },
+    });
+    const now = new Date();
+    const reservedUntil = new Date(now.getTime() + NFT_RESERVATION_MINUTES * 60_000);
+    const claimed = await tx.nftItem.updateMany({
+      where: {
+        id: input.itemId,
+        listedPriceZec: { not: null },
+        OR: [{ reservedUntil: null }, { reservedUntil: { lt: now } }],
+      },
+      data: { reservedUntil, reservedByOrderId: o.id },
+    });
+    if (claimed.count === 0) {
+      // Someone else's reservation is still live (or the piece got
+      // delisted the instant before this ran) -- roll back the order row
+      // we just created, this attempt never happened.
+      await tx.nftPurchaseOrder.delete({ where: { id: o.id } });
+      return { error: "item_reserved" } as const;
+    }
+    return toNftPurchaseOrderView(o);
   });
-  return toNftPurchaseOrderView(o);
 }
 
 export async function setNftPurchaseOrderAddress(
@@ -3520,6 +3657,14 @@ export async function getPendingNftPurchasesAwaitingPayment(): Promise<NftPurcha
 
 export async function failNftPurchaseOrder(id: string) {
   const o = await prisma.nftPurchaseOrder.update({ where: { id }, data: { status: "FAILED" } });
+  // Brai, 2026-09-24: release the reservation lock right away instead of
+  // making the next buyer wait out the full NFT_RESERVATION_MINUTES --
+  // "only if still mine" (via reservedByOrderId) so this never clobbers a
+  // newer reservation some other order picked up after this one lapsed.
+  await prisma.nftItem.updateMany({
+    where: { id: o.itemId, reservedByOrderId: o.id },
+    data: { reservedUntil: null, reservedByOrderId: null },
+  });
   return toNftPurchaseOrderView(o);
 }
 
@@ -3544,7 +3689,17 @@ export async function fillNftPurchase(
 ): Promise<NftItemView | null> {
   const result = await prisma.nftItem.updateMany({
     where: { id: itemId, ownerInternalWalletId: sellerWalletId, listedPriceZec: { not: null } },
-    data: { ownerInternalWalletId: buyerWalletId, listedPriceZec: null, listedAt: null, listedPayoutAddress: null },
+    data: {
+      ownerInternalWalletId: buyerWalletId,
+      listedPriceZec: null,
+      listedAt: null,
+      listedPayoutAddress: null,
+      // Brai, 2026-09-24: sale went through -- release the reservation lock
+      // along with everything else the listing set (it's moot now that the
+      // piece isn't even listed anymore, but keeps the row clean).
+      reservedUntil: null,
+      reservedByOrderId: null,
+    },
   });
   if (result.count === 0) return null;
   await prisma.nftPurchaseOrder.update({ where: { id: purchaseId }, data: { status: "FILLED", executionTxid: txid, filledAt: new Date(), platformFeeZec } });
