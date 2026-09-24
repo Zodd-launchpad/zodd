@@ -63,7 +63,14 @@ export async function GET(_req: Request, { params }: { params: { handle: string 
   const handle = params.handle;
   const status = await lookupStatus(handle);
 
-  const statusWord = status === "APPROVED" ? "APPROVED" : status === "REJECTED" ? "NOT APPROVED" : "UNDER REVIEW";
+  // Brai, 2026-09-24: "sigue diciendo aprobbed ... quiero que diga
+  // WHITELISTED en verde" -- this share-card image is generated server-side
+  // (next/og) with its own hardcoded English copy, entirely separate from
+  // translations.ts (which only drives the on-site status page). That's why
+  // fixing translations.ts alone didn't change what shows up when someone
+  // taps Share on Twitter/X -- this is the actual string that ends up baked
+  // into the shared image.
+  const statusWord = status === "APPROVED" ? "WHITELISTED" : status === "REJECTED" ? "NOT APPROVED" : "UNDER REVIEW";
   const statusColor = status === "APPROVED" ? "#16c784" : status === "REJECTED" ? "#ea3943" : "#9a9aa0";
   const heading =
     status === "APPROVED"
