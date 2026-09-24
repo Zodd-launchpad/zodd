@@ -38,6 +38,26 @@ function runCli(args, opts = {}) {
   return result;
 }
 
+// ZODD (2026-09-24, Brai: "busca la solucion para el otro problema"): the
+// recurring failure underneath the stuck-poll incident today was zingo-cli
+// intermittently failing to even OPEN its gRPC connection to the indexer --
+// "Failed to create lightclient. gRPC client error" -- seen repeatedly
+// across otherwise-healthy stretches (same build, same server, requests
+// moments apart succeeding right after one of these). This is a
+// connection-establishment failure: it happens before zingo-cli does
+// anything to the wallet or the chain, so retrying it is safe even for a
+// send (nothing was submitted if the client never connected). It's exactly
+// the kind of thing that clears itself a few seconds later, which is what
+// made restarting the whole service "fix" it temporarily in practice --
+// this does the same recovery automatically, per call, instead of needing
+// a human to notice and restart.
+function isTransientIndexerConnectionError(err) {
+  const msg = String(err?.message ?? err ?? "");
+  return /Failed to create lightclient/i.test(msg) || /gRPC client error/i.test(msg);
+}
+
+const INDEXER_RETRY_DELAYS_MS = [2_000, 5_000]; // up to 2 retries (3 attempts total)
+
 async function runCliExclusive(args, { timeout = CLI_TIMEOUT_MS, waitsync = false } = {}) {
   // IMPORTANT: zingo-cli does NOT sync before running a one-shot command by
   // default -- it fires the command against whatever state the wallet
@@ -46,16 +66,27 @@ async function runCliExclusive(args, { timeout = CLI_TIMEOUT_MS, waitsync = fals
   // show up as a 0 balance). Any read that needs the current chain state,
   // or any spend, must pass waitsync: true.
   const fullArgs = ["--data-dir", DATA_DIR, "--server", SERVER, ...(waitsync ? ["--waitsync"] : []), ...args];
-  try {
-    const { stdout, stderr } = await execFileP(BIN, fullArgs, { timeout, maxBuffer: 16 * 1024 * 1024 });
-    if (stderr?.trim()) console.error(`[zingo-cli stderr] ${stderr.trim()}`);
-    return stdout.trim();
-  } catch (err) {
-    // Surface stdout/stderr even on non-zero exit -- zingo-cli sometimes
-    // prints the useful error message there rather than throwing cleanly.
-    const detail = [err.stdout, err.stderr].filter(Boolean).join("\n").trim();
-    throw new Error(`zingo-cli ${args[0]} failed: ${detail || err.message}`);
+  let lastErr;
+  for (let attempt = 0; attempt <= INDEXER_RETRY_DELAYS_MS.length; attempt++) {
+    try {
+      const { stdout, stderr } = await execFileP(BIN, fullArgs, { timeout, maxBuffer: 16 * 1024 * 1024 });
+      if (stderr?.trim()) console.error(`[zingo-cli stderr] ${stderr.trim()}`);
+      return stdout.trim();
+    } catch (err) {
+      // Surface stdout/stderr even on non-zero exit -- zingo-cli sometimes
+      // prints the useful error message there rather than throwing cleanly.
+      const detail = [err.stdout, err.stderr].filter(Boolean).join("\n").trim();
+      lastErr = new Error(`zingo-cli ${args[0]} failed: ${detail || err.message}`);
+      if (attempt < INDEXER_RETRY_DELAYS_MS.length && isTransientIndexerConnectionError(lastErr)) {
+        const delay = INDEXER_RETRY_DELAYS_MS[attempt];
+        console.error(`[zingo-cli] transient indexer connection failure on "${args[0]}" (attempt ${attempt + 1}/${INDEXER_RETRY_DELAYS_MS.length + 1}) -- retrying in ${delay}ms`);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        continue;
+      }
+      throw lastErr;
+    }
   }
+  throw lastErr;
 }
 
 /** Best-effort parse: zingo-cli's own docs say some commands print JSON and
