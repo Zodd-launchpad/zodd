@@ -28,16 +28,57 @@ export const MAX_PAYOUT_ZEC = MAX_ZEC_PER_ORDER;
 
 const ZATOSHIS_PER_ZEC = 100_000_000;
 
+// ZODD (2026-09-24, Brai: "investiga ahora mismo... dejalo andando"):
+// zcash-wallet-service was found stuck for 5+ minutes at a stretch --
+// zingo-cli intermittently fails to open its gRPC connection to the
+// indexer ("Failed to create lightclient. gRPC client error"), and every
+// route on that service DOES already carry its own internal timeout around
+// the zingo-cli call (see CLI_TIMEOUT_MS / the per-route timeouts in
+// zcash-wallet-service/src/cli.js) -- but this fetch() here, on the caller
+// side, had none at all. If the server-side timeout doesn't fire cleanly
+// for whatever reason (or the hang is actually in accepting/routing the
+// HTTP request itself, before zingo-cli even runs), a plain fetch() just
+// waits forever, which is exactly what turned into the observed
+// "[zcashReal] skipping this poll tick -- the previous one is still
+// running" pileup -- pollInFlight stuck true, payment detection stalled,
+// for as long as the underlying hang lasted. This never lets that happen
+// again from the backend's side: any call to zcash-wallet-service that
+// doesn't get a response within CALL_TIMEOUT_MS aborts on its own, the
+// caller sees a clean error, and the next poll/top-up tick gets a fresh
+// try instead of waiting behind a hang with no end. Set comfortably above
+// the longest legitimate in-service timeout (unspentNotes/heightInfo at
+// 3 min, waitsync: true) so a real, merely-slow sync isn't cut off early.
+const CALL_TIMEOUT_MS = 4 * 60_000;
+
+async function fetchWithTimeout(url: string, opts: RequestInit, timeoutMs: number) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...opts, signal: controller.signal });
+  } catch (err: any) {
+    if (err?.name === "AbortError") {
+      throw new Error(`zcash-wallet-service call timed out after ${Math.round(timeoutMs / 1000)}s (no response -- likely a stuck zingo-cli/indexer connection on that service)`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function call(path: string, opts: RequestInit = {}) {
   if (!INTERNAL_TOKEN) throw new Error("ZCASH_WALLET_SERVICE_TOKEN is not set");
-  const res = await fetch(`${WALLET_SERVICE_URL}${path}`, {
-    ...opts,
-    headers: {
-      "x-internal-token": INTERNAL_TOKEN,
-      ...(opts.body ? { "Content-Type": "application/json" } : {}),
-      ...(opts.headers ?? {}),
+  const res = await fetchWithTimeout(
+    `${WALLET_SERVICE_URL}${path}`,
+    {
+      ...opts,
+      headers: {
+        "x-internal-token": INTERNAL_TOKEN,
+        ...(opts.body ? { "Content-Type": "application/json" } : {}),
+        ...(opts.headers ?? {}),
+      },
     },
-  });
+    CALL_TIMEOUT_MS
+  );
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.error ?? `zcash-wallet-service error ${res.status}`);
   return body;
@@ -70,14 +111,20 @@ async function callAddressWorker(path: string, opts: RequestInit = {}) {
   const url = pool[nextAddressWorker % pool.length];
   nextAddressWorker++;
   if (!INTERNAL_TOKEN) throw new Error("ZCASH_WALLET_SERVICE_TOKEN is not set");
-  const res = await fetch(`${url}${path}`, {
-    ...opts,
-    headers: {
-      "x-internal-token": INTERNAL_TOKEN,
-      ...(opts.body ? { "Content-Type": "application/json" } : {}),
-      ...(opts.headers ?? {}),
+  // Same reasoning as fetchWithTimeout on `call` above -- this is the other
+  // caller that used to be able to hang forever against a stuck worker.
+  const res = await fetchWithTimeout(
+    `${url}${path}`,
+    {
+      ...opts,
+      headers: {
+        "x-internal-token": INTERNAL_TOKEN,
+        ...(opts.body ? { "Content-Type": "application/json" } : {}),
+        ...(opts.headers ?? {}),
+      },
     },
-  });
+    CALL_TIMEOUT_MS
+  );
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.error ?? `zcash address worker error ${res.status}`);
   return body;
