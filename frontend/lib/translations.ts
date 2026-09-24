@@ -225,9 +225,11 @@ export const translations = {
   "nftWhitelist.error.empty": { en: "Enter your X handle first.", zh: "请先输入你的 X 账号。" },
   "nftWhitelist.error.emptyAddress": { en: "Enter your Zcash wallet address first.", zh: "请先输入你的 Zcash 钱包地址。" },
   "nftWhitelist.status.PENDING": { en: "Under review", zh: "审核中" },
-  // Brai, 2026-09-24: "Todos figuran en la whitelist cuando consultan su
-  // estado como APROBBED" -- literal word he wants shown, not "Approved".
-  "nftWhitelist.status.APPROVED": { en: "APROBBED", zh: "APROBBED" },
+  // Brai, 2026-09-24: "cambia APROBBED por WHITELISTED... hay gente que no
+  // entiende el APROBBED" -- swapped the displayed word for everyone
+  // approved in either whitelist tier (COLAB or APROBBED); the internal
+  // tier/status values in the database are untouched, only this label.
+  "nftWhitelist.status.APPROVED": { en: "WHITELISTED", zh: "WHITELISTED" },
   "nftWhitelist.status.REJECTED": { en: "Not approved", zh: "未通过" },
   "nftWhitelist.pendingNote": { en: "We'll review your follow/like/retweet by hand. No need to resubmit.", zh: "我们会人工审核你的关注/点赞/转发。无需重复提交。" },
   "nftWhitelist.approvedNote": { en: "You're whitelisted — your next mint on this collection will be free.", zh: "你已进入白名单——本系列下一次铸造将免费。" },
