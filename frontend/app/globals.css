@@ -611,6 +611,62 @@ tr:hover td { background: #151517; cursor: pointer; }
   .nft-whitelist-banner-cta { font-size: 22px; }
 }
 
+/* Brai, 2026-09-24: "arriba MINT (destacado, en blanco), en el medio
+   FORGE y abajo NFT MARKETPLACE" -- three big stacked entry points at the
+   top of /nft/test (see the nft-hub comment in nft/test/page.tsx). MINT
+   is the loudest block, same white/chrome gradient as .btn-gold; FORGE
+   and NFT MARKETPLACE are secondary but still full-width and unmissable. */
+.nft-hub {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 640px;
+  margin: 0 auto 44px;
+}
+.nft-hub-block {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 26px 24px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  text-decoration: none;
+  cursor: pointer;
+  font-family: inherit;
+  transition: box-shadow 0.15s, transform 0.1s, filter 0.15s;
+}
+.nft-hub-block:active { transform: scale(0.99); }
+.nft-hub-block-label {
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: var(--text);
+}
+.nft-hub-block-forge:hover,
+.nft-hub-block-market:hover {
+  border-color: var(--accent-dim);
+  box-shadow: 0 0 18px var(--glow-soft);
+  transform: translateY(-1px);
+}
+.nft-hub-block-mint {
+  padding: 34px 24px;
+  border-color: transparent;
+  background: linear-gradient(180deg, #ffffff, #d4d4d9);
+}
+.nft-hub-block-mint .nft-hub-block-label { color: #0a0a0b; font-size: 32px; }
+.nft-hub-block-mint:hover {
+  box-shadow: 0 0 28px var(--glow);
+  filter: brightness(1.05);
+  transform: translateY(-1px);
+}
+@media (max-width: 520px) {
+  .nft-hub-block { padding: 20px; }
+  .nft-hub-block-label { font-size: 19px; }
+  .nft-hub-block-mint { padding: 26px 20px; }
+  .nft-hub-block-mint .nft-hub-block-label { font-size: 23px; }
+}
+
 /* Graduation progress bar (token page sidebar) */
 .grad-bar {
   height: 8px;

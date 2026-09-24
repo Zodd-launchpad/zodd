@@ -325,6 +325,11 @@ export const translations = {
   // marketplace" -- reference to copy: zecrocks.cash/market, minus its
   // Holders leaderboard) ----------
   "nftMarket.badge": { en: "NFT MARKET", zh: "NFT 市场" },
+  // Brai, 2026-09-24: hub section at the very top of /nft/test -- see the
+  // big comment on it in page.tsx.
+  "nftMarket.hub.mint": { en: "MINT", zh: "铸造" },
+  "nftMarket.hub.forge": { en: "FORGE", zh: "熔炉" },
+  "nftMarket.hub.marketplace": { en: "NFT MARKETPLACE", zh: "NFT 市场" },
   "nftMarket.notConfigured.title": { en: "Coming soon", zh: "敬请期待" },
   "nftMarket.notConfigured.body": { en: "The collection isn't live yet.", zh: "该系列尚未上线。" },
   "pyramid.closed.title": { en: "Coming soon", zh: "敬请期待" },

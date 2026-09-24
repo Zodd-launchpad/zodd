@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import QRCode from "qrcode";
 import {
@@ -87,6 +87,19 @@ export default function NftMarketTestPage() {
 
   const [collection, setCollection] = useState<NftCollection | null | undefined>(undefined); // undefined = loading, null = not configured yet
   const [tab, setTab] = useState<Tab>("items");
+
+  // Brai, 2026-09-24: "arriba MINT (destacado, en blanco), en el medio
+  // FORGE y abajo NFT MARKETPLACE ... esto tiene que quedar en
+  // zodd.fun/nft/test" -- the hub section rendered just below (see
+  // nft-hub in the JSX) jumps straight into this same page's existing
+  // Forge/Items tabs rather than duplicating them, then scrolls the
+  // (already-built) marketplace section into view so the jump feels like
+  // real navigation instead of a silent tab flip below the fold.
+  const marketSectionRef = useRef<HTMLDivElement>(null);
+  function goToTab(k: Tab) {
+    setTab(k);
+    marketSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 
   // ---- Items tab ----
   // Brai, 2026-09-19: "el marketplace debe comenzar en LISTED y precios de
@@ -238,7 +251,29 @@ export default function NftMarketTestPage() {
 
   return (
     <div className="container nft-market">
-      <div className="badge">{t("nftMarket.badge")}</div>
+      {/* Brai, 2026-09-24: "quiero dejar preparada el vinculo
+          zodd.fun/nft/test para que vaya directamente a /NFT ... arriba
+          MINT (destacado, en blanco), en el medio FORGE y abajo NFT
+          MARKETPLACE" -- three big stacked entry points, prepping this
+          page's top so it's ready to become the real zodd.fun/nft once
+          Brai's happy with it (currently /nft is still the coming-soon
+          placeholder -- see nft/page.tsx). MINT links straight out to the
+          real mint page; FORGE and NFT MARKETPLACE jump to this same
+          page's existing tabs below (see goToTab above) instead of
+          duplicating them. */}
+      <div className="nft-hub">
+        <Link href="/nft/test/mint" className="nft-hub-block nft-hub-block-mint">
+          <span className="nft-hub-block-label">{t("nftMarket.hub.mint")}</span>
+        </Link>
+        <button type="button" className="nft-hub-block nft-hub-block-forge" onClick={() => goToTab("forge")}>
+          <span className="nft-hub-block-label">{t("nftMarket.hub.forge")}</span>
+        </button>
+        <button type="button" className="nft-hub-block nft-hub-block-market" onClick={() => goToTab("items")}>
+          <span className="nft-hub-block-label">{t("nftMarket.hub.marketplace")}</span>
+        </button>
+      </div>
+
+      <div ref={marketSectionRef} className="badge">{t("nftMarket.badge")}</div>
       <div className="nft-market-header">
         <div>
           <h1 className="nft-market-title">{collection.name}</h1>
