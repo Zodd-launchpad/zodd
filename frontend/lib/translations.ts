@@ -501,6 +501,14 @@ export const translations = {
   "nftMint.freeClaim.feeNote": { en: "A tiny network fee applies so your piece lives on-chain, not just in a database.", zh: "需支付极少的网络手续费，让你的作品真正上链，而不只是存在数据库里。" },
   "nftMint.freeClaim.badge": { en: "FREE MINT", zh: "免费铸造" },
   "nftMint.freeClaim.waitingBody": { en: "Send the exact (tiny) amount below to put your free piece on-chain. It's revealed automatically once payment is detected.", zh: "请发送下方极少金额，让你的免费作品上链。检测到付款后将自动为你揭示作品。" },
+  // Brai, 2026-09-24: "aunque sea FREE MINT pongas 0.001 ZEC (entre
+  // parentesis el valor en dolar), (PLATFORM FEE) una (i) de informacion y
+  // que explique que este fee es por los costos de mantenimiento de los
+  // servidores, transacciones internas, etc" -- shown only on the final
+  // payment screen (once the QR is up), right where the free-mint fee
+  // amount is displayed, so it's clearly labeled rather than a bare number.
+  "nftMint.platformFee.label": { en: "PLATFORM FEE", zh: "平台费" },
+  "nftMint.platformFee.tooltip": { en: "This fee covers server maintenance costs, internal transactions, and other platform upkeep.", zh: "此费用用于覆盖服务器维护成本、内部交易等平台运营开支。" },
   "nftMint.revealed.badge": { en: "YOU MINTED", zh: "铸造成功" },
   "nftMint.revealed.viewItem": { en: "View piece", zh: "查看作品" },
   "nftMint.revealed.backToMarket": { en: "Back to market", zh: "返回市场" },

@@ -623,8 +623,47 @@ export default function NftMintPage() {
           {freeClaim && <div className="badge" style={{ display: "block", textAlign: "center", marginBottom: 10 }}>{t("nftMint.freeClaim.badge")}</div>}
           <h2 style={{ marginTop: 0, textAlign: "center" }}>
             {exactZecAmount != null ? formatZec(exactZecAmount) : ""} {collection?.currency}
+            {exactZecAmount != null && collection?.currency === "ZEC" && formatUsd(exactZecAmount, usdRate) && (
+              <span className="muted" style={{ fontSize: 14, fontWeight: 400 }}> (≈ {formatUsd(exactZecAmount, usdRate)})</span>
+            )}
             {mintedQuantity > 1 && <span className="muted" style={{ fontSize: 14, fontWeight: 400 }}> ({t("nftMint.quantity.label")}: {mintedQuantity})</span>}
           </h2>
+          {/* Brai, 2026-09-24: "aunque sea FREE MINT pongas ... (PLATFORM FEE)
+              una (i) de informacion ... solo en la ultima parte de pago,
+              cuando te abre ya el qr" -- only here, on the final QR/payment
+              screen, and only for the free-claim fee (the whole amount IS
+              the platform's cost-recovery fee in that case -- see
+              NFT_FREE_MINT_FEE_ZEC's comment in fees.ts -- unlike a normal
+              paid mint, where the amount is the piece's price, not a fee). */}
+          {freeClaim && (
+            <p
+              className="muted"
+              style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, margin: "2px 0 0", fontSize: 11, letterSpacing: "1px" }}
+            >
+              <span style={{ fontWeight: 700 }}>{t("nftMint.platformFee.label")}</span>
+              <span
+                title={t("nftMint.platformFee.tooltip")}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  width: 15,
+                  height: 15,
+                  borderRadius: "50%",
+                  border: "1px solid var(--border)",
+                  fontSize: 10,
+                  fontStyle: "italic",
+                  fontWeight: 700,
+                  letterSpacing: 0,
+                  cursor: "help",
+                  color: "var(--accent)",
+                  flexShrink: 0,
+                }}
+              >
+                i
+              </span>
+            </p>
+          )}
           <p className="muted" style={{ textAlign: "center" }}>{freeClaim ? t("nftMint.freeClaim.waitingBody") : t("nftMint.waitingBody")}</p>
           {isRealMode && (
             <div style={{ margin: "12px 0" }}>
