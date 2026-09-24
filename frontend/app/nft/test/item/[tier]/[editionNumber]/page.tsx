@@ -261,7 +261,7 @@ export default function NftItemPage() {
                   target="_blank"
                   rel="noreferrer"
                   className="mono-break"
-                  style={{ display: "block", fontSize: 11, color: "var(--accent)", marginTop: 6 }}
+                  style={{ display: "block", fontSize: 15, fontWeight: 600, color: "var(--accent)", marginTop: 10 }}
                 >
                   {t("nftItem.viewOnChain")}
                 </a>
@@ -290,7 +290,7 @@ export default function NftItemPage() {
               )}
 
               {isOwner && item.listedPriceZec != null && (
-                <button className="btn btn-outline" style={{ width: "100%" }} onClick={submitUnlist}>
+                <button className="btn btn-gold" style={{ width: "100%" }} onClick={submitUnlist}>
                   {t("nftItem.unlistButton")}
                 </button>
               )}
