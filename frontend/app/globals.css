@@ -1022,6 +1022,11 @@ tr:hover td { background: #151517; cursor: pointer; }
 .nft-about-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 16px; margin-top: 16px; font-size: 14px; }
 
 /* Brai, 2026-09-19: Forge tab -- papiros -> fragmentos -> reliquias. */
+/* Brai, 2026-09-24: "sube esa imagen que dice forge y que quede asi la
+   forja, con la imagen arriba y abajo los dos items para craftear" --
+   banner image above the craft recipes, same rounded-card treatment as
+   the market header's cover art elsewhere on this page. */
+.nft-forge-banner { display: block; width: 100%; max-height: 320px; object-fit: cover; border-radius: 8px; margin-bottom: 24px; border: 1px solid var(--border); }
 .nft-forge-intro { max-width: 640px; margin-bottom: 20px; font-size: 13px; }
 .nft-forge-message { padding: 10px 14px; border-radius: 6px; font-size: 13px; margin-bottom: 16px; border: 1px solid var(--border); }
 .nft-forge-message-ok { color: var(--green); border-color: var(--green-glow); background: rgba(22, 199, 132, 0.1); }

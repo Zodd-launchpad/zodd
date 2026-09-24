@@ -30,14 +30,6 @@ const COLLECTION_SLUG = "zodd-genesis";
 
 type Phase = "loading" | "confirm" | "waiting" | "revealed" | "failed" | "soldOut" | "notConfigured";
 
-function formatLocalTime(iso: string): string {
-  try {
-    return new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
-  } catch {
-    return iso;
-  }
-}
-
 export default function NftMintPage() {
   const { t } = useLanguage();
   const { wallet, loading: walletLoading } = useWallet();
@@ -429,16 +421,12 @@ export default function NftMintPage() {
 
               {collection.mintPhase === "locked" && (
                 <p style={{ color: "var(--accent)", fontSize: 13 }}>
-                  {collection.whitelistStartsAt
-                    ? t("nftMint.phase.lockedWithTime", { time: formatLocalTime(collection.whitelistStartsAt) })
-                    : t("nftMint.phase.locked")}
+                  {t("nftMint.phase.locked")}
                 </p>
               )}
               {collection.mintPhase === "whitelist" && (
                 <p style={{ color: "var(--accent)", fontSize: 13 }}>
-                  {collection.publicStartsAt
-                    ? t("nftMint.phase.whitelist", { time: formatLocalTime(collection.publicStartsAt) })
-                    : t("nftMint.phase.whitelistNoTime")}
+                  {t("nftMint.phase.whitelistNoTime")}
                 </p>
               )}
 
@@ -596,37 +584,6 @@ export default function NftMintPage() {
               )}
             </div>
 
-            {/* ---- Schedule ---- */}
-            <div className="nft-mintpage-schedule">
-              <h3 className="nft-mintpage-schedule-title">{t("nftMint.schedule.title")}</h3>
-              <div className="nft-mintpage-schedule-row">
-                <div>
-                  <div className="nft-mintpage-schedule-name">{t("nftMint.schedule.whitelistStage")}</div>
-                  <div className="muted" style={{ fontSize: 12 }}>
-                    {collection.whitelistStartsAt ? formatLocalTime(collection.whitelistStartsAt) : t("nftMint.schedule.notScheduled")}
-                    {" · "}
-                    {t("nftMint.schedule.free", { max: collection.whitelistFreeMintLimit })}
-                  </div>
-                </div>
-                {wallet && (
-                  <span className={`nft-mintpage-eligibility ${whitelistEntry ? "eligible" : "not-eligible"}`}>
-                    {whitelistEntry ? t("nftMint.schedule.eligible") : t("nftMint.schedule.notEligible")}
-                  </span>
-                )}
-              </div>
-              <div className="nft-mintpage-schedule-row">
-                <div>
-                  <div className="nft-mintpage-schedule-name">{t("nftMint.schedule.publicStage")}</div>
-                  <div className="muted" style={{ fontSize: 12 }}>
-                    {collection.publicStartsAt ? formatLocalTime(collection.publicStartsAt) : t("nftMint.schedule.notScheduled")}
-                    {" · "}
-                    {formatZec(collection.mintPriceZec)} {collection.currency}
-                  </div>
-                </div>
-                {wallet && <span className="nft-mintpage-eligibility eligible">{t("nftMint.schedule.eligible")}</span>}
-              </div>
-            </div>
-
             {/* ---- Live feeds ---- */}
             <div className="nft-mintpage-live-grid">
               <div className="nft-mintpage-live-col">
@@ -637,7 +594,6 @@ export default function NftMintPage() {
                   liveMints.map((a, i) => (
                     <Link key={`${a.editionNumber}-${a.createdAt}-${i}`} href={nftItemPath(a.editionNumber, a.tier)} className="nft-mintpage-live-row">
                       <span>{a.name ?? nftItemLabel(a.tier, a.editionNumber)}</span>
-                      <span className="muted">{new Date(a.createdAt).toLocaleTimeString()}</span>
                     </Link>
                   ))
                 )}

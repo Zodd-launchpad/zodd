@@ -1593,6 +1593,38 @@ app.post("/api/admin/nft-rename-variants", async (req, reply) => {
   }
 });
 
+// Brai, 2026-09-24: "agrega esos dos NFT a tier 3" -- adds new video
+// variants to ONE tier's pool in place (see store.addNftTierVariants).
+// Unlike nft-reseed-tiered-variants above, this never wipes or creates any
+// NftItem rows and never touches totalSupply/mintedCount -- it only grows
+// that tier's variant pool so future forge crafts can draw the new
+// artwork. Same dual ADMIN_TOKEN/NFT_SEED_TOKEN auth as the other
+// variant-media routes (this one also carries a multi-MB video payload).
+const nftAddTierVariantsSchema = z.object({
+  slug: z.string().min(1),
+  tier: z.enum(["PAPIRO", "FRAGMENTO", "RELIQUIA"]),
+  variants: z.array(nftVariantSchema).min(1),
+});
+
+app.post("/api/admin/nft-add-tier-variants", async (req, reply) => {
+  if (!ADMIN_TOKEN && !NFT_SEED_TOKEN) {
+    return reply.code(503).send({ error: "ADMIN_TOKEN is not configured" });
+  }
+  const provided = req.headers["x-admin-token"];
+  const authorized =
+    (!!ADMIN_TOKEN && provided === ADMIN_TOKEN) ||
+    (!!NFT_SEED_TOKEN && provided === NFT_SEED_TOKEN);
+  if (!authorized) return reply.code(401).send({ error: "unauthorized" });
+  const body = nftAddTierVariantsSchema.parse(req.body);
+  try {
+    const result = await store.addNftTierVariants(body.slug, body.tier, body.variants);
+    if (!result) return reply.code(404).send({ error: "collection not found" });
+    return reply.send(result);
+  } catch (err: any) {
+    return reply.code(400).send({ error: err?.message ?? "add failed" });
+  }
+});
+
 // Brai, 2026-09-21: the actual video bytes for a tier variant, streamed
 // from here instead of being embedded as a data: URL in every item API
 // response (see the long comment on toNftItemView's resolvedImage in

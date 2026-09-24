@@ -510,6 +510,7 @@ export default function NftMarketTestPage() {
 
       {tab === "forge" && (
         <div className="nft-forge-tab">
+          <img src="/zodd-forge-banner.jpg" alt="" className="nft-forge-banner" />
           {!wallet && <p className="muted">{t("portfolio.connectFirst")}</p>}
           {wallet && forgeInventory === null && <p className="muted">{t("nftMarket.loading")}</p>}
           {wallet && forgeInventory !== null && (

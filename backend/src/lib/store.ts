@@ -2455,7 +2455,7 @@ function slugifyVariantName(name: string, fallbackIndex: number): string {
  * hex chars of the content hash so a later reseed that changes a variant's
  * video always gets a fresh URL -- no stale browser/CDN cache of the old
  * clip under the same key. */
-function buildTierVariants(collectionId: string, tier: "PAPIRO" | "FRAGMENTO" | "RELIQUIA", inputs: TieredVariantInput[]): NftTierVariant[] {
+export function buildTierVariants(collectionId: string, tier: "PAPIRO" | "FRAGMENTO" | "RELIQUIA", inputs: TieredVariantInput[]): NftTierVariant[] {
   return inputs.map((v, idx) => {
     if (!v.name?.trim()) throw new Error(`${tier} variant #${idx + 1} is missing a name`);
     if (!v.videoDataUrl || !v.videoDataUrl.startsWith("data:video/")) {
@@ -2650,6 +2650,54 @@ export async function renameNftTierVariants(
   }
 
   return { collectionId: collection.id, updatedVariants, updatedItems };
+}
+
+// Brai, 2026-09-24: "agrega esos dos NFT a tier 3" -- adds new named video
+// variants to a tier's existing pool WITHOUT wiping or re-seeding anything.
+// Sibling to renameNftTierVariants above (same "read the tier's variants
+// column, patch it, write it back" shape) but appends instead of relabeling.
+// Deliberately does NOT touch totalSupply/mintedCount or create any new
+// NftItem rows -- adding a variant only means future forgeCraft draws
+// (targetVariants[Math.floor(Math.random() * targetVariants.length)]) can
+// now land on it; it does not mint anything by itself. Already-minted items
+// referencing the tier's older variants are completely unaffected since
+// those keys stay in the array untouched. Re-running with the same video
+// is safe (idempotent): buildTierVariants' key embeds the content hash, so
+// a variant that's already present by key is skipped rather than duplicated.
+export async function addNftTierVariants(
+  slug: string,
+  tier: "PAPIRO" | "FRAGMENTO" | "RELIQUIA",
+  inputs: TieredVariantInput[]
+): Promise<{ collectionId: string; addedVariants: number; skippedDuplicates: number; totalVariants: number } | null> {
+  if (!inputs.length) throw new Error("no variants provided");
+
+  const collection = await prisma.nftCollection.findUnique({
+    where: { slug },
+    select: { id: true, papiroVariants: true, fragmentoVariants: true, reliquiaVariants: true },
+  });
+  if (!collection) return null;
+
+  const fieldByTier: Record<"PAPIRO" | "FRAGMENTO" | "RELIQUIA", "papiroVariants" | "fragmentoVariants" | "reliquiaVariants"> = {
+    PAPIRO: "papiroVariants",
+    FRAGMENTO: "fragmentoVariants",
+    RELIQUIA: "reliquiaVariants",
+  };
+  const field = fieldByTier[tier];
+  const current = parseVariants((collection as unknown as Record<string, unknown>)[field]);
+
+  const built = buildTierVariants(collection.id, tier, inputs);
+  const existingKeys = new Set(current.map((v) => v.key));
+  const deduped = built.filter((v) => !existingKeys.has(v.key));
+
+  const next = [...current, ...deduped];
+  await prisma.nftCollection.update({ where: { id: collection.id }, data: { [field]: next as unknown as object } });
+
+  return {
+    collectionId: collection.id,
+    addedVariants: deduped.length,
+    skippedDuplicates: built.length - deduped.length,
+    totalVariants: next.length,
+  };
 }
 
 // Brai, 2026-09-19: "la foto se ve toda dañada en colores raros" -- the
