@@ -611,60 +611,56 @@ tr:hover td { background: #151517; cursor: pointer; }
   .nft-whitelist-banner-cta { font-size: 22px; }
 }
 
-/* Brai, 2026-09-24: "arriba MINT (destacado, en blanco), en el medio
-   FORGE y abajo NFT MARKETPLACE" -- three big stacked entry points at the
-   top of /nft/test (see the nft-hub comment in nft/test/page.tsx). MINT
-   is the loudest block, same white/chrome gradient as .btn-gold; FORGE
-   and NFT MARKETPLACE are secondary but still full-width and unmissable. */
+/* Brai, 2026-09-24: "arriba MINT, en el medio FORGE y abajo NFT
+   MARKETPLACE" -- three stacked entry points at the top of /nft/test (see
+   the nft-hub comment in nft/test/page.tsx). Went through a white/chrome
+   "big block" look first ("quedaron grotescos" -- too huge) then Brai
+   asked for it half the size, then to just reuse the SAME look as the
+   existing "Enter to Whitelist" banner on /nft ("ese estilo, el de enter
+   whitelist ... no hagas blanco ninguno") -- so this is literally
+   .nft-whitelist-banner's rules, renamed for reuse in a stack of three
+   instead of one. */
 .nft-hub {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  max-width: 640px;
-  margin: 0 auto 44px;
+  gap: 10px;
+  max-width: 560px;
+  margin: 0 auto 24px;
 }
 .nft-hub-block {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  padding: 26px 24px;
+  gap: 10px;
+  padding: 28px 24px;
   border-radius: 14px;
-  border: 1px solid var(--border);
-  background: var(--panel);
+  border: 1px solid var(--accent-dim);
+  background: linear-gradient(180deg, rgba(255, 204, 77, 0.08), rgba(255, 204, 77, 0.02));
   text-decoration: none;
   cursor: pointer;
   font-family: inherit;
   transition: box-shadow 0.15s, transform 0.1s, filter 0.15s;
 }
-.nft-hub-block:active { transform: scale(0.99); }
-.nft-hub-block-label {
-  font-size: 24px;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  color: var(--text);
-}
-.nft-hub-block-forge:hover,
-.nft-hub-block-market:hover {
-  border-color: var(--accent-dim);
-  box-shadow: 0 0 18px var(--glow-soft);
-  transform: translateY(-1px);
-}
-.nft-hub-block-mint {
-  padding: 34px 24px;
-  border-color: transparent;
-  background: linear-gradient(180deg, #ffffff, #d4d4d9);
-}
-.nft-hub-block-mint .nft-hub-block-label { color: #0a0a0b; font-size: 32px; }
-.nft-hub-block-mint:hover {
+.nft-hub-block:hover {
   box-shadow: 0 0 28px var(--glow);
   filter: brightness(1.05);
   transform: translateY(-1px);
 }
+.nft-hub-block-tagline {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.nft-hub-block-label {
+  font-size: 28px;
+  font-weight: 800;
+  color: var(--text);
+  text-shadow: 0 0 16px var(--glow-soft);
+}
 @media (max-width: 520px) {
-  .nft-hub-block { padding: 20px; }
-  .nft-hub-block-label { font-size: 19px; }
-  .nft-hub-block-mint { padding: 26px 20px; }
-  .nft-hub-block-mint .nft-hub-block-label { font-size: 23px; }
+  .nft-hub-block-label { font-size: 22px; }
 }
 
 /* Graduation progress bar (token page sidebar) */

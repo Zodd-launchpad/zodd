@@ -88,17 +88,24 @@ export default function NftMarketTestPage() {
   const [collection, setCollection] = useState<NftCollection | null | undefined>(undefined); // undefined = loading, null = not configured yet
   const [tab, setTab] = useState<Tab>("items");
 
-  // Brai, 2026-09-24: "arriba MINT (destacado, en blanco), en el medio
-  // FORGE y abajo NFT MARKETPLACE ... esto tiene que quedar en
-  // zodd.fun/nft/test" -- the hub section rendered just below (see
-  // nft-hub in the JSX) jumps straight into this same page's existing
-  // Forge/Items tabs rather than duplicating them, then scrolls the
-  // (already-built) marketplace section into view so the jump feels like
-  // real navigation instead of a silent tab flip below the fold.
+  // Brai, 2026-09-24: "arriba MINT, en el medio FORGE y abajo NFT
+  // MARKETPLACE ... esto tiene que quedar en zodd.fun/nft/test" -- the hub
+  // section rendered just below (see nft-hub in the JSX) jumps straight
+  // into this same page's existing Forge/Items tabs rather than
+  // duplicating them.
+  // Brai, 2026-09-24 cont.: "no debe aparecer el market arriba, solo los 3
+  // menues" -- the whole market section (badge/header/stats/tabs/grid)
+  // stays hidden until one of FORGE/NFT MARKETPLACE is tapped; MINT never
+  // reveals it since that one navigates straight to the real mint page.
+  const [showMarket, setShowMarket] = useState(false);
   const marketSectionRef = useRef<HTMLDivElement>(null);
   function goToTab(k: Tab) {
     setTab(k);
-    marketSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    setShowMarket(true);
+    // The market section may only just be mounting this same click (it
+    // was hidden until now), so its ref isn't attached yet inside this
+    // handler -- defer the scroll to after React commits that DOM.
+    setTimeout(() => marketSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
   }
 
   // ---- Items tab ----
@@ -253,25 +260,33 @@ export default function NftMarketTestPage() {
     <div className="container nft-market">
       {/* Brai, 2026-09-24: "quiero dejar preparada el vinculo
           zodd.fun/nft/test para que vaya directamente a /NFT ... arriba
-          MINT (destacado, en blanco), en el medio FORGE y abajo NFT
-          MARKETPLACE" -- three big stacked entry points, prepping this
-          page's top so it's ready to become the real zodd.fun/nft once
-          Brai's happy with it (currently /nft is still the coming-soon
-          placeholder -- see nft/page.tsx). MINT links straight out to the
-          real mint page; FORGE and NFT MARKETPLACE jump to this same
-          page's existing tabs below (see goToTab above) instead of
+          MINT, en el medio FORGE y abajo NFT MARKETPLACE" -- three
+          stacked entry points, prepping this page's top so it's ready to
+          become the real zodd.fun/nft once Brai's happy with it
+          (currently /nft is still the coming-soon placeholder -- see
+          nft/page.tsx). Styled like that same page's "Enter to Whitelist"
+          banner, per Brai's follow-up ("ese estilo, el de enter
+          whitelist ... no hagas blanco ninguno"). MINT links straight out
+          to the real mint page; FORGE and NFT MARKETPLACE jump to this
+          same page's existing tabs below (see goToTab above) instead of
           duplicating them. */}
       <div className="nft-hub">
-        <Link href="/nft/test/mint" className="nft-hub-block nft-hub-block-mint">
+        <Link href="/nft/test/mint" className="nft-hub-block">
+          <span className="nft-hub-block-tagline">{t("nftMarket.hub.mint.tagline")}</span>
           <span className="nft-hub-block-label">{t("nftMarket.hub.mint")}</span>
         </Link>
-        <button type="button" className="nft-hub-block nft-hub-block-forge" onClick={() => goToTab("forge")}>
+        <button type="button" className="nft-hub-block" onClick={() => goToTab("forge")}>
+          <span className="nft-hub-block-tagline">{t("nftMarket.hub.forge.tagline")}</span>
           <span className="nft-hub-block-label">{t("nftMarket.hub.forge")}</span>
         </button>
-        <button type="button" className="nft-hub-block nft-hub-block-market" onClick={() => goToTab("items")}>
+        <button type="button" className="nft-hub-block" onClick={() => goToTab("items")}>
+          <span className="nft-hub-block-tagline">{t("nftMarket.hub.marketplace.tagline")}</span>
           <span className="nft-hub-block-label">{t("nftMarket.hub.marketplace")}</span>
         </button>
       </div>
+
+      {showMarket && (
+        <>
 
       <div ref={marketSectionRef} className="badge">{t("nftMarket.badge")}</div>
       <div className="nft-market-header">
@@ -628,6 +643,8 @@ export default function NftMarketTestPage() {
             </div>
           </div>
         </div>
+      )}
+        </>
       )}
     </div>
   );

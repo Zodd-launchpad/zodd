@@ -326,9 +326,17 @@ export const translations = {
   // Holders leaderboard) ----------
   "nftMarket.badge": { en: "NFT MARKET", zh: "NFT 市场" },
   // Brai, 2026-09-24: hub section at the very top of /nft/test -- see the
-  // big comment on it in page.tsx.
+  // big comment on it in page.tsx. Each block pairs a small tagline (same
+  // small-caps style as the "NFT WHITELIST IS OPEN" banner) with the big
+  // label below it. Brai gave the taglines in Spanish and asked for them
+  // in English, worded to make sense: "hemos empezado el minteo de la
+  // coleccion" / "forja piezas, construye nuevos nft" / "browse, trade
+  // the coleccion".
+  "nftMarket.hub.mint.tagline": { en: "MINTING IS NOW LIVE", zh: "铸造现已开放" },
   "nftMarket.hub.mint": { en: "MINT", zh: "铸造" },
+  "nftMarket.hub.forge.tagline": { en: "FORGE PIECES, BUILD NEW NFTS", zh: "熔炼作品，打造新的 NFT" },
   "nftMarket.hub.forge": { en: "FORGE", zh: "熔炉" },
+  "nftMarket.hub.marketplace.tagline": { en: "BROWSE & TRADE THE COLLECTION", zh: "浏览并交易该系列" },
   "nftMarket.hub.marketplace": { en: "NFT MARKETPLACE", zh: "NFT 市场" },
   "nftMarket.notConfigured.title": { en: "Coming soon", zh: "敬请期待" },
   "nftMarket.notConfigured.body": { en: "The collection isn't live yet.", zh: "该系列尚未上线。" },
