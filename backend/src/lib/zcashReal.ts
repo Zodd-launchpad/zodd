@@ -320,7 +320,18 @@ function startPolling() {
     }
     pollInFlight = true;
     try {
-    await pollOnce();
+      await pollOnce();
+    } catch (err) {
+      // Brai, 2026-09-24: "no aparecen los tokens" x2 today -- this tick
+      // used to be try/FINALLY only, so a throw inside pollOnce (growing
+      // backlog of years-old orders on every restart makes an edge case
+      // more likely over time) propagated out of this async setInterval
+      // callback as an unhandled promise rejection, which crashes the
+      // ENTIRE backend process by default since Node 15 -- nothing else in
+      // this app was ever touched, it just silently died. Catching it here
+      // means one bad tick logs an error and gets skipped instead of
+      // taking down tokens/NFTs/payments/everything else on the site.
+      console.error("[zcashReal] a payment-poll tick threw -- caught here so it can't crash the whole backend:", err);
     } finally {
       pollInFlight = false;
     }

@@ -62,6 +62,27 @@ const NFT_SEED_TOKEN = process.env.NFT_SEED_TOKEN;
 const app = Fastify({ logger: true, maxParamLength: 512, bodyLimit: 200 * 1024 * 1024 });
 app.log.info(`ZCASH_MODE=${ZCASH_MODE} -- ${ZCASH_MODE === "real" ? "REAL ZEC IS LIVE ON THIS DEPLOYMENT" : "using the simulated zcash service, no real funds move"}`);
 
+// Brai, 2026-09-24: "no aparecen los tokens" happened twice today -- both
+// times Railway just showed the backend as "crashed" with NO error ever
+// logged anywhere, which is the signature of an unhandled promise
+// rejection: since Node 15, one of those TERMINATES THE WHOLE PROCESS by
+// default, and nothing in this file was catching it, so whatever async bug
+// tripped it left zero trace and the entire site (tokens, NFTs, payments,
+// everything) went down with it. The prime suspect is the payment-poll
+// tick in zcashReal.ts's startPolling (now also hardened directly with its
+// own try/catch), but this is a backstop for anywhere else a stray
+// unawaited/uncaught async call might be hiding. This does NOT fix
+// whatever the underlying bug turns out to be -- it just logs it loudly
+// (so next time it's actually visible instead of a silent crash) and keeps
+// the process running instead of taking the whole platform down over a
+// background tick.
+process.on("unhandledRejection", (reason) => {
+  app.log.error(reason, "UNHANDLED PROMISE REJECTION -- this would have silently crashed the entire backend before this safety net was added");
+});
+process.on("uncaughtException", (err) => {
+  app.log.error(err, "UNCAUGHT EXCEPTION -- this would have silently crashed the entire backend before this safety net was added");
+});
+
 app.register(import("@fastify/cors"), { origin: true });
 
 // Lets the frontend know whether it's talking to the real or simulated
