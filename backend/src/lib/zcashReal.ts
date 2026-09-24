@@ -589,16 +589,7 @@ export async function generateOrderAddress(
 // warming the pool up well ahead of time, not raising this number alone.
 // Safe to bump later once this has run for a while and Brai has a feel for
 // real traffic -- nothing else needs to change to raise or lower it.
-//
-// Brai, 2026-09-24: "tenes que preparar el pool de 500 para el evento del
-// sabado" -- bumped 100 -> 500 ahead of Saturday's event. This alone is the
-// whole change (per the comment above, still true): once this deploys, the
-// existing top-up loop (maybeTopUpAddressPool, every 10s, up to 5 addresses
-// per tick, paced by the wallet service's own queue) just keeps refilling
-// past the old 100 mark until it reaches 500 -- it does NOT jump there
-// instantly. Deploy this with real lead time before the event, not minutes
-// before doors open.
-const ADDRESS_POOL_TARGET = 500;
+const ADDRESS_POOL_TARGET = 100;
 
 let topUpInFlight = false;
 async function maybeTopUpAddressPool() {
