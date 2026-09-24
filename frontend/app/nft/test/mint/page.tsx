@@ -523,6 +523,19 @@ export default function NftMintPage() {
                     </>
                   )}
 
+                  {/* Brai, 2026-09-24: "agrega un cartel que diga MAXIMO 10 POR
+                      WALLET ... pero no quiero ninguna limitacion por wallet
+                      mas que los 5 free mint y 1 mint free ... el mensaje
+                      quiero que sea solo un mensaje de texto que no tenga
+                      ninguna implicancia en la programacion ni cambie nada"
+                      -- purely cosmetic, hardcoded text. Deliberately NOT
+                      wired to remainingWalletAllowance/quantityCap/any real
+                      limit -- public mint quantity stays unbounded below.
+                      Do not tie this string to enforcement logic. */}
+                  <p className="muted" style={{ fontSize: 11, letterSpacing: "0.04em", marginBottom: 8 }}>
+                    {t("nftMint.publicMaxNote")}
+                  </p>
+
                   <div className="nft-mintpage-qty-row">
                     <span className="nft-mintpage-stage-label">{t("nftMint.quantity.label")}</span>
                     <div className="nft-mintpage-stepper">

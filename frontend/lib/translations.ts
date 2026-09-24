@@ -556,6 +556,10 @@ export const translations = {
   "nftMint.stage.yourPrice": { en: "Your price", zh: "你的价格" },
   "nftMint.stage.freeRemaining": { en: "{count} free mints left for your wallet", zh: "你的钱包还剩 {count} 次免费铸造" },
   "nftMint.stage.freeUsedUp": { en: "Your free mints are used up — minting now pays full price.", zh: "你的免费铸造名额已用完，继续铸造需支付全价。" },
+  // Brai, 2026-09-24: cosmetic-only notice on the mint screen -- see the
+  // big comment where it's rendered in mint/page.tsx. Not tied to any
+  // real per-wallet cap; public minting stays unlimited.
+  "nftMint.publicMaxNote": { en: "MAXIMUM 10 PER WALLET", zh: "每个钱包最多 10 个" },
   "nftMint.quantity.label": { en: "Quantity", zh: "数量" },
   "nftMint.quantity.remaining": { en: "{count} left for your wallet", zh: "你的钱包还可铸造 {count} 个" },
   "nftMint.total.label": { en: "Total", zh: "总计" },
