@@ -460,9 +460,29 @@ export default function NftMintPage() {
               </div>
 
               {collection.mintPhase === "locked" && (
-                <p style={{ color: "var(--accent)", fontSize: 13 }}>
-                  {t("nftMint.phase.locked")}
-                </p>
+                <>
+                  <p style={{ color: "var(--accent)", fontSize: 13 }}>
+                    {t("nftMint.phase.locked")}
+                  </p>
+                  {/* Brai, 2026-09-25: "exactamente asi lo quiero el cartel
+                      dice 16:00 UTC, pero el horario real que te pedi
+                      configurar es 15:15 UTC" -- deliberately NOT read from
+                      collection.publicStartsAt (which is 15:15, the real
+                      gate). This is announced/marketing copy on purpose,
+                      same "informational only, not tied to real logic"
+                      pattern as the COLLECTION SUPPLY block above (555/5000/
+                      10 per wallet) -- the real gate opens quietly earlier so
+                      things are already flowing by the time everyone shows
+                      up at the announced hour. Do not wire this to
+                      whitelistStartsAt/publicStartsAt. */}
+                  <p className="muted" style={{ fontSize: 12, lineHeight: 1.7, margin: "4px 0 0" }}>
+                    {t("nftMint.schedule.mintDateLabel")}: SATURDAY SEPTEMBER 26
+                    <br />
+                    {t("nftMint.schedule.whitelistLabel")}: 15:00 UTC
+                    <br />
+                    {t("nftMint.schedule.publicLabel")}: 16:00 UTC
+                  </p>
+                </>
               )}
               {collection.mintPhase === "whitelist" && (
                 <p style={{ color: "var(--accent)", fontSize: 13 }}>

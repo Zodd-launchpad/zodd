@@ -584,6 +584,12 @@ export const translations = {
   "nftMint.schedule.notEligible": { en: "NOT ELIGIBLE", zh: "无资格" },
   "nftMint.schedule.free": { en: "Free (up to {max})", zh: "免费（最多 {max} 个）" },
   "nftMint.schedule.notScheduled": { en: "Not scheduled yet", zh: "尚未安排时间" },
+  // Brai, 2026-09-25: "abajo del current stage ... pongas MINT DATE / WHITELIST
+  // / PUBLIC" -- informational lines under the locked-phase message, values
+  // computed from the real collection.whitelistStartsAt/publicStartsAt.
+  "nftMint.schedule.mintDateLabel": { en: "MINT DATE", zh: "铸造日期" },
+  "nftMint.schedule.whitelistLabel": { en: "WHITELIST", zh: "白名单" },
+  "nftMint.schedule.publicLabel": { en: "PUBLIC", zh: "公开" },
   "nftMint.stage.currentLabel": { en: "Current Stage", zh: "当前阶段" },
   "nftMint.stage.yourPrice": { en: "Your price", zh: "你的价格" },
   "nftMint.stage.freeRemaining": { en: "{count} free mints left for your wallet", zh: "你的钱包还剩 {count} 次免费铸造" },

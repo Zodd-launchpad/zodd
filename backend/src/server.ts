@@ -1687,8 +1687,14 @@ const nftCollectionScheduleSchema = z.object({
   publicStartsAt: z.string().datetime().nullable().optional(),
 });
 app.post("/api/admin/nft-collection-schedule", async (req, reply) => {
-  if (!ADMIN_TOKEN) return reply.code(503).send({ error: "ADMIN_TOKEN is not configured" });
-  if (req.headers["x-admin-token"] !== ADMIN_TOKEN) return reply.code(401).send({ error: "unauthorized" });
+  if (!ADMIN_TOKEN && !NFT_SEED_TOKEN) {
+    return reply.code(503).send({ error: "ADMIN_TOKEN is not configured" });
+  }
+  const providedScheduleToken = req.headers["x-admin-token"];
+  const scheduleAuthorized =
+    (!!ADMIN_TOKEN && providedScheduleToken === ADMIN_TOKEN) ||
+    (!!NFT_SEED_TOKEN && providedScheduleToken === NFT_SEED_TOKEN);
+  if (!scheduleAuthorized) return reply.code(401).send({ error: "unauthorized" });
   const body = nftCollectionScheduleSchema.safeParse(req.body);
   if (!body.success) {
     return reply.code(400).send({ error: "expected { slug, whitelistStartsAt?: ISO string | null, publicStartsAt?: ISO string | null }" });
