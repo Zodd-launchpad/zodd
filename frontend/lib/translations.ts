@@ -549,13 +549,16 @@ export const translations = {
   "nftMint.info.public": { en: "Public mint", zh: "公开铸造" },
   "nftMint.info.perWallet": { en: "Max per wallet", zh: "每个钱包上限" },
   "nftMint.revealed.share": { en: "SHARE", zh: "分享" },
+  // Brai, 2026-09-25: exact requested SHARE tweet copy (translated to
+  // English per his "en ingles todo, claro"), same fixed text regardless
+  // of how many pieces were minted in the batch.
   "nftMint.share.caption.single": {
-    en: "Just minted {label} on ZODD 🎉 via @zodd_zcash",
-    zh: "刚刚在 @zodd_zcash 上铸造了 {label} 🎉",
+    en: "I just minted the following #NFT on @zodd_zcash!\n\nThe first #NFTs with utility are live on the #ZCash network.\n\n\n$ZEC @zcash",
+    zh: "I just minted the following #NFT on @zodd_zcash!\n\nThe first #NFTs with utility are live on the #ZCash network.\n\n\n$ZEC @zcash",
   },
   "nftMint.share.caption.multi": {
-    en: "Just minted {count} ZODD Genesis NFTs 🎉 via @zodd_zcash",
-    zh: "刚刚在 @zodd_zcash 上铸造了 {count} 个 ZODD Genesis NFT 🎉",
+    en: "I just minted the following #NFT on @zodd_zcash!\n\nThe first #NFTs with utility are live on the #ZCash network.\n\n\n$ZEC @zcash",
+    zh: "I just minted the following #NFT on @zodd_zcash!\n\nThe first #NFTs with utility are live on the #ZCash network.\n\n\n$ZEC @zcash",
   },
   "nftMint.limitNote": { en: "Limit: {max} pieces per wallet.", zh: "每个钱包限购 {max} 件。" },
   "nftMint.phase.locked": { en: "Minting hasn't opened yet.", zh: "铸造尚未开放。" },
@@ -614,8 +617,12 @@ export const translations = {
   // Shown on the mint page only while the connected wallet has no free
   // mint eligibility yet. Reuses nftWhitelist.wizard.connectX/xConnected
   // and nftWhitelist.wizard.noirAutofill(ing) for the shared bits.
+  // Brai, 2026-09-25: "en realidad tiene que decir: Estas en whitelist?
+  // Conecta tu handle para chequear." -- replacing the English copy with
+  // his exact requested Spanish wording (same pattern as other literal
+  // Spanish UI strings elsewhere on this page, e.g. "MAXIMO 10 POR WALLET").
   "nftMint.xClaim.intro": {
-    en: "Already approved but never linked a wallet? Connect your X account to check.",
+    en: "¿Estás en whitelist? Conecta tu handle para chequear.",
     zh: "已获批但从未关联钱包？连接你的 X 账号进行核实。",
   },
   "nftMint.xClaim.checkButton": { en: "CHECK ELIGIBILITY", zh: "核实资格" },

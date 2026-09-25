@@ -1935,6 +1935,10 @@ export async function listNftItems(
     sort?: "price_asc" | "price_desc" | "edition";
     page?: number;
     pageSize?: number;
+    // Brai, 2026-09-25: "ponele un NFT de una reliquia a cada uno, para
+    // decorar" -- optional tier filter so the hub page can ask for one real
+    // RELIQUIA piece's image without pulling the whole collection.
+    tier?: "PAPIRO" | "FRAGMENTO" | "RELIQUIA";
   } = {}
 ): Promise<{ items: NftItemView[]; total: number }> {
   const pageSize = Math.min(opts.pageSize ?? 48, 100);
@@ -1943,6 +1947,7 @@ export async function listNftItems(
   // never shows up in the marketplace again, same as Token.hidden dropping
   // a token out of every public listing while keeping its row for history.
   const where: Record<string, unknown> = { collectionId, burnedAt: null };
+  if (opts.tier) where.tier = opts.tier;
   if (opts.status === "listed") where.listedPriceZec = { not: null };
   // Brai, 2026-09-19 (v14): "Not listed" chip on the Items tab (copying
   // zecbit.net) -- deliberately includes not-yet-minted pieces too, same as

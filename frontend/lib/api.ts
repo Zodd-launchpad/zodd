@@ -320,6 +320,9 @@ export const api = {
       ownerWalletId?: string;
       sort?: "price_asc" | "price_desc" | "edition";
       page?: number;
+      // Brai, 2026-09-25: "ponele un NFT de una reliquia a cada uno, para
+      // decorar" -- lets the hub page ask for just RELIQUIA pieces.
+      tier?: "PAPIRO" | "FRAGMENTO" | "RELIQUIA";
     }
   ): Promise<{ items: NftItem[]; total: number; page: number }> => {
     const params = new URLSearchParams();
@@ -327,6 +330,7 @@ export const api = {
     if (opts?.ownerWalletId) params.set("ownerWalletId", opts.ownerWalletId);
     if (opts?.sort) params.set("sort", opts.sort);
     if (opts?.page) params.set("page", String(opts.page));
+    if (opts?.tier) params.set("tier", opts.tier);
     const qs = params.toString();
     return req(`/api/nft/collections/${slug}/items${qs ? `?${qs}` : ""}`);
   },

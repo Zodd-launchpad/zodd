@@ -66,12 +66,6 @@ export default function NftMintPage() {
   // ZEC" -- the flat platform fee now shows as its own line item for paid
   // mints too, not just free claims. Comes from the mint response.
   const [platformFeeZec, setPlatformFeeZec] = useState<number | null>(null);
-  // Brai, 2026-09-25: "la I del platform fee no aparece la indicacion" --
-  // the (i) only ever used the native `title` attribute, which never
-  // triggers on a tap (no hover) on mobile, only a mouse hover on desktop.
-  // Tapping the icon now also toggles this, showing the same tooltip text
-  // inline right below the row -- works on both.
-  const [feeTooltipOpen, setFeeTooltipOpen] = useState(false);
   const [mintedQuantity, setMintedQuantity] = useState(1);
   const [memo, setMemo] = useState<string | null>(null);
   const [qr, setQr] = useState<string | null>(null);
@@ -760,42 +754,17 @@ export default function NftMintPage() {
                 <span className="muted" style={{ fontWeight: 400 }}>+</span>
                 <span>{formatZec(platformFeeZec)} {collection?.currency}</span>
                 <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "1px" }}>{t("nftMint.platformFee.label")}</span>
-                <span
-                  title={t("nftMint.platformFee.tooltip")}
-                  onClick={() => setFeeTooltipOpen((v) => !v)}
-                  role="button"
-                  tabIndex={0}
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    width: 15,
-                    height: 15,
-                    borderRadius: "50%",
-                    border: "1px solid var(--border)",
-                    fontSize: 10,
-                    fontStyle: "italic",
-                    fontWeight: 700,
-                    letterSpacing: 0,
-                    cursor: "help",
-                    color: "var(--accent)",
-                    flexShrink: 0,
-                  }}
-                >
-                  i
-                </span>
                 <span className="muted" style={{ fontWeight: 400 }}>=</span>
                 <span>{t("nftMint.total.label")}: {formatZec(exactZecAmount)} {collection?.currency}</span>
               </div>
-              {/* Tap-friendly fallback for the (i) above -- a native `title`
-                  attribute only ever shows on a desktop mouse hover, never on
-                  a mobile tap (no hover event at all), which is why Brai saw
-                  no explanation show up. */}
-              {feeTooltipOpen && (
-                <p className="muted" style={{ fontSize: 12, margin: "6px auto 0", maxWidth: 320 }}>
-                  {t("nftMint.platformFee.tooltip")}
-                </p>
-              )}
+              {/* Brai, 2026-09-25: "eso de platform fee de la I prefiero que
+                  este depslegado siempre, borra la I y pone el cartel que
+                  aparezca siempre que diga this fee covers ... blabla" --
+                  removed the (i) tap/hover icon entirely; the explanation
+                  text is now always shown, not gated behind a click. */}
+              <p className="muted" style={{ fontSize: 12, margin: "6px auto 0", maxWidth: 320 }}>
+                {t("nftMint.platformFee.tooltip")}
+              </p>
               {!freeClaim && (formatUsd(exactZecAmount, usdRate) || mintedQuantity > 1) && collection?.currency === "ZEC" && (
                 <p className="muted" style={{ fontSize: 13, margin: "4px 0 0" }}>
                   {formatUsd(exactZecAmount, usdRate) && <>≈ {formatUsd(exactZecAmount, usdRate)}</>}

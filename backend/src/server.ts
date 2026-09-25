@@ -1317,6 +1317,11 @@ const listNftItemsQuerySchema = z.object({
   ownerWalletId: z.string().optional(),
   sort: z.enum(["price_asc", "price_desc", "edition"]).optional(),
   page: z.coerce.number().int().positive().optional(),
+  // Brai, 2026-09-25: "a los menues MINT FORGE Y NFT MARKETPLACE ... ponele
+  // un NFT de una reliquia a cada uno, para decorar" -- the hub page needs
+  // one real RELIQUIA piece's image to show as decoration; optional and
+  // additive, every existing caller that omits it keeps working unchanged.
+  tier: z.enum(["PAPIRO", "FRAGMENTO", "RELIQUIA"]).optional(),
 });
 
 async function serializeNftCollection(c: store.NftCollectionView) {
