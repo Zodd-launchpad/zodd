@@ -147,15 +147,25 @@ export default function NftMarketTestPage() {
 
   // Brai, 2026-09-25: "a los menues MINT FORGE Y NFT MARKETPLACE, en el
   // mismo rectangulo al lado ponele un NFT de una reliquia a cada uno, para
-  // decorar" -- purely decorative, same RELIQUIA piece's real media shown
-  // next to all three hub buttons. One real item (not a hardcoded image),
-  // via the tier filter on the items listing.
-  const [hubReliquiaImage, setHubReliquiaImage] = useState<string | null>(null);
+  // decorar" -- purely decorative, real RELIQUIA pieces shown next to the
+  // three hub buttons. Brai, 2026-09-25 (follow-up): "pusiste el mismo nft
+  // en las 3 lineas de titulo ... que sean 3 diferentes" -- fetch a small
+  // page of RELIQUIA items (not a hardcoded image) and give each hub block
+  // its own distinct piece, falling back to the first one if the
+  // collection doesn't have 3 distinct RELIQUIA items yet.
+  const [hubReliquiaImages, setHubReliquiaImages] = useState<(string | null)[]>([null, null, null]);
   useEffect(() => {
     api
       .getNftItems(COLLECTION_SLUG, { tier: "RELIQUIA", page: 1 })
-      .then((r) => setHubReliquiaImage(r.items[0]?.imageDataUrl ?? null))
-      .catch(() => setHubReliquiaImage(null));
+      .then((r) => {
+        const fallback = r.items[0]?.imageDataUrl ?? null;
+        setHubReliquiaImages([
+          r.items[0]?.imageDataUrl ?? fallback,
+          r.items[1]?.imageDataUrl ?? fallback,
+          r.items[2]?.imageDataUrl ?? fallback,
+        ]);
+      })
+      .catch(() => setHubReliquiaImages([null, null, null]));
   }, []);
 
   // "Owned by you" needs a connected wallet -- fall back to "all" if it
@@ -286,29 +296,29 @@ export default function NftMarketTestPage() {
           duplicating them. */}
       {/* Brai, 2026-09-25: "a los menues MINT FORGE Y NFT MARKETPLACE, en el
           mismo rectangulo al lado ponele un NFT de una reliquia a cada uno,
-          para decorar" -- same real RELIQUIA piece (hubReliquiaImage, fetched
-          above) shown beside the text in all three, purely decorative. */}
+          para decorar" -- 3 distinct real RELIQUIA pieces (hubReliquiaImages,
+          fetched above), one per block, shown beside the text. */}
       <div className="nft-hub">
         <Link href="/nft/test/mint" className="nft-hub-block">
           <span className="nft-hub-block-text">
             <span className="nft-hub-block-tagline">{t("nftMarket.hub.mint.tagline")}</span>
             <span className="nft-hub-block-label">{t("nftMarket.hub.mint")}</span>
           </span>
-          {hubReliquiaImage && <NftMedia src={hubReliquiaImage} alt="" className="nft-hub-block-media" />}
+          {hubReliquiaImages[0] && <NftMedia src={hubReliquiaImages[0]} alt="" className="nft-hub-block-media" />}
         </Link>
         <button type="button" className="nft-hub-block" onClick={() => goToTab("forge")}>
           <span className="nft-hub-block-text">
             <span className="nft-hub-block-tagline">{t("nftMarket.hub.forge.tagline")}</span>
             <span className="nft-hub-block-label">{t("nftMarket.hub.forge")}</span>
           </span>
-          {hubReliquiaImage && <NftMedia src={hubReliquiaImage} alt="" className="nft-hub-block-media" />}
+          {hubReliquiaImages[1] && <NftMedia src={hubReliquiaImages[1]} alt="" className="nft-hub-block-media" />}
         </button>
         <button type="button" className="nft-hub-block" onClick={() => goToTab("items")}>
           <span className="nft-hub-block-text">
             <span className="nft-hub-block-tagline">{t("nftMarket.hub.marketplace.tagline")}</span>
             <span className="nft-hub-block-label">{t("nftMarket.hub.marketplace")}</span>
           </span>
-          {hubReliquiaImage && <NftMedia src={hubReliquiaImage} alt="" className="nft-hub-block-media" />}
+          {hubReliquiaImages[2] && <NftMedia src={hubReliquiaImages[2]} alt="" className="nft-hub-block-media" />}
         </button>
       </div>
 

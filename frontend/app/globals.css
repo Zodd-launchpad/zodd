@@ -657,10 +657,12 @@ tr:hover td { background: #151517; cursor: pointer; }
   gap: 10px;
   text-align: left;
 }
+/* Brai, 2026-09-25: "agrandalos un poco que casi no se ven" -- bumped up
+   from 56px/44px. */
 .nft-hub-block-media {
-  width: 56px;
-  height: 56px;
-  border-radius: 10px;
+  width: 88px;
+  height: 88px;
+  border-radius: 12px;
   object-fit: cover;
   flex-shrink: 0;
   border: 1px solid var(--accent-dim);
@@ -680,7 +682,7 @@ tr:hover td { background: #151517; cursor: pointer; }
 }
 @media (max-width: 520px) {
   .nft-hub-block-label { font-size: 22px; }
-  .nft-hub-block-media { width: 44px; height: 44px; }
+  .nft-hub-block-media { width: 68px; height: 68px; }
 }
 
 /* Graduation progress bar (token page sidebar) */
