@@ -3312,7 +3312,7 @@ export async function claimNftWhitelistByVerifiedHandle(
     if (existingByHandle.status === "APPROVED" && candidateAddresses.includes(existingByHandle.walletAddress)) {
       return toNftWhitelistEntryView(existingByHandle);
     }
-    return { error: "this X account already has a whitelist application on file -- contact Brai" };
+    return { error: "this X account already has a whitelist application on file -- contact ZODD team" };
   }
 
   const preapproved = await prisma.nftWhitelistPreapproved.findUnique({ where: { twitterHandle: handle } });
