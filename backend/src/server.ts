@@ -1757,6 +1757,27 @@ app.post("/api/admin/nft-launch-reset", async (req, reply) => {
   return reply.send({ ok: true, reset: resetResult, collection });
 });
 
+// Brai, 2026-09-25: "quiero volver a resetear los free mint si para
+// probarlo" -- companion to nft-launch-reset above: that one wipes minted
+// NFTs but deliberately leaves whitelist claim history alone, so a tester
+// who already used up their free mints during testing was still locked out
+// after the pool reset. This puts every whitelist entry's claimedCount back
+// to 0 (see store.resetNftWhitelistClaims's comment). Same dual
+// ADMIN_TOKEN/NFT_SEED_TOKEN auth as the routes above.
+app.post("/api/admin/nft-whitelist-reset-claims", async (req, reply) => {
+  if (!ADMIN_TOKEN && !NFT_SEED_TOKEN) {
+    return reply.code(503).send({ error: "ADMIN_TOKEN is not configured" });
+  }
+  const provided = req.headers["x-admin-token"];
+  const authorized =
+    (!!ADMIN_TOKEN && provided === ADMIN_TOKEN) ||
+    (!!NFT_SEED_TOKEN && provided === NFT_SEED_TOKEN);
+  if (!authorized) return reply.code(401).send({ error: "unauthorized" });
+  const result = await store.resetNftWhitelistClaims();
+  app.log.warn(`[admin] NFT WHITELIST CLAIMS RESET: ${result.entriesReset} entries reset to 0 free mints claimed`);
+  return reply.send({ ok: true, ...result });
+});
+
 // ---------- NFT: mint ----------
 // Same model as a token-creation fee: the minter pays a fixed price to a
 // one-time address, and a piece only actually gets assigned once that

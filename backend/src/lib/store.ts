@@ -3347,6 +3347,25 @@ export async function getNftWhitelistEntry(walletAddress: string): Promise<NftWh
   return entry ? toNftWhitelistEntryView(entry) : null;
 }
 
+/* Brai, 2026-09-25: "quiero volver a resetear los free mint si para
+ * probarlo" -- the launch-day NFT reset (resetNftMints above) deliberately
+ * never touches NftWhitelistEntry, so anyone who already burned through
+ * their free-mint allowance during testing (claimedCount at freeMintLimit)
+ * was still locked out after the pool itself got wiped back to zero. This
+ * is the companion reset: puts every whitelist entry's free-claim usage
+ * back to "never claimed" (claimedCount 0, claimedAt/claimedByWalletId
+ * null) so testers get their real allowance back for the actual launch.
+ * Deliberately narrow, same spirit as resetNftMints -- touches ONLY these
+ * three claim-tracking fields, never status/tier/walletAddress/handle, so
+ * approvals and wallet links are untouched. */
+export async function resetNftWhitelistClaims(): Promise<{ entriesReset: number }> {
+  const result = await prisma.nftWhitelistEntry.updateMany({
+    where: { claimedCount: { gt: 0 } },
+    data: { claimedCount: 0, claimedAt: null, claimedByWalletId: null },
+  });
+  return { entriesReset: result.count };
+}
+
 /** Public-facing shape for the by-handle lookup below. This endpoint is
  * UNAUTHENTICATED and reachable by typing anyone's handle, not just your
  * own -- so it must never leak walletAddress (would deanonymize whoever
