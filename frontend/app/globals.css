@@ -1068,6 +1068,7 @@ tr:hover td { background: #151517; cursor: pointer; }
 
 .nft-activity-kind { font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; padding: 3px 8px; border-radius: 4px; display: inline-block; }
 .nft-activity-kind-mint { color: var(--accent); background: var(--glow-soft); }
+.nft-activity-kind-forge { color: var(--yellow); background: rgba(243, 186, 47, 0.15); }
 .nft-activity-kind-list { color: var(--bronze); background: rgba(201, 162, 75, 0.15); }
 .nft-activity-kind-sale { color: var(--green); background: rgba(22, 199, 132, 0.15); }
 

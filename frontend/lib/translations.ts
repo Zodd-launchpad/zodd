@@ -435,6 +435,7 @@ export const translations = {
   "nftMarket.activity.col.price": { en: "Price", zh: "价格" },
   "nftMarket.activity.col.when": { en: "When", zh: "时间" },
   "nftMarket.activity.kind.mint": { en: "Mint", zh: "铸造" },
+  "nftMarket.activity.kind.forge": { en: "Forge", zh: "熔炼" },
   "nftMarket.activity.kind.list": { en: "List", zh: "上架" },
   "nftMarket.activity.kind.sale": { en: "Sale", zh: "成交" },
 
@@ -531,6 +532,17 @@ export const translations = {
   // share button (see /nft/test/share/[tier]/[editionNumber]/page.tsx and
   // its OG image route), just for a freshly-minted piece instead of a
   // whitelist status.
+  // Brai, 2026-09-25: "abajo en informacion en la pagina del mint debe
+  // figurar: 555 whitelist y 5000 public y 10 por persona ... esto tiene
+  // que ser informacion que este en la pagina, no cambia nuestro codigo
+  // porque habra mas de 555 de whitelist ... y tambien la gente podra
+  // mintear mas de 10" -- purely informational display copy, same "text
+  // only, zero enforcement" spirit as nftMint.publicMaxNote above. NOT
+  // read from quantityCap/maxMintsPerWallet/any live whitelist count.
+  "nftMint.info.title": { en: "COLLECTION SUPPLY", zh: "藏品供应量" },
+  "nftMint.info.whitelist": { en: "Whitelist mint", zh: "白名单铸造" },
+  "nftMint.info.public": { en: "Public mint", zh: "公开铸造" },
+  "nftMint.info.perWallet": { en: "Max per wallet", zh: "每个钱包上限" },
   "nftMint.revealed.share": { en: "SHARE", zh: "分享" },
   "nftMint.share.caption.single": {
     en: "Just minted {label} on ZODD 🎉 via @zodd_zcash",
@@ -616,6 +628,7 @@ export const translations = {
   "portfolio.nfts.listed": { en: "Listed", zh: "已上架" },
   "portfolio.nfts.unlisted": { en: "Not listed", zh: "未上架" },
   "activity.nft.MINT": { en: "Minted", zh: "铸造了" },
+  "activity.nft.FORGE": { en: "Forged", zh: "熔炼了" },
   "activity.nft.LIST": { en: "Listed", zh: "上架了" },
   "activity.nft.SALE": { en: "Sold", zh: "售出了" },
   // Brai, 2026-09-07: tried a Noir-specific banner (first a quiet 2-line

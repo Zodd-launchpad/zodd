@@ -353,7 +353,13 @@ export default function NftMintPage() {
     return () => clearInterval(id);
   }, [phase, mintId]);
 
-  const liveMints = useMemo(() => (activity ?? []).filter((a) => a.kind === "MINT").slice(0, 8), [activity]);
+  // Brai, 2026-09-25: "quiero que a partir del proximo mint, en LIVE
+  // ACTIVITY figure los mint y tambien los FORGE que hagan" -- a forge
+  // craft is now its own distinct activity kind (see getRecentNftActivityGlobal's
+  // comment in store.ts) instead of silently counting as a MINT, but this
+  // compact "live mints" column is meant to show BOTH -- something new
+  // joined a wallet's collection either way.
+  const liveMints = useMemo(() => (activity ?? []).filter((a) => a.kind === "MINT" || a.kind === "FORGE").slice(0, 8), [activity]);
   const liveSales = useMemo(() => (activity ?? []).filter((a) => a.kind === "SALE").slice(0, 8), [activity]);
 
   if (walletLoading || phase === "loading") return null;
@@ -648,6 +654,31 @@ export default function NftMintPage() {
                     </Link>
                   ))
                 )}
+              </div>
+            </div>
+
+            {/* Brai, 2026-09-25: "abajo en informacion en la pagina del
+                mint debe figurar: 555 whitelist y 5000 public y 10 por
+                persona ... esto tiene que ser informacion que este en la
+                pagina, no cambia nuestro codigo porque habra mas de 555 de
+                whitelist ... y tambien la gente podra mintear mas de 10"
+                -- purely informational, hardcoded display numbers, same
+                "text only, zero enforcement" spirit as the MAXIMUM 10 PER
+                WALLET note above. Deliberately NOT wired to
+                quantityCap/maxMintsPerWallet/whitelistEntry counts. */}
+            <div className="nft-mintpage-schedule">
+              <p className="nft-mintpage-schedule-title">{t("nftMint.info.title")}</p>
+              <div className="nft-mintpage-schedule-row">
+                <span className="nft-mintpage-schedule-name">{t("nftMint.info.whitelist")}</span>
+                <span className="muted">555</span>
+              </div>
+              <div className="nft-mintpage-schedule-row">
+                <span className="nft-mintpage-schedule-name">{t("nftMint.info.public")}</span>
+                <span className="muted">5000</span>
+              </div>
+              <div className="nft-mintpage-schedule-row">
+                <span className="nft-mintpage-schedule-name">{t("nftMint.info.perWallet")}</span>
+                <span className="muted">10</span>
               </div>
             </div>
           </div>

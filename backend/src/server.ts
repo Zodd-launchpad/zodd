@@ -1717,6 +1717,46 @@ app.post("/api/admin/nft-collection-price", async (req, reply) => {
   return reply.send({ ok: true, collection: result });
 });
 
+// Brai, 2026-09-25: "resetea la plataforma de nfts a cero ... la
+// plataforma lanza mañana 26 de septiembre a las 15 horas UTC puede
+// empezar a mintear la whitelist y a las 16 UTC puede empezar a mintear el
+// publico" -- one call that both wipes every test mint (store.resetNftMints,
+// see its comment for exactly what it does and doesn't touch) AND sets
+// tomorrow's real presale schedule (store.setNftCollectionSchedule,
+// already existed for this from an earlier test run), so launch setup is
+// one request instead of two. Same dual ADMIN_TOKEN/NFT_SEED_TOKEN auth as
+// the tiered-variants reseed route above -- this is exactly the kind of
+// one-off migration-style call NFT_SEED_TOKEN's comment describes.
+const nftLaunchResetSchema = z.object({
+  slug: z.string().min(1),
+  whitelistStartsAt: z.string().datetime().nullable().optional(),
+  publicStartsAt: z.string().datetime().nullable().optional(),
+});
+app.post("/api/admin/nft-launch-reset", async (req, reply) => {
+  if (!ADMIN_TOKEN && !NFT_SEED_TOKEN) {
+    return reply.code(503).send({ error: "ADMIN_TOKEN is not configured" });
+  }
+  const provided = req.headers["x-admin-token"];
+  const authorized =
+    (!!ADMIN_TOKEN && provided === ADMIN_TOKEN) ||
+    (!!NFT_SEED_TOKEN && provided === NFT_SEED_TOKEN);
+  if (!authorized) return reply.code(401).send({ error: "unauthorized" });
+  const body = nftLaunchResetSchema.safeParse(req.body);
+  if (!body.success) {
+    return reply.code(400).send({ error: "expected { slug, whitelistStartsAt?: ISO string | null, publicStartsAt?: ISO string | null }" });
+  }
+  const resetResult = await store.resetNftMints(body.data.slug);
+  if (!resetResult) return reply.code(404).send({ error: "collection not found" });
+  const collection = await store.setNftCollectionSchedule(body.data.slug, {
+    whitelistStartsAt: body.data.whitelistStartsAt === undefined ? undefined : body.data.whitelistStartsAt ? new Date(body.data.whitelistStartsAt) : null,
+    publicStartsAt: body.data.publicStartsAt === undefined ? undefined : body.data.publicStartsAt ? new Date(body.data.publicStartsAt) : null,
+  });
+  app.log.warn(
+    `[admin] NFT LAUNCH RESET for ${body.data.slug}: reset ${resetResult.itemsReset} pool items, deleted ${resetResult.forgedItemsDeleted} forged items, ${resetResult.mintsDeleted} pending mints, ${resetResult.purchasesDeleted} purchase orders. Schedule: whitelist=${collection?.whitelistStartsAt ?? "unset"} public=${collection?.publicStartsAt ?? "unset"}`
+  );
+  return reply.send({ ok: true, reset: resetResult, collection });
+});
+
 // ---------- NFT: mint ----------
 // Same model as a token-creation fee: the minter pays a fixed price to a
 // one-time address, and a piece only actually gets assigned once that

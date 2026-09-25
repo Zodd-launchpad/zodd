@@ -568,7 +568,7 @@ export interface NftPurchaseOrder {
 }
 
 export interface NftActivity {
-  kind: "MINT" | "LIST" | "SALE";
+  kind: "MINT" | "FORGE" | "LIST" | "SALE";
   collectionSlug: string;
   editionNumber: number;
   tier: "PAPIRO" | "FRAGMENTO" | "RELIQUIA";

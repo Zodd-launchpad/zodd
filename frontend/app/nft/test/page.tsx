@@ -76,6 +76,7 @@ const STATUS_LABEL_KEY: Record<StatusFilter, TranslationKey> = {
 };
 const ACTIVITY_KIND_KEY: Record<NftActivity["kind"], TranslationKey> = {
   MINT: "nftMarket.activity.kind.mint",
+  FORGE: "nftMarket.activity.kind.forge",
   LIST: "nftMarket.activity.kind.list",
   SALE: "nftMarket.activity.kind.sale",
 };

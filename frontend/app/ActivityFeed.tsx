@@ -14,12 +14,17 @@ const POLL_MS = 30000;
 const MAX_ROWS = 18;
 
 // Brai, 2026-09-18 (v2, URGENT): "sacame del live activity todo lo
-// relacionado a NFT mientras probemos" -- NFT mint/list/sale events are
-// pulled out of the merged feed below while the collection is still being
-// tested (0.000001 ZEC test mint price etc). Token trades keep showing as
-// before. Flip this back to true to bring NFT rows back into Live Activity
-// once testing is done -- nothing else needs to change.
-const SHOW_NFT_IN_ACTIVITY = false;
+// relacionado a NFT mientras probemos" -- NFT mint/list/sale events were
+// pulled out of the merged feed below while the collection was still being
+// tested (0.000001 ZEC test mint price etc). Token trades kept showing as
+// before.
+//
+// Brai, 2026-09-25: "a partir del proximo mint, en LIVE ACTIVITY figure
+// los mint y tambien los FORGE que hagan" -- launch is tomorrow (2026-09-26)
+// and the test mints have just been wiped (see the nft-launch-reset admin
+// call), so this flips back on now: real mints, forges, listings and sales
+// show here from here on.
+const SHOW_NFT_IN_ACTIVITY = true;
 
 // Brai, 2026-09-08: "necsito movimiento en la pagina sino parece que nadie
 // esta comprando y vendiendo... hazme un panel a la izquierda que aprezca

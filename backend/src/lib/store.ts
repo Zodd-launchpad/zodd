@@ -908,7 +908,15 @@ export async function getRecentTradesGlobal(limit = 30): Promise<GlobalTradeView
 // Deliberately wallet-free, same lesson as the whitelist by-handle privacy
 // fix: this is public and unauthenticated, so it only ever names the PIECE
 // (collection + edition), never who owns or listed it.
-export type NftActivityKind = "MINT" | "LIST" | "SALE";
+// Brai, 2026-09-25: "quiero que a partir del proximo mint, en LIVE ACTIVITY
+// figure los mint y tambien los FORGE que hagan" -- a crafted piece
+// (forgeCraft below) was already showing up here, just silently lumped in
+// as a plain "MINT" (mintedAt gets set on both a real paid mint AND a
+// forge craft) -- there was no way to tell them apart. Split it out by
+// mintPaymentTxid === "FORGED" (forgeCraft's own marker, see its comment)
+// so a forge shows as its own distinct event instead of looking like a
+// real payment.
+export type NftActivityKind = "MINT" | "FORGE" | "LIST" | "SALE";
 export interface NftActivityView {
   kind: NftActivityKind;
   collectionSlug: string;
@@ -927,7 +935,14 @@ export async function getRecentNftActivityGlobal(limit = 30): Promise<NftActivit
       where: { mintedAt: { not: null } },
       orderBy: { mintedAt: "desc" },
       take: perKind,
-      select: { editionNumber: true, tier: true, name: true, mintedAt: true, collection: { select: { slug: true, mintPriceZec: true, currency: true } } },
+      select: {
+        editionNumber: true,
+        tier: true,
+        name: true,
+        mintedAt: true,
+        mintPaymentTxid: true,
+        collection: { select: { slug: true, mintPriceZec: true, currency: true } },
+      },
     }),
     prisma.nftItem.findMany({
       where: { listedAt: { not: null } },
@@ -950,12 +965,16 @@ export async function getRecentNftActivityGlobal(limit = 30): Promise<NftActivit
 
   const rows: NftActivityView[] = [
     ...mints.map((m) => ({
-      kind: "MINT" as const,
+      // Brai, 2026-09-25: a forge craft never charges ZEC (it burns pieces
+      // instead -- see forgeCraft's mintPaymentTxid: "FORGED"), so it shows
+      // priceZec 0 here rather than the collection's real mint price, which
+      // would misleadingly suggest a payment happened.
+      kind: (m.mintPaymentTxid === "FORGED" ? "FORGE" : "MINT") as const,
       collectionSlug: m.collection.slug,
       editionNumber: m.editionNumber,
       tier: m.tier,
       name: m.name,
-      priceZec: num(m.collection.mintPriceZec),
+      priceZec: m.mintPaymentTxid === "FORGED" ? 0 : num(m.collection.mintPriceZec),
       currency: m.collection.currency as Currency,
       createdAt: (m.mintedAt as Date).toISOString(),
     })),
@@ -2169,6 +2188,78 @@ export async function forgeCraft(walletId: string, collectionId: string, fromTie
     if (err instanceof Error && err.message === "__forge_race_lost__") return { ok: false, reason: "insufficient" };
     throw err;
   }
+}
+
+/**
+ * Brai, 2026-09-25: "resetea la plataforma de nfts a cero. O sea borra
+ * todos los minteados y empezamos de nuevo. NO BORRES NINGUN TOKEN DE LOS
+ * CREADOS, SOLO NFT" -- clears every mint/listing/reservation on the
+ * collection's pre-seeded pool (seedTieredNftCollectionWithVariants) so it
+ * goes back to fully unminted, WITHOUT re-seeding: editionNumbers, tiers,
+ * and each piece's video variant assignment (mediaVariantKey) all stay
+ * exactly as they were, so nothing needs to be re-uploaded.
+ *
+ * A forged piece (forgeCraft above) is NOT part of that pre-seeded pool --
+ * it's a brand-new row created on craft, continuing that tier's edition
+ * counter past the pool's range -- so "reset to zero" deletes those
+ * outright instead of un-forging them back into their burned ingredients
+ * (there's no way to know which pieces were burned to make a given forged
+ * piece once this runs).
+ *
+ * Deliberately narrow: never touches NftWhitelistEntry/NftWhitelistPreapproved
+ * (the real applications/approvals -- needed for tomorrow's actual launch)
+ * and never touches anything outside the Nft* models (Token/Order/Balance
+ * -- an entirely separate feature, explicitly not to be touched here).
+ */
+export async function resetNftMints(slug: string): Promise<{
+  itemsReset: number;
+  forgedItemsDeleted: number;
+  mintsDeleted: number;
+  purchasesDeleted: number;
+} | null> {
+  const collection = await prisma.nftCollection.findUnique({ where: { slug } });
+  if (!collection) return null;
+
+  const allItemIds = (
+    await prisma.nftItem.findMany({ where: { collectionId: collection.id }, select: { id: true } })
+  ).map((r) => r.id);
+  const forgedItemIds = (
+    await prisma.nftItem.findMany({
+      where: { collectionId: collection.id, mintPaymentTxid: "FORGED" },
+      select: { id: true },
+    })
+  ).map((r) => r.id);
+
+  const [purchasesDel, mintsDel, itemsUpdate, forgedDel] = await prisma.$transaction([
+    // Purchase orders reference NftItem by FK -- delete them first (covers
+    // both pool pieces we're about to reset AND forged pieces we're about
+    // to delete outright) so nothing is left dangling either way.
+    prisma.nftPurchaseOrder.deleteMany({ where: { itemId: { in: allItemIds } } }),
+    prisma.pendingNftMint.deleteMany({ where: { collectionId: collection.id } }),
+    prisma.nftItem.updateMany({
+      where: { collectionId: collection.id, mintPaymentTxid: { not: "FORGED" } },
+      data: {
+        ownerInternalWalletId: null,
+        mintedAt: null,
+        mintPaymentTxid: null,
+        listedPriceZec: null,
+        listedAt: null,
+        listedPayoutAddress: null,
+        reservedUntil: null,
+        reservedByOrderId: null,
+        burnedAt: null,
+      },
+    }),
+    prisma.nftItem.deleteMany({ where: { id: { in: forgedItemIds } } }),
+  ]);
+  await prisma.nftCollection.update({ where: { id: collection.id }, data: { mintedCount: 0 } });
+
+  return {
+    itemsReset: itemsUpdate.count,
+    forgedItemsDeleted: forgedDel.count,
+    mintsDeleted: mintsDel.count,
+    purchasesDeleted: purchasesDel.count,
+  };
 }
 
 /** Gate for LA PIRAMIDE (see createPendingTokenCreation's isPyramidToken):
