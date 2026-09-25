@@ -66,6 +66,12 @@ export default function NftMintPage() {
   // ZEC" -- the flat platform fee now shows as its own line item for paid
   // mints too, not just free claims. Comes from the mint response.
   const [platformFeeZec, setPlatformFeeZec] = useState<number | null>(null);
+  // Brai, 2026-09-25: "la I del platform fee no aparece la indicacion" --
+  // the (i) only ever used the native `title` attribute, which never
+  // triggers on a tap (no hover) on mobile, only a mouse hover on desktop.
+  // Tapping the icon now also toggles this, showing the same tooltip text
+  // inline right below the row -- works on both.
+  const [feeTooltipOpen, setFeeTooltipOpen] = useState(false);
   const [mintedQuantity, setMintedQuantity] = useState(1);
   const [memo, setMemo] = useState<string | null>(null);
   const [qr, setQr] = useState<string | null>(null);
@@ -702,14 +708,18 @@ export default function NftMintPage() {
               que es por los servidores y plataforma fee etc ... si estas
               comprando de manera publica nft que te cobra 0.0025 este qr
               tiene que decir 0.0025 ZEC + 0.001 ZEC platform FEE = TOTAL:
-              0.0035 ZEC" -- the (i) tooltip from 2026-09-24 only ever showed
-              on a free claim (the whole amount WAS the fee there); the flat
-              fee is now also added on top of every PAID mint's price (see
-              the /api/nft/mint route's paid branch in server.ts), so a
-              paid mint needs its own price+fee=total breakdown here, not
-              just a bare total. platformFeeZec comes straight from that
-              same response -- never hardcoded on this side. */}
-          {!freeClaim && platformFeeZec != null && exactZecAmount != null ? (
+              0.0035 ZEC" -- and later, for free mints specifically: "quiero
+              que cuando vayan a pagar diga 1 FREE MINT + 0.001 ZEC PLATFORM
+              FEE = 0.001 ZEC (...APROBBED) y 5 FREE MINT + 0.001 ZEC
+              PLATFORM FEE = 0.001 ZEC (...COLAB)" -- one shared
+              price/fee=total row for both cases now: a paid mint shows its
+              ZEC price as the first term, a free claim shows "{quantity}
+              FREE MINT" instead (mintedQuantity already holds 1 or 5
+              depending on tier, set from the free-claim response). Either
+              way exactZecAmount is the real on-chain total being requested
+              and platformFeeZec is never hardcoded here, always the mint
+              response's own value. */}
+          {platformFeeZec != null && exactZecAmount != null ? (
             <div style={{ textAlign: "center" }}>
               <div
                 style={{
@@ -722,12 +732,19 @@ export default function NftMintPage() {
                   fontWeight: 700,
                 }}
               >
-                <span>{formatZec(Math.max(0, exactZecAmount - platformFeeZec))} {collection?.currency}</span>
+                {freeClaim ? (
+                  <span>{mintedQuantity} {t("nftMint.freeMint.label")}</span>
+                ) : (
+                  <span>{formatZec(Math.max(0, exactZecAmount - platformFeeZec))} {collection?.currency}</span>
+                )}
                 <span className="muted" style={{ fontWeight: 400 }}>+</span>
                 <span>{formatZec(platformFeeZec)} {collection?.currency}</span>
                 <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "1px" }}>{t("nftMint.platformFee.label")}</span>
                 <span
                   title={t("nftMint.platformFee.tooltip")}
+                  onClick={() => setFeeTooltipOpen((v) => !v)}
+                  role="button"
+                  tabIndex={0}
                   style={{
                     display: "inline-flex",
                     alignItems: "center",
@@ -750,7 +767,16 @@ export default function NftMintPage() {
                 <span className="muted" style={{ fontWeight: 400 }}>=</span>
                 <span>{t("nftMint.total.label")}: {formatZec(exactZecAmount)} {collection?.currency}</span>
               </div>
-              {(formatUsd(exactZecAmount, usdRate) || mintedQuantity > 1) && collection?.currency === "ZEC" && (
+              {/* Tap-friendly fallback for the (i) above -- a native `title`
+                  attribute only ever shows on a desktop mouse hover, never on
+                  a mobile tap (no hover event at all), which is why Brai saw
+                  no explanation show up. */}
+              {feeTooltipOpen && (
+                <p className="muted" style={{ fontSize: 12, margin: "6px auto 0", maxWidth: 320 }}>
+                  {t("nftMint.platformFee.tooltip")}
+                </p>
+              )}
+              {!freeClaim && (formatUsd(exactZecAmount, usdRate) || mintedQuantity > 1) && collection?.currency === "ZEC" && (
                 <p className="muted" style={{ fontSize: 13, margin: "4px 0 0" }}>
                   {formatUsd(exactZecAmount, usdRate) && <>≈ {formatUsd(exactZecAmount, usdRate)}</>}
                   {mintedQuantity > 1 && <> ({t("nftMint.quantity.label")}: {mintedQuantity})</>}
@@ -758,50 +784,13 @@ export default function NftMintPage() {
               )}
             </div>
           ) : (
-            <>
-              <h2 style={{ marginTop: 0, textAlign: "center" }}>
-                {exactZecAmount != null ? formatZec(exactZecAmount) : ""} {collection?.currency}
-                {exactZecAmount != null && collection?.currency === "ZEC" && formatUsd(exactZecAmount, usdRate) && (
-                  <span className="muted" style={{ fontSize: 14, fontWeight: 400 }}> (≈ {formatUsd(exactZecAmount, usdRate)})</span>
-                )}
-                {mintedQuantity > 1 && <span className="muted" style={{ fontSize: 14, fontWeight: 400 }}> ({t("nftMint.quantity.label")}: {mintedQuantity})</span>}
-              </h2>
-              {/* Brai, 2026-09-24: "aunque sea FREE MINT pongas ... (PLATFORM FEE)
-                  una (i) de informacion ... solo en la ultima parte de pago,
-                  cuando te abre ya el qr" -- free-claim case: the whole
-                  amount above IS the fee (see NFT_FREE_MINT_FEE_ZEC's
-                  comment in fees.ts), so it's just a label + tooltip under
-                  the total rather than a price/fee/total breakdown. */}
-              {freeClaim && (
-                <p
-                  className="muted"
-                  style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, margin: "2px 0 0", fontSize: 11, letterSpacing: "1px" }}
-                >
-                  <span style={{ fontWeight: 700 }}>{t("nftMint.platformFee.label")}</span>
-                  <span
-                    title={t("nftMint.platformFee.tooltip")}
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      width: 15,
-                      height: 15,
-                      borderRadius: "50%",
-                      border: "1px solid var(--border)",
-                      fontSize: 10,
-                      fontStyle: "italic",
-                      fontWeight: 700,
-                      letterSpacing: 0,
-                      cursor: "help",
-                      color: "var(--accent)",
-                      flexShrink: 0,
-                    }}
-                  >
-                    i
-                  </span>
-                </p>
+            <h2 style={{ marginTop: 0, textAlign: "center" }}>
+              {exactZecAmount != null ? formatZec(exactZecAmount) : ""} {collection?.currency}
+              {exactZecAmount != null && collection?.currency === "ZEC" && formatUsd(exactZecAmount, usdRate) && (
+                <span className="muted" style={{ fontSize: 14, fontWeight: 400 }}> (≈ {formatUsd(exactZecAmount, usdRate)})</span>
               )}
-            </>
+              {mintedQuantity > 1 && <span className="muted" style={{ fontSize: 14, fontWeight: 400 }}> ({t("nftMint.quantity.label")}: {mintedQuantity})</span>}
+            </h2>
           )}
           <p className="muted" style={{ textAlign: "center" }}>{freeClaim ? t("nftMint.freeClaim.waitingBody") : t("nftMint.waitingBody")}</p>
           {isRealMode && (

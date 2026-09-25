@@ -503,6 +503,11 @@ export const translations = {
   // as "it's charging me" despite the backend actually giving those free.
   // Split into two explicit buttons instead of one ambiguous one.
   "nftMint.freeMintButton": { en: "FREE MINT ({count})", zh: "免费铸造（{count}）" },
+  // Brai, 2026-09-25: "quiero que cuando vayan a pagar diga 1 FREE MINT +
+  // 0.001 ZEC PLATFORM FEE = 0.001 ZEC" -- plain label composed with the
+  // count in front on the waiting/payment screen (mintedQuantity + this),
+  // unlike freeMintButton above which has the count in parens on the button.
+  "nftMint.freeMint.label": { en: "FREE MINT", zh: "免费铸造" },
   "nftMint.buyButton": { en: "MINT", zh: "铸造" },
   "nftMint.total.free": { en: "FREE", zh: "免费" },
   "nftMint.waitingBody": { en: "Send the exact amount below. Your piece is revealed automatically once payment is detected.", zh: "请发送下方准确金额。检测到付款后将自动为你揭示作品。" },
