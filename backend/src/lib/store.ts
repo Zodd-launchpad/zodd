@@ -3302,15 +3302,30 @@ export async function claimNftWhitelistByVerifiedHandle(
 
   const existingByHandle = await prisma.nftWhitelistEntry.findFirst({ where: { twitterHandle: handle } });
   if (existingByHandle) {
-    // Same "both addresses this wallet is known by" match as
-    // findApprovedNftWhitelistEntryForWallet -- if this exact wallet is
-    // already the one behind that entry, treat it as a success (idempotent
-    // re-click of the CHECK button) instead of an error.
-    const candidateAddresses = [wallet.noirAddress, wallet.defaultRefundAddress].filter(
-      (a): a is string => !!a
-    );
-    if (existingByHandle.status === "APPROVED" && candidateAddresses.includes(existingByHandle.walletAddress)) {
-      return toNftWhitelistEntryView(existingByHandle);
+    // Brai, 2026-09-25: "quiero que todos puedan cambiar de wallet, porque
+    // recorda que las wallet van cambiando las shielded asi que si viene la
+    // gente y registro con una wallet cuando vaya a claimear su whitelist le
+    // va a dar error, asi que fijate que sea por handled no por wallet" --
+    // Zcash shielded addresses are diversified (connectOrCreateNoirWallet
+    // refreshes wallet.defaultRefundAddress to whatever the wallet reports
+    // on EVERY reconnect, and it can legitimately be a different valid
+    // string each time), so gating this on an exact walletAddress match was
+    // locking out anyone who reconnected, tested once already, or just got
+    // handed a fresh diversified address. The verified X handle is the real
+    // identity here (server-trusted, from the OAuth cookie, never something
+    // the client could type -- see this function's own doc comment above),
+    // so any wallet that proves it owns an already-APPROVED handle gets
+    // (re-)bound via claimedByWalletId instead of being rejected.
+    // findApprovedNftWhitelistEntryForWallet below checks claimedByWalletId
+    // FIRST, falling back to the old address match only for legacy entries
+    // that were hand-submitted through the original wizard and never went
+    // through this X-verify flow at all.
+    if (existingByHandle.status === "APPROVED") {
+      const rebound = await prisma.nftWhitelistEntry.update({
+        where: { id: existingByHandle.id },
+        data: { claimedByWalletId: walletId },
+      });
+      return toNftWhitelistEntryView(rebound);
     }
     return { error: "this X account already has a whitelist application on file -- contact ZODD team" };
   }
@@ -3330,6 +3345,10 @@ export async function claimNftWhitelistByVerifiedHandle(
       status: "APPROVED",
       reviewedAt: new Date(),
       reviewNote: "auto-approved: X-verified handle matched the preapproved list",
+      // Bind by wallet identity from day one too, same reasoning as the
+      // rebind above -- this wallet's shielded address can still rotate out
+      // from under `address` on a later reconnect.
+      claimedByWalletId: walletId,
     },
   });
   // Same bookkeeping connectOrCreateNoirWallet/setDefaultRefundAddress do
@@ -3548,16 +3567,28 @@ export async function reviewNftWhitelistEntry(
  * server.ts can turn each into a clean, specific 4xx. */
 /** Shared by claimFreeNftWhitelistMint and the presale phase gate in
  * server.ts -- see claimFreeNftWhitelistMint's big comment above for why
- * this checks both noirAddress and defaultRefundAddress. */
+ * this checks both noirAddress and defaultRefundAddress.
+ *
+ * Brai, 2026-09-25: "fijate que sea por handled no por wallet" -- checks
+ * claimedByWalletId FIRST (set by claimNftWhitelistByVerifiedHandle on
+ * every successful X-verify link/re-link, see its comment), which survives
+ * a wallet's shielded address rotating on reconnect. Falls back to the old
+ * address match only for legacy entries hand-submitted through the
+ * original wizard, which never got a claimedByWalletId at all. */
 async function findApprovedNftWhitelistEntryForWallet(walletId: string) {
   const wallet = await prisma.internalWallet.findUnique({ where: { id: walletId } });
   if (!wallet) return null;
   const candidateAddresses = [wallet.noirAddress, wallet.defaultRefundAddress].filter(
     (a): a is string => !!a
   );
-  if (candidateAddresses.length === 0) return null;
   return prisma.nftWhitelistEntry.findFirst({
-    where: { walletAddress: { in: candidateAddresses }, status: "APPROVED" },
+    where: {
+      status: "APPROVED",
+      OR: [
+        { claimedByWalletId: walletId },
+        ...(candidateAddresses.length > 0 ? [{ walletAddress: { in: candidateAddresses } }] : []),
+      ],
+    },
   });
 }
 
