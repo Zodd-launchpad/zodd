@@ -525,6 +525,21 @@ export const translations = {
   "nftMint.revealed.badge": { en: "YOU MINTED", zh: "铸造成功" },
   "nftMint.revealed.viewItem": { en: "View piece", zh: "查看作品" },
   "nftMint.revealed.backToMarket": { en: "Back to market", zh: "返回市场" },
+  // Brai, 2026-09-25: "quiero que cuando minteas, aparezca el nft y un
+  // boton que diga SHARE y te deje compartir tu NFT en twitter" -- same
+  // Twitter-intent + server-rendered-OG-card pattern as the whitelist
+  // share button (see /nft/test/share/[tier]/[editionNumber]/page.tsx and
+  // its OG image route), just for a freshly-minted piece instead of a
+  // whitelist status.
+  "nftMint.revealed.share": { en: "SHARE", zh: "分享" },
+  "nftMint.share.caption.single": {
+    en: "Just minted {label} on ZODD 🎉 via @zodd_zcash",
+    zh: "刚刚在 @zodd_zcash 上铸造了 {label} 🎉",
+  },
+  "nftMint.share.caption.multi": {
+    en: "Just minted {count} ZODD Genesis NFTs 🎉 via @zodd_zcash",
+    zh: "刚刚在 @zodd_zcash 上铸造了 {count} 个 ZODD Genesis NFT 🎉",
+  },
   "nftMint.limitNote": { en: "Limit: {max} pieces per wallet.", zh: "每个钱包限购 {max} 件。" },
   "nftMint.phase.locked": { en: "Minting hasn't opened yet.", zh: "铸造尚未开放。" },
   "nftMint.phase.lockedWithTime": { en: "Minting opens {time}.", zh: "铸造将于 {time} 开放。" },

@@ -253,6 +253,29 @@ export default function NftMintPage() {
     }
   }
 
+  // Brai, 2026-09-25: "quiero que cuando minteas, aparezca el nft y un
+  // boton que diga SHARE y te deje compartir tu NFT en twitter" -- exact
+  // same Twitter-intent + fresh-token pattern as shareStatus() in
+  // nft/whitelist/page.tsx, pointed at the newly-minted piece's own share
+  // page (/nft/test/share/[tier]/[editionNumber]) so the tweet's card
+  // shows THIS piece, not a generic one. When more than one piece was
+  // minted in the same batch, the card still shows the first piece, but
+  // the caption says how many were minted.
+  function shareMinted() {
+    if (resultItems.length === 0) return;
+    const first = resultItems[0];
+    const tierSlug = nftTierSlug(first.tier);
+    const label = first.name ?? nftItemLabel(first.tier, first.editionNumber);
+    const caption =
+      mintedQuantity > 1
+        ? t("nftMint.share.caption.multi", { count: mintedQuantity })
+        : t("nftMint.share.caption.single", { label });
+    const freshToken = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const shareUrl = `https://zodd.fun/nft/test/share/${tierSlug}/${first.editionNumber}?t=${freshToken}`;
+    const intentUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(caption)}&url=${encodeURIComponent(shareUrl)}`;
+    window.open(intentUrl, "_blank", "noopener,noreferrer");
+  }
+
   async function startMint(mintQuantity: number, which: "free" | "buy") {
     if (!wallet || mintQuantity < 1) return;
     setError(null);
@@ -738,6 +761,9 @@ export default function NftMintPage() {
             </div>
           )}
           <div className="nft-mint-footer">
+            <button className="btn btn-outline" onClick={shareMinted}>
+              {t("nftMint.revealed.share")}
+            </button>
             {resultItems.length === 1 && (
               <Link href={nftItemPath(resultItems[0].editionNumber, resultItems[0].tier)} className="btn btn-outline">
                 {t("nftMint.revealed.viewItem")}
