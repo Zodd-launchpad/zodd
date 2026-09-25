@@ -621,8 +621,11 @@ export const translations = {
   // Conecta tu handle para chequear." -- replacing the English copy with
   // his exact requested Spanish wording (same pattern as other literal
   // Spanish UI strings elsewhere on this page, e.g. "MAXIMO 10 POR WALLET").
+  // Brai, 2026-09-25: "el mensaje de ESTAS EN WHITELIST conecta tu handle,
+  // tiene que estar en ingles" -- same copy, translated to English (the
+  // earlier version had accidentally been left in Spanish in the `en` slot).
   "nftMint.xClaim.intro": {
-    en: "¿Estás en whitelist? Conecta tu handle para chequear.",
+    en: "Are you on the whitelist? Connect your handle to check.",
     zh: "已获批但从未关联钱包？连接你的 X 账号进行核实。",
   },
   "nftMint.xClaim.checkButton": { en: "CHECK ELIGIBILITY", zh: "核实资格" },
