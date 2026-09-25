@@ -521,6 +521,13 @@ export type NftMintResult =
       // whitelist free claim's tiny on-chain fee (NFT_FREE_MINT_FEE_ZEC),
       // not a real paid mint. Optional/absent on a normal paid mint.
       freeClaim?: boolean;
+      // Brai, 2026-09-25: "que te explique porque te cobra 0.001 ZEC ...
+      // 0.0025 ZEC + 0.001 ZEC platform FEE = TOTAL: 0.0035 ZEC" -- the
+      // flat platform fee baked into zecAmount above, broken out so the
+      // mint page can show the price/fee/total split instead of just one
+      // combined number. Always present now (a free claim's zecAmount IS
+      // entirely this fee; a paid mint's zecAmount is price + this fee).
+      platformFeeZec: number;
     };
 
 export interface NftPendingMint {
@@ -534,6 +541,9 @@ export interface NftPendingMint {
   // the polled /api/nft/mints/:id row too, so the "waiting" UI still knows
   // after a page reload (mintId in state, freeClaim not).
   freeClaim: boolean;
+  // Same platformFeeZec breakdown as NftMintResult's PENDING branch, also
+  // mirrored here for the same page-reload reason.
+  platformFeeZec: number;
   status: "PENDING" | "CREATED" | "EXPIRED" | "FAILED";
   resultItemId: string | null;
   // Brai, 2026-09-19: quantity minting -- how many pieces this payment

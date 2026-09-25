@@ -1879,6 +1879,7 @@ app.post("/api/nft/mint", async (req, reply) => {
       memo: walletService.buildPaymentMemoBase64(pending.id),
       status: "PENDING",
       freeClaim: true,
+      platformFeeZec: NFT_FREE_MINT_FEE_ZEC,
     });
   }
 
@@ -1894,7 +1895,16 @@ app.post("/api/nft/mint", async (req, reply) => {
   // rejects outright. Round once here to 8 decimal places (ZEC's own
   // precision) and reuse that single value everywhere below, instead of
   // recomputing (and re-drifting) the multiplication a second time.
-  const totalMintZec = Math.round(mintPriceZec * quantity * 1e8) / 1e8;
+  const baseMintZec = Math.round(mintPriceZec * quantity * 1e8) / 1e8;
+  // Brai, 2026-09-25: "si estas comprando de manera publica nft que te
+  // cobra 0.0025 este qr tiene que decir 0.0025 ZEC + 0.001 ZEC platform
+  // FEE = TOTAL: 0.0035 ZEC" -- the same flat NFT_FREE_MINT_FEE_ZEC a free
+  // whitelist claim pays now also gets tacked onto every PAID mint, once
+  // per transaction regardless of quantity (same "flat, not per-piece"
+  // rule as the free-claim fee -- see its own comment in fees.ts). This is
+  // the actual amount requested on-chain, not just a display split: the
+  // QR/address below is generated for this total, not baseMintZec alone.
+  const totalMintZec = Math.round((baseMintZec + NFT_FREE_MINT_FEE_ZEC) * 1e8) / 1e8;
 
   // Brai, 2026-09-19: "mintea a precio 0" -- when an owner wallet's price
   // is actually 0, there's no real payment to wait for, so skip the
@@ -1953,6 +1963,7 @@ app.post("/api/nft/mint", async (req, reply) => {
     quantity,
     memo: walletService.buildPaymentMemoBase64(pending.id),
     status: "PENDING",
+    platformFeeZec: NFT_FREE_MINT_FEE_ZEC,
   });
 });
 

@@ -62,6 +62,10 @@ export default function NftMintPage() {
   // tiny on-chain fee too (see api.mintNft's PENDING branch), so the
   // "waiting" screen needs to say that's what this is, not a real purchase.
   const [freeClaim, setFreeClaim] = useState(false);
+  // Brai, 2026-09-25: "0.0025 ZEC + 0.001 ZEC platform FEE = TOTAL: 0.0035
+  // ZEC" -- the flat platform fee now shows as its own line item for paid
+  // mints too, not just free claims. Comes from the mint response.
+  const [platformFeeZec, setPlatformFeeZec] = useState<number | null>(null);
   const [mintedQuantity, setMintedQuantity] = useState(1);
   const [memo, setMemo] = useState<string | null>(null);
   const [qr, setQr] = useState<string | null>(null);
@@ -300,6 +304,7 @@ export default function NftMintPage() {
       setMintedQuantity(result.quantity);
       setMemo(result.memo ?? null);
       setFreeClaim(!!result.freeClaim);
+      setPlatformFeeZec(result.platformFeeZec ?? null);
       const uri = `zcash:${result.zecAddress}?amount=${result.zecAmount}${result.memo ? `&memo=${result.memo}` : ""}`;
       setQr(await QRCode.toDataURL(uri, { margin: 1, width: 220 }));
       setPhase("waiting");
@@ -688,48 +693,110 @@ export default function NftMintPage() {
       {phase === "waiting" && (
         <div className="card">
           {freeClaim && <div className="badge" style={{ display: "block", textAlign: "center", marginBottom: 10 }}>{t("nftMint.freeClaim.badge")}</div>}
-          <h2 style={{ marginTop: 0, textAlign: "center" }}>
-            {exactZecAmount != null ? formatZec(exactZecAmount) : ""} {collection?.currency}
-            {exactZecAmount != null && collection?.currency === "ZEC" && formatUsd(exactZecAmount, usdRate) && (
-              <span className="muted" style={{ fontSize: 14, fontWeight: 400 }}> (≈ {formatUsd(exactZecAmount, usdRate)})</span>
-            )}
-            {mintedQuantity > 1 && <span className="muted" style={{ fontSize: 14, fontWeight: 400 }}> ({t("nftMint.quantity.label")}: {mintedQuantity})</span>}
-          </h2>
-          {/* Brai, 2026-09-24: "aunque sea FREE MINT pongas ... (PLATFORM FEE)
-              una (i) de informacion ... solo en la ultima parte de pago,
-              cuando te abre ya el qr" -- only here, on the final QR/payment
-              screen, and only for the free-claim fee (the whole amount IS
-              the platform's cost-recovery fee in that case -- see
-              NFT_FREE_MINT_FEE_ZEC's comment in fees.ts -- unlike a normal
-              paid mint, where the amount is the piece's price, not a fee). */}
-          {freeClaim && (
-            <p
-              className="muted"
-              style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, margin: "2px 0 0", fontSize: 11, letterSpacing: "1px" }}
-            >
-              <span style={{ fontWeight: 700 }}>{t("nftMint.platformFee.label")}</span>
-              <span
-                title={t("nftMint.platformFee.tooltip")}
+          {/* Brai, 2026-09-25: "que te explique porque te cobra 0.001 ZEC,
+              que es por los servidores y plataforma fee etc ... si estas
+              comprando de manera publica nft que te cobra 0.0025 este qr
+              tiene que decir 0.0025 ZEC + 0.001 ZEC platform FEE = TOTAL:
+              0.0035 ZEC" -- the (i) tooltip from 2026-09-24 only ever showed
+              on a free claim (the whole amount WAS the fee there); the flat
+              fee is now also added on top of every PAID mint's price (see
+              the /api/nft/mint route's paid branch in server.ts), so a
+              paid mint needs its own price+fee=total breakdown here, not
+              just a bare total. platformFeeZec comes straight from that
+              same response -- never hardcoded on this side. */}
+          {!freeClaim && platformFeeZec != null && exactZecAmount != null ? (
+            <div style={{ textAlign: "center" }}>
+              <div
                 style={{
-                  display: "inline-flex",
+                  display: "flex",
+                  flexWrap: "wrap",
                   alignItems: "center",
                   justifyContent: "center",
-                  width: 15,
-                  height: 15,
-                  borderRadius: "50%",
-                  border: "1px solid var(--border)",
-                  fontSize: 10,
-                  fontStyle: "italic",
+                  gap: 6,
+                  fontSize: 19,
                   fontWeight: 700,
-                  letterSpacing: 0,
-                  cursor: "help",
-                  color: "var(--accent)",
-                  flexShrink: 0,
                 }}
               >
-                i
-              </span>
-            </p>
+                <span>{formatZec(Math.max(0, exactZecAmount - platformFeeZec))} {collection?.currency}</span>
+                <span className="muted" style={{ fontWeight: 400 }}>+</span>
+                <span>{formatZec(platformFeeZec)} {collection?.currency}</span>
+                <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "1px" }}>{t("nftMint.platformFee.label")}</span>
+                <span
+                  title={t("nftMint.platformFee.tooltip")}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    width: 15,
+                    height: 15,
+                    borderRadius: "50%",
+                    border: "1px solid var(--border)",
+                    fontSize: 10,
+                    fontStyle: "italic",
+                    fontWeight: 700,
+                    letterSpacing: 0,
+                    cursor: "help",
+                    color: "var(--accent)",
+                    flexShrink: 0,
+                  }}
+                >
+                  i
+                </span>
+                <span className="muted" style={{ fontWeight: 400 }}>=</span>
+                <span>{t("nftMint.total.label")}: {formatZec(exactZecAmount)} {collection?.currency}</span>
+              </div>
+              {(formatUsd(exactZecAmount, usdRate) || mintedQuantity > 1) && collection?.currency === "ZEC" && (
+                <p className="muted" style={{ fontSize: 13, margin: "4px 0 0" }}>
+                  {formatUsd(exactZecAmount, usdRate) && <>≈ {formatUsd(exactZecAmount, usdRate)}</>}
+                  {mintedQuantity > 1 && <> ({t("nftMint.quantity.label")}: {mintedQuantity})</>}
+                </p>
+              )}
+            </div>
+          ) : (
+            <>
+              <h2 style={{ marginTop: 0, textAlign: "center" }}>
+                {exactZecAmount != null ? formatZec(exactZecAmount) : ""} {collection?.currency}
+                {exactZecAmount != null && collection?.currency === "ZEC" && formatUsd(exactZecAmount, usdRate) && (
+                  <span className="muted" style={{ fontSize: 14, fontWeight: 400 }}> (≈ {formatUsd(exactZecAmount, usdRate)})</span>
+                )}
+                {mintedQuantity > 1 && <span className="muted" style={{ fontSize: 14, fontWeight: 400 }}> ({t("nftMint.quantity.label")}: {mintedQuantity})</span>}
+              </h2>
+              {/* Brai, 2026-09-24: "aunque sea FREE MINT pongas ... (PLATFORM FEE)
+                  una (i) de informacion ... solo en la ultima parte de pago,
+                  cuando te abre ya el qr" -- free-claim case: the whole
+                  amount above IS the fee (see NFT_FREE_MINT_FEE_ZEC's
+                  comment in fees.ts), so it's just a label + tooltip under
+                  the total rather than a price/fee/total breakdown. */}
+              {freeClaim && (
+                <p
+                  className="muted"
+                  style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, margin: "2px 0 0", fontSize: 11, letterSpacing: "1px" }}
+                >
+                  <span style={{ fontWeight: 700 }}>{t("nftMint.platformFee.label")}</span>
+                  <span
+                    title={t("nftMint.platformFee.tooltip")}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      width: 15,
+                      height: 15,
+                      borderRadius: "50%",
+                      border: "1px solid var(--border)",
+                      fontSize: 10,
+                      fontStyle: "italic",
+                      fontWeight: 700,
+                      letterSpacing: 0,
+                      cursor: "help",
+                      color: "var(--accent)",
+                      flexShrink: 0,
+                    }}
+                  >
+                    i
+                  </span>
+                </p>
+              )}
+            </>
           )}
           <p className="muted" style={{ textAlign: "center" }}>{freeClaim ? t("nftMint.freeClaim.waitingBody") : t("nftMint.waitingBody")}</p>
           {isRealMode && (

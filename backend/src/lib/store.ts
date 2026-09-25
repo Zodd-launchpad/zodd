@@ -6,7 +6,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
 import { CurveState, DEFAULT_CURVE_CONFIG, currentPrice, quoteBuy, quoteSell } from "./bondingCurve.js";
-import { splitFee, NFT_WHITELIST_FREE_MINT_LIMIT, NFT_TIER_NUMBERING_START, freeMintLimitForTier, NFT_RESERVATION_MINUTES } from "./fees.js";
+import { splitFee, NFT_WHITELIST_FREE_MINT_LIMIT, NFT_TIER_NUMBERING_START, freeMintLimitForTier, NFT_RESERVATION_MINUTES, NFT_FREE_MINT_FEE_ZEC } from "./fees.js";
 
 export const prisma = new PrismaClient();
 export { DEFAULT_CURVE_CONFIG };
@@ -2857,6 +2857,16 @@ export interface PendingNftMintView {
   // mint, so the frontend can show "FREE MINT -- just cover the network
   // fee" instead of treating it like a normal purchase.
   freeClaim: boolean;
+  // Brai, 2026-09-25: "si estas comprando de manera publica nft que te
+  // cobra 0.0025 este qr tiene que decir 0.0025 ZEC + 0.001 ZEC platform
+  // FEE = TOTAL: 0.0035 ZEC" -- the flat NFT_FREE_MINT_FEE_ZEC is no
+  // longer just the whole amount on a free claim, it's now ALSO tacked on
+  // top of every paid mint's price (see the /api/nft/mint route's paid
+  // branch in server.ts). Always this same constant regardless of
+  // freeClaim/quantity/tier, so it's computed here rather than stored --
+  // exposed so the mint page can show the price/fee/total breakdown
+  // without hardcoding the fee amount itself.
+  platformFeeZec: number;
 }
 
 function toPendingNftMintView(p: {
@@ -2890,6 +2900,7 @@ function toPendingNftMintView(p: {
     resultItemIds: p.resultItemIds,
     createdAt: p.createdAt.toISOString(),
     freeClaim: !!p.freeClaimWhitelistEntryId,
+    platformFeeZec: NFT_FREE_MINT_FEE_ZEC,
   };
 }
 
