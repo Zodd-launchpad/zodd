@@ -10,10 +10,9 @@ import Link from "next/link";
 // (b) a plain landing page for anyone who clicks the tweet, so they land
 // on a real page about the collection instead of a dead link.
 //
-// Lives under /nft/test/share for now, same as the rest of the mint flow
-// -- "seguimos en zodd.fun/nft/test hasta que yo te diga que lo pases a
-// zodd.fun/nft" -- moves together with everything else under /nft/test
-// when that switch happens.
+// Brai, 2026-09-25: "pasamos todo a zodd.fun/nft ... todo lo de
+// zodd.fun/nft/test lo pasamos a zodd.fun/nft" -- moved here from
+// /nft/test/share along with the rest of the mint flow.
 const SITE_URL = "https://zodd.fun";
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8787";
 const COLLECTION_SLUG = "zodd-genesis";
@@ -59,7 +58,7 @@ export async function generateMetadata({
   const token = typeof searchParams?.t === "string" ? searchParams.t : "";
   const tokenQuery = token ? `?t=${encodeURIComponent(token)}` : "";
   const imageUrl = `${SITE_URL}/api/og/nft/${tierSlug}/${editionNumber}${tokenQuery}`;
-  const pageUrl = `${SITE_URL}/nft/test/share/${tierSlug}/${editionNumber}${tokenQuery}`;
+  const pageUrl = `${SITE_URL}/nft/share/${tierSlug}/${editionNumber}${tokenQuery}`;
 
   return {
     title,
@@ -86,10 +85,10 @@ export default async function NftShareItemPage({
       <h1>{label}</h1>
       <p>Minted live on Zcash mainnet.</p>
       <p style={{ marginTop: 24 }}>
-        <Link href={`/nft/test/item/${tierSlug}/${editionNumber}`} className="btn btn-outline" style={{ marginRight: 12 }}>
+        <Link href={`/nft/item/${tierSlug}/${editionNumber}`} className="btn btn-outline" style={{ marginRight: 12 }}>
           View this piece
         </Link>
-        <Link href="/nft/test/mint" className="btn btn-gold">
+        <Link href="/nft/mint" className="btn btn-gold">
           Mint your own
         </Link>
       </p>

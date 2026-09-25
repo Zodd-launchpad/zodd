@@ -216,7 +216,7 @@ export default function NftItemPage() {
 
   return (
     <div className="container nft-market nft-item-page">
-      <Link href="/nft/test" className="nft-back-link" style={{ display: "inline-block", marginBottom: 16 }}>
+      <Link href="/nft" className="nft-back-link" style={{ display: "inline-block", marginBottom: 16 }}>
         {t("nftMint.back")}
       </Link>
       <div className="nft-item-layout">

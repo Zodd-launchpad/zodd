@@ -261,7 +261,7 @@ export default function NftMintPage() {
   // boton que diga SHARE y te deje compartir tu NFT en twitter" -- exact
   // same Twitter-intent + fresh-token pattern as shareStatus() in
   // nft/whitelist/page.tsx, pointed at the newly-minted piece's own share
-  // page (/nft/test/share/[tier]/[editionNumber]) so the tweet's card
+  // page (/nft/share/[tier]/[editionNumber]) so the tweet's card
   // shows THIS piece, not a generic one. When more than one piece was
   // minted in the same batch, the card still shows the first piece, but
   // the caption says how many were minted.
@@ -275,7 +275,7 @@ export default function NftMintPage() {
         ? t("nftMint.share.caption.multi", { count: mintedQuantity })
         : t("nftMint.share.caption.single", { label });
     const freshToken = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-    const shareUrl = `https://zodd.fun/nft/test/share/${tierSlug}/${first.editionNumber}?t=${freshToken}`;
+    const shareUrl = `https://zodd.fun/nft/share/${tierSlug}/${first.editionNumber}?t=${freshToken}`;
     const intentUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(caption)}&url=${encodeURIComponent(shareUrl)}`;
     window.open(intentUrl, "_blank", "noopener,noreferrer");
   }
@@ -396,7 +396,7 @@ export default function NftMintPage() {
 
   return (
     <div className="container nft-market nft-mint-page">
-      <Link href="/nft/test" className="nft-back-link" style={{ display: "inline-block", marginBottom: 16 }}>
+      <Link href="/nft" className="nft-back-link" style={{ display: "inline-block", marginBottom: 16 }}>
         {t("nftMint.back")}
       </Link>
 
@@ -554,7 +554,7 @@ export default function NftMintPage() {
                       ) : (
                         <a
                           className="btn btn-gold"
-                          href={`/api/auth/twitter/start?returnTo=${encodeURIComponent("/nft/test/mint")}`}
+                          href={`/api/auth/twitter/start?returnTo=${encodeURIComponent("/nft/mint")}`}
                           style={{ display: "inline-block" }}
                         >
                           {t("nftWhitelist.wizard.connectX")}
@@ -850,7 +850,7 @@ export default function NftMintPage() {
                 {t("nftMint.revealed.viewItem")}
               </Link>
             )}
-            <button className="btn btn-gold" onClick={() => router.push("/nft/test")}>
+            <button className="btn btn-gold" onClick={() => router.push("/nft")}>
               {t("nftMint.revealed.backToMarket")}
             </button>
           </div>

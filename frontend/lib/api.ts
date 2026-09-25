@@ -141,8 +141,9 @@ export function formatZec(zecAmount: number): string {
 export function nftTierSlug(tier: "PAPIRO" | "FRAGMENTO" | "RELIQUIA"): "papiro" | "fragmento" | "reliquia" {
   return tier === "PAPIRO" ? "papiro" : tier === "FRAGMENTO" ? "fragmento" : "reliquia";
 }
+// Brai, 2026-09-25: "pasamos todo a zodd.fun/nft" -- was /nft/test/item/...
 export function nftItemPath(editionNumber: number, tier: "PAPIRO" | "FRAGMENTO" | "RELIQUIA"): string {
-  return `/nft/test/item/${nftTierSlug(tier)}/${editionNumber}`;
+  return `/nft/item/${nftTierSlug(tier)}/${editionNumber}`;
 }
 // Brai, 2026-09-19: "todos sigan un numero tipo TIER 1 #1321" -- consistent
 // display label wherever an item's name might be missing.
