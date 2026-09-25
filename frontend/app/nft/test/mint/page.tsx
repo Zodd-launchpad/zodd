@@ -602,10 +602,15 @@ export default function NftMintPage() {
                       </button>
                     </div>
                   </div>
-                  <p className="muted" style={{ fontSize: 12 }}>
-                    {t("nftMint.quantity.remaining", { count: remainingWalletAllowance })}
-                  </p>
-
+                  {/* Brai, 2026-09-25: "quiero que desaparezca ese cartel que
+                      dice 50 left for your wallet ... que desaparezca para
+                      todas las wallets la cantidad que puede mintear real" --
+                      this used to render remainingWalletAllowance right
+                      below the stepper, which leaked the real per-wallet cap
+                      and clashed with the deliberately-fake "MAXIMO 10 POR
+                      WALLET" cartel above. Removed entirely; quantityCap
+                      still silently caps the stepper's +/- and typed value,
+                      just never displayed as a number anywhere. */}
                   <div className="nft-mintpage-total-row">
                     <span className="nft-mintpage-stage-label">{t("nftMint.total.label")}</span>
                     <span className="nft-mintpage-total-value">

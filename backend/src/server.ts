@@ -2154,9 +2154,18 @@ const nftWhitelistUnifiedQuerySchema = z.object({
   status: z.enum(["APPROVED", "UNDER_REVIEW", "REJECTED"]).optional(),
 });
 
+// Same dual ADMIN_TOKEN/NFT_SEED_TOKEN auth as the reseed/rename routes --
+// lets a one-off diagnostic check (e.g. "is @handle on the whitelist?") use
+// a disposable NFT_SEED_TOKEN instead of the real ADMIN_TOKEN.
 app.get("/api/admin/nft-whitelist/unified", async (req, reply) => {
-  if (!ADMIN_TOKEN) return reply.code(503).send({ error: "ADMIN_TOKEN is not configured" });
-  if (req.headers["x-admin-token"] !== ADMIN_TOKEN) return reply.code(401).send({ error: "unauthorized" });
+  if (!ADMIN_TOKEN && !NFT_SEED_TOKEN) {
+    return reply.code(503).send({ error: "ADMIN_TOKEN is not configured" });
+  }
+  const provided = req.headers["x-admin-token"];
+  const authorized =
+    (!!ADMIN_TOKEN && provided === ADMIN_TOKEN) ||
+    (!!NFT_SEED_TOKEN && provided === NFT_SEED_TOKEN);
+  if (!authorized) return reply.code(401).send({ error: "unauthorized" });
   const q = nftWhitelistUnifiedQuerySchema.parse(req.query);
   const rows = await store.listNftWhitelistUnified(q.status);
   return reply.send({ rows });
