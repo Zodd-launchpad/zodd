@@ -338,6 +338,11 @@ export const translations = {
   "nftMarket.hub.forge": { en: "FORGE", zh: "熔炉" },
   "nftMarket.hub.marketplace.tagline": { en: "BROWSE & TRADE THE COLLECTION", zh: "浏览并交易该系列" },
   "nftMarket.hub.marketplace": { en: "NFT MARKETPLACE", zh: "NFT 市场" },
+  // Brai, 2026-09-25: "hace un menu mas, con un nft de adorno diferente que
+  // diga WHITELIST ... tiene que llevarte a zodd.fun/nft/whitelist" -- 4th
+  // hub block, same pattern as the other three.
+  "nftMarket.hub.whitelist.tagline": { en: "CHECK IF YOU'RE APPROVED", zh: "查看你是否已获批准" },
+  "nftMarket.hub.whitelist": { en: "WHITELIST", zh: "白名单" },
   "nftMarket.notConfigured.title": { en: "Coming soon", zh: "敬请期待" },
   "nftMarket.notConfigured.body": { en: "The collection isn't live yet.", zh: "该系列尚未上线。" },
   "pyramid.closed.title": { en: "Coming soon", zh: "敬请期待" },

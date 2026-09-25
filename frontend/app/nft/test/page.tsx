@@ -148,12 +148,14 @@ export default function NftMarketTestPage() {
   // Brai, 2026-09-25: "a los menues MINT FORGE Y NFT MARKETPLACE, en el
   // mismo rectangulo al lado ponele un NFT de una reliquia a cada uno, para
   // decorar" -- purely decorative, real RELIQUIA pieces shown next to the
-  // three hub buttons. Brai, 2026-09-25 (follow-up): "pusiste el mismo nft
-  // en las 3 lineas de titulo ... que sean 3 diferentes" -- fetch a small
-  // page of RELIQUIA items (not a hardcoded image) and give each hub block
-  // its own distinct piece, falling back to the first one if the
-  // collection doesn't have 3 distinct RELIQUIA items yet.
-  const [hubReliquiaImages, setHubReliquiaImages] = useState<(string | null)[]>([null, null, null]);
+  // hub buttons. Brai, 2026-09-25 (follow-up): "pusiste el mismo nft en las
+  // 3 lineas de titulo ... que sean 3 diferentes" -- fetch a small page of
+  // RELIQUIA items (not a hardcoded image) and give each hub block its own
+  // distinct piece, falling back to the first one if the collection
+  // doesn't have that many distinct RELIQUIA items yet. Brai, 2026-09-25
+  // (2nd follow-up): "hace un menu mas ... con un nft de adorno diferente
+  // que diga WHITELIST" -- now 4 slots instead of 3, one per hub block.
+  const [hubReliquiaImages, setHubReliquiaImages] = useState<(string | null)[]>([null, null, null, null]);
   useEffect(() => {
     api
       .getNftItems(COLLECTION_SLUG, { tier: "RELIQUIA", page: 1 })
@@ -163,6 +165,7 @@ export default function NftMarketTestPage() {
           r.items[0]?.imageDataUrl ?? fallback,
           r.items[1]?.imageDataUrl ?? fallback,
           r.items[2]?.imageDataUrl ?? fallback,
+          r.items[3]?.imageDataUrl ?? fallback,
         ]);
       })
       .catch(() => setHubReliquiaImages([null, null, null]));
@@ -296,8 +299,12 @@ export default function NftMarketTestPage() {
           duplicating them. */}
       {/* Brai, 2026-09-25: "a los menues MINT FORGE Y NFT MARKETPLACE, en el
           mismo rectangulo al lado ponele un NFT de una reliquia a cada uno,
-          para decorar" -- 3 distinct real RELIQUIA pieces (hubReliquiaImages,
-          fetched above), one per block, shown beside the text. */}
+          para decorar" -- distinct real RELIQUIA pieces (hubReliquiaImages,
+          fetched above), one per block, shown beside the text. Brai,
+          2026-09-25 (follow-up): "hace un menu mas, con un nft de adorno
+          diferente que diga WHITELIST ... tiene que llevarte a
+          zodd.fun/nft/whitelist" -- 4th block, links straight to the
+          existing whitelist page (same pattern as MINT above). */}
       <div className="nft-hub">
         <Link href="/nft/test/mint" className="nft-hub-block">
           <span className="nft-hub-block-text">
@@ -320,6 +327,13 @@ export default function NftMarketTestPage() {
           </span>
           {hubReliquiaImages[2] && <NftMedia src={hubReliquiaImages[2]} alt="" className="nft-hub-block-media" />}
         </button>
+        <Link href="/nft/whitelist" className="nft-hub-block">
+          <span className="nft-hub-block-text">
+            <span className="nft-hub-block-tagline">{t("nftMarket.hub.whitelist.tagline")}</span>
+            <span className="nft-hub-block-label">{t("nftMarket.hub.whitelist")}</span>
+          </span>
+          {hubReliquiaImages[3] && <NftMedia src={hubReliquiaImages[3]} alt="" className="nft-hub-block-media" />}
+        </Link>
       </div>
 
       {showMarket && (
