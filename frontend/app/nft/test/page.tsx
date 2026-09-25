@@ -149,23 +149,35 @@ export default function NftMarketTestPage() {
   // mismo rectangulo al lado ponele un NFT de una reliquia a cada uno, para
   // decorar" -- purely decorative, real RELIQUIA pieces shown next to the
   // hub buttons. Brai, 2026-09-25 (follow-up): "pusiste el mismo nft en las
-  // 3 lineas de titulo ... que sean 3 diferentes" -- fetch a small page of
-  // RELIQUIA items (not a hardcoded image) and give each hub block its own
-  // distinct piece, falling back to the first one if the collection
-  // doesn't have that many distinct RELIQUIA items yet. Brai, 2026-09-25
-  // (2nd follow-up): "hace un menu mas ... con un nft de adorno diferente
-  // que diga WHITELIST" -- now 4 slots instead of 3, one per hub block.
+  // 3 lineas de titulo ... que sean 3 diferentes" -- Brai, 2026-09-25 (2nd
+  // follow-up): "hace un menu mas ... con un nft de adorno diferente que
+  // diga WHITELIST" -- now 4 slots. Brai, 2026-09-25 (3rd follow-up): "la
+  // cuarta reliquia de whitelist es igual a la primera" -- root cause: this
+  // collection only has 5 distinct RELIQUIA *designs* shared across 1000+
+  // editions, so picking raw list indices [0,1,2,3] from a page of items
+  // often repeats a design (e.g. items[0] and items[3] were literally the
+  // same artwork, different edition numbers). Fixed by de-duplicating on
+  // imageDataUrl (the actual artwork identity) and taking the first 4
+  // distinct ones, falling back to whichever distinct images were found if
+  // the collection somehow has fewer than 4 RELIQUIA designs.
   const [hubReliquiaImages, setHubReliquiaImages] = useState<(string | null)[]>([null, null, null, null]);
   useEffect(() => {
     api
       .getNftItems(COLLECTION_SLUG, { tier: "RELIQUIA", page: 1 })
       .then((r) => {
-        const fallback = r.items[0]?.imageDataUrl ?? null;
+        const distinct: string[] = [];
+        for (const item of r.items) {
+          if (item.imageDataUrl && !distinct.includes(item.imageDataUrl)) {
+            distinct.push(item.imageDataUrl);
+          }
+          if (distinct.length >= 4) break;
+        }
+        const fallback = distinct[0] ?? null;
         setHubReliquiaImages([
-          r.items[0]?.imageDataUrl ?? fallback,
-          r.items[1]?.imageDataUrl ?? fallback,
-          r.items[2]?.imageDataUrl ?? fallback,
-          r.items[3]?.imageDataUrl ?? fallback,
+          distinct[0] ?? fallback,
+          distinct[1] ?? fallback,
+          distinct[2] ?? fallback,
+          distinct[3] ?? fallback,
         ]);
       })
       .catch(() => setHubReliquiaImages([null, null, null]));
