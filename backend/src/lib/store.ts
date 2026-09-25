@@ -1878,6 +1878,27 @@ export async function getMediaVariantByKey(key: string): Promise<NftTierVariant 
 // silently emits a broken relative path.
 const PUBLIC_BACKEND_URL = (process.env.PUBLIC_BACKEND_URL ?? process.env.BACKEND_PUBLIC_URL ?? "https://backend-production-e195.up.railway.app").replace(/\/$/, "");
 
+// Brai, 2026-09-25: "la cuarta reliquia de whitelist es igual a la
+// primera" -- root cause was that the hub decoration picked its "distinct"
+// pieces from already-MINTED items, which only ever reflect whichever
+// variants random assignment happened to land on so far (5 of the RELIQUIA
+// tier's 7 configured designs, since the other 2 were added later via
+// addNftTierVariants and haven't been drawn by any mint yet). This reads
+// straight from the tier's configured variant pool instead -- the real,
+// complete set of designs -- and returns lightweight metadata only (never
+// the multi-MB videoDataUrl itself, which is a multi-MB base64 blob not fit
+// for a public listing response; same reasoning as toNftItemView's
+// resolvedImage already documents for individual items).
+export async function getNftTierVariantsPublic(
+  slug: string,
+  tier: "PAPIRO" | "FRAGMENTO" | "RELIQUIA"
+): Promise<{ key: string; name: string; mediaUrl: string }[]> {
+  const collection = await prisma.nftCollection.findUnique({ where: { slug }, select: { id: true } });
+  if (!collection) return [];
+  const media = await getCollectionTierImages(collection.id);
+  return media[tier].variants.map((v) => ({ key: v.key, name: v.name, mediaUrl: `${PUBLIC_BACKEND_URL}/api/nft/media/${encodeURIComponent(v.key)}` }));
+}
+
 function toNftItemView(
   i: {
     id: string;

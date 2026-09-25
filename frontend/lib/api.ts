@@ -337,6 +337,16 @@ export const api = {
   // Brai, 2026-09-19 (v14): Traits tab on /nft/test -- see the backend's
   // getNftTraitCounts for why this is its own aggregation endpoint.
   getNftTraits: (slug: string): Promise<{ traits: NftTraitCount[] }> => req(`/api/nft/collections/${slug}/traits`),
+  // Brai, 2026-09-25: "la cuarta reliquia de whitelist es igual a la
+  // primera" -- lightweight listing of a tier's actually-configured
+  // variants (not just whichever ones happen to already be minted), used by
+  // the hub decoration so it always has the real, complete design set to
+  // pick distinct pieces from. See the backend's getNftTierVariantsPublic.
+  getNftTierVariants: (
+    slug: string,
+    tier: "PAPIRO" | "FRAGMENTO" | "RELIQUIA"
+  ): Promise<{ variants: { key: string; name: string; mediaUrl: string }[] }> =>
+    req(`/api/nft/collections/${slug}/tier-variants?tier=${tier}`),
   // Brai, 2026-09-19: editionNumber is scoped per tier now (see the
   // backend's NftItem.editionNumber comment) -- "TIER 1 #1321" and
   // "TIER 2 #1321" can both exist, so the lookup needs the tier slug too.

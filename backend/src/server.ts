@@ -1384,6 +1384,22 @@ app.get("/api/nft/collections/:slug/traits", async (req, reply) => {
   return reply.send({ traits });
 });
 
+// Brai, 2026-09-25: "la cuarta reliquia de whitelist es igual a la primera"
+// -- the hub decoration on /nft/test was picking its "distinct" pieces from
+// already-MINTED items, which don't yet cover every configured design (see
+// store.getNftTierVariantsPublic's comment). This is the lightweight public
+// listing it needs: just {key, name, mediaUrl} per variant, never the
+// multi-MB video payload itself. Deliberately unauthenticated, same trust
+// level as /api/nft/media/:key below (marketing media for a public page).
+const nftTierVariantsQuerySchema = z.object({ tier: z.enum(["PAPIRO", "FRAGMENTO", "RELIQUIA"]) });
+app.get("/api/nft/collections/:slug/tier-variants", async (req, reply) => {
+  const { slug } = req.params as { slug: string };
+  const q = nftTierVariantsQuerySchema.safeParse(req.query);
+  if (!q.success) return reply.code(400).send({ error: "expected ?tier=PAPIRO|FRAGMENTO|RELIQUIA" });
+  const variants = await store.getNftTierVariantsPublic(slug, q.data.tier);
+  return reply.send({ variants });
+});
+
 // ---------- Forge: papiros -> fragmentos -> reliquias ----------
 // Brai, 2026-09-19: "genera una solapa que sea como la forja" -- see
 // store.ts's FORGE_RECIPES/forgeCraft for the actual burn+mint mechanics.

@@ -152,35 +152,29 @@ export default function NftMarketTestPage() {
   // 3 lineas de titulo ... que sean 3 diferentes" -- Brai, 2026-09-25 (2nd
   // follow-up): "hace un menu mas ... con un nft de adorno diferente que
   // diga WHITELIST" -- now 4 slots. Brai, 2026-09-25 (3rd follow-up): "la
-  // cuarta reliquia de whitelist es igual a la primera" -- root cause: this
-  // collection only has 5 distinct RELIQUIA *designs* shared across 1000+
-  // editions, so picking raw list indices [0,1,2,3] from a page of items
-  // often repeats a design (e.g. items[0] and items[3] were literally the
-  // same artwork, different edition numbers). Fixed by de-duplicating on
-  // imageDataUrl (the actual artwork identity) and taking the first 4
-  // distinct ones, falling back to whichever distinct images were found if
-  // the collection somehow has fewer than 4 RELIQUIA designs.
+  // cuarta reliquia de whitelist es igual a la primera ... no puede ser, son
+  // 7 las reliquias" -- root cause: picking from already-MINTED items only
+  // ever surfaced designs that had actually been drawn by a mint so far (5
+  // of the 7 configured RELIQUIA designs -- the other 2 were added to the
+  // tier's variant pool later and hadn't been minted yet, so they could
+  // never show up this way). Switched to the tier's real, complete variant
+  // pool (getNftTierVariants) -- these ARE the 7 official designs Brai
+  // confirmed and named, independent of what's been minted.
   const [hubReliquiaImages, setHubReliquiaImages] = useState<(string | null)[]>([null, null, null, null]);
   useEffect(() => {
     api
-      .getNftItems(COLLECTION_SLUG, { tier: "RELIQUIA", page: 1 })
+      .getNftTierVariants(COLLECTION_SLUG, "RELIQUIA")
       .then((r) => {
-        const distinct: string[] = [];
-        for (const item of r.items) {
-          if (item.imageDataUrl && !distinct.includes(item.imageDataUrl)) {
-            distinct.push(item.imageDataUrl);
-          }
-          if (distinct.length >= 4) break;
-        }
-        const fallback = distinct[0] ?? null;
+        const urls = r.variants.map((v) => v.mediaUrl);
+        const fallback = urls[0] ?? null;
         setHubReliquiaImages([
-          distinct[0] ?? fallback,
-          distinct[1] ?? fallback,
-          distinct[2] ?? fallback,
-          distinct[3] ?? fallback,
+          urls[0] ?? fallback,
+          urls[1] ?? fallback,
+          urls[2] ?? fallback,
+          urls[3] ?? fallback,
         ]);
       })
-      .catch(() => setHubReliquiaImages([null, null, null]));
+      .catch(() => setHubReliquiaImages([null, null, null, null]));
   }, []);
 
   // "Owned by you" needs a connected wallet -- fall back to "all" if it
