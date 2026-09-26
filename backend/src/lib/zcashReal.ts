@@ -687,19 +687,57 @@ async function maybeTopUpAddressPool() {
     // still processes its own share serially, so this doesn't overload any
     // single one) instead of one at a time, so top-up speed actually scales
     // with worker count instead of being paced by round-trips.
-    while (count < ADDRESS_POOL_TARGET && generated < 5) {
-      const batchSize = Math.min(1 + ADDRESS_WORKER_URLS.length, ADDRESS_POOL_TARGET - count, 5 - generated);
+    //
+    // ZODD (2026-09-26, live launch incident): two address-only workers can
+    // come back with the SAME address if their local diversifier counters
+    // ever land on the same index (see the long comment on
+    // addPregeneratedZcashAddress in store.ts -- confirmed today, right
+    // after a simultaneous ZCASH_FORCE_REWALLET wipe/resync of all 4
+    // workers left them ticking forward in perfect lockstep, since the
+    // round-robin in callAddressWorker calls every worker the same number
+    // of times). addPregeneratedZcashAddress returns false for a duplicate
+    // instead of throwing, so one collision only costs that one address --
+    // it no longer nukes the rest of the batch. A hard attempt cap keeps
+    // this loop from spinning forever in the worst case (every single call
+    // colliding); it just gives up for this tick and the next nudge/timer
+    // tick tries again.
+    let duplicates = 0;
+    let attempts = 0;
+    const MAX_TOPUP_ATTEMPTS = 20;
+    while (count < ADDRESS_POOL_TARGET && generated < 5 && attempts < MAX_TOPUP_ATTEMPTS) {
+      const batchSize = Math.min(
+        1 + ADDRESS_WORKER_URLS.length,
+        ADDRESS_POOL_TARGET - count,
+        5 - generated,
+        MAX_TOPUP_ATTEMPTS - attempts
+      );
       const results = await Promise.all(
         Array.from({ length: Math.max(1, batchSize) }, () => callAddressWorker("/wallet/address", { method: "POST" }))
       );
+      attempts += results.length;
+      const seenThisBatch = new Set<string>();
       for (const { address, saplingDiversifierHex = null, orchardDiversifierHex = null } of results) {
-        await addPregeneratedZcashAddress(address, saplingDiversifierHex, orchardDiversifierHex);
+        if (seenThisBatch.has(address)) {
+          duplicates++;
+          continue;
+        }
+        seenThisBatch.add(address);
+        const inserted = await addPregeneratedZcashAddress(address, saplingDiversifierHex, orchardDiversifierHex);
+        if (!inserted) {
+          duplicates++;
+          continue;
+        }
         generated++;
         count++;
       }
     }
     if (generated > 0) {
       console.log(`[zcashReal] address pool: generated ${generated} address(es), ~${count}/${ADDRESS_POOL_TARGET} now in stock`);
+    }
+    if (duplicates > 0) {
+      console.warn(
+        `[zcashReal] address pool top-up: skipped ${duplicates} duplicate address(es) this run (two address workers handed out the same diversifier -- see the comment on addPregeneratedZcashAddress in store.ts). Not fatal, but worth a look if it keeps happening a lot.`
+      );
     }
   } catch (err) {
     console.error(`[zcashReal] address pool top-up failed:`, err);

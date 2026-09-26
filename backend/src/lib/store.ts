@@ -4,7 +4,7 @@
  * this one actually persists across restarts and deploys.
  */
 import { createHash, randomUUID } from "node:crypto";
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import { CurveState, DEFAULT_CURVE_CONFIG, currentPrice, quoteBuy, quoteSell } from "./bondingCurve.js";
 import { splitFee, NFT_WHITELIST_FREE_MINT_LIMIT, NFT_TIER_NUMBERING_START, freeMintLimitForTier, NFT_RESERVATION_MINUTES, NFT_FREE_MINT_FEE_ZEC } from "./fees.js";
 
@@ -3980,13 +3980,41 @@ export async function claimPregeneratedZcashAddress(orderId: string): Promise<{
  * an order) address to the pool. Called only by maybeTopUpAddressPool's
  * background refill loop in zcashReal.ts -- never on the interactive
  * buy/sell path, which only ever reads via claimPregeneratedZcashAddress
- * above. */
+ * above.
+ *
+ * ZODD (2026-09-26, live launch incident): the address-only workers all
+ * share the SAME ZCASH_WALLET_SEED (see the comment on ADDRESS_WORKER_URLS
+ * in zcashReal.ts), but each keeps its OWN local wallet.dat, which is what
+ * actually tracks "which diversifier index have I already handed out". If
+ * two workers' local counters ever land on the same index -- confirmed
+ * today, right after wiping/resyncing all 4 of them at once via
+ * ZCASH_FORCE_REWALLET, which reset every one of them back to the same
+ * starting index at the same time -- they can return the IDENTICAL new
+ * address, and this insert's own unique constraint on `address` is what
+ * actually catches that. Returns false instead of throwing so the batch
+ * loop in maybeTopUpAddressPool can skip just this one collision and keep
+ * going: previously this threw straight into that function's outer catch,
+ * which aborted the ENTIRE top-up attempt -- including every other,
+ * perfectly good address already generated in the same batch -- every
+ * single time two workers collided. That's exactly what was observed: the
+ * pool stuck flat for 40+ minutes with "[zcashReal] address pool top-up
+ * failed" logging on almost every tick, because the workers were stuck in
+ * lockstep (round-robin calls them the same number of times each) and kept
+ * colliding on literally every round. */
 export async function addPregeneratedZcashAddress(
   address: string,
   saplingDiversifierHex: string | null,
   orchardDiversifierHex: string | null
-): Promise<void> {
-  await prisma.pregeneratedZcashAddress.create({ data: { address, saplingDiversifierHex, orchardDiversifierHex } });
+): Promise<boolean> {
+  try {
+    await prisma.pregeneratedZcashAddress.create({ data: { address, saplingDiversifierHex, orchardDiversifierHex } });
+    return true;
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+      return false; // duplicate diversifier from another worker -- not a real error, just skip it
+    }
+    throw err;
+  }
 }
 
 /** How many unclaimed addresses are currently sitting in the pool -- what
