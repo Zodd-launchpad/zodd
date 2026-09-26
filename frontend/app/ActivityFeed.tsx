@@ -10,7 +10,14 @@ import { useLanguage } from "@/lib/i18n";
 // responsable (306GB / $15 de los $21.85 del proyecto en 14 dias). 20s
 // sigue viendose "vivo" para un feed de actividad, a una fraccion del
 // trafico.
-const POLL_MS = 30000;
+//
+// Brai, 2026-09-26 (dia de lanzamiento): "necesito que configures el
+// refresco del live activity cada 3 segundos" -- vuelve a subir el
+// polling, ahora mas agresivo que el 4s original que causo el problema de
+// arriba. OJO: esto multiplica el trafico de /api/trades y /api/nft/activity
+// por ~10x contra los 30s actuales, en todas las pestanas abiertas durante
+// el lanzamiento. Vigilar el egress de Railway hoy.
+const POLL_MS = 3000;
 const MAX_ROWS = 18;
 
 // Brai, 2026-09-18 (v2, URGENT): "sacame del live activity todo lo
