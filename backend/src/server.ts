@@ -1007,6 +1007,37 @@ app.post("/api/admin/force-complete-token-creation", async (req, reply) => {
   return reply.send({ ok: true, token });
 });
 
+// ZODD (2026-09-26, live launch incident): twin of force-complete-token-
+// creation above, for a stuck PendingNftMint instead. Same root cause,
+// same fix philosophy: an already-received payment (proven by matching the
+// order's own one-time-address diversifier against a confirmed note --
+// unambiguous, per zcashReal.ts's Pass 0) that pollOnce's Pass 0/1/2 never
+// got to credit here -- either because the SAME diversifier/address was
+// handed out to two different pending mints at once (address-pool bug,
+// still under investigation) and the underlying note got claimed by
+// whichever OTHER pending record/collection got to it first via the
+// amount-fallback pass, or because the backend crashed between the match
+// and the DB write finishing. Either way the ZEC already sits in the
+// platform wallet -- this does NOT move any funds, it only finishes the
+// mint record via the exact same store.completePendingNftMint the normal
+// payment-detected path uses (atomic random-claim, whitelist-allowance
+// re-check, sold-out handling, all of it), so a manually-recovered mint is
+// indistinguishable from a normal one. Guarded to real mode and
+// PENDING-only; requires the id of a note actually seen by the wallet
+// service, so this can't be used to mint for free.
+app.post("/api/admin/force-complete-nft-mint", async (req, reply) => {
+  if (ZCASH_MODE !== "real") return reply.code(404).send({ error: "not in real mode" });
+  const body = z.object({ mintId: z.string(), txid: z.string().min(10) }).safeParse(req.body);
+  if (!body.success) return reply.code(400).send({ error: "expected mintId and txid" });
+  const pending = await store.getPendingNftMint(body.data.mintId);
+  if (!pending) return reply.code(404).send({ error: "not found" });
+  if (pending.status !== "PENDING") return reply.code(409).send({ error: `already ${pending.status}` });
+  const result = await store.completePendingNftMint(body.data.mintId, body.data.txid);
+  if (!result) return reply.code(500).send({ error: "completion failed (sold out or free-claim allowance exhausted)" });
+  app.log.info(`[admin] force-completed pending NFT mint ${body.data.mintId} -> ${result.collectionSlug} x${result.itemIds.length} (#${result.editionNumbers.join(", #")}) (manual recovery, txid ${body.data.txid})`);
+  return reply.send({ ok: true, result });
+});
+
 // Brai (2026-09-07): wants to run the creator-fee distribution himself, on
 // demand, instead of only via the automatic 24h/15min-check cycle
 // (startFeeDistributor below) -- "quiero hacerlo manual yo, para mas
