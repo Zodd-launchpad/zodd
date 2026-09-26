@@ -17,7 +17,21 @@ import { useLanguage } from "@/lib/i18n";
 // arriba. OJO: esto multiplica el trafico de /api/trades y /api/nft/activity
 // por ~10x contra los 30s actuales, en todas las pestanas abiertas durante
 // el lanzamiento. Vigilar el egress de Railway hoy.
-const POLL_MS = 3000;
+//
+// ZODD (2026-09-26, live incident, same launch day): confirmed live -- the
+// backend has been crash-looping roughly every 1-2 minutes under real
+// launch traffic (memory climbing to 5-7.5GB average/peak per
+// get-service-metrics, well past what this service normally needs), and
+// every restart drops the in-memory payment-watcher state mid-flight,
+// which is exactly why several buyers who DID pay (confirmed on-chain,
+// diversifier-matched) never got their NFT finalized -- the match kept
+// getting interrupted before the DB write landed. 3s polling from
+// (likely) dozens of concurrent open tabs, on top of everything else this
+// service is doing during the drop, lines up with when this got bad.
+// Dialing back to 10s: still reads as live, cuts this endpoint's request
+// volume by ~3x from 3s, without reverting all the way to the pre-launch
+// 30s. Revisit once the launch traffic spike passes.
+const POLL_MS = 10000;
 const MAX_ROWS = 18;
 
 // Brai, 2026-09-18 (v2, URGENT): "sacame del live activity todo lo
