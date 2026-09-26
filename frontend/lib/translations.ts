@@ -515,7 +515,7 @@ export const translations = {
   "nftMint.freeMint.label": { en: "FREE MINT", zh: "免费铸造" },
   "nftMint.buyButton": { en: "MINT", zh: "铸造" },
   "nftMint.total.free": { en: "FREE", zh: "免费" },
-  "nftMint.waitingBody": { en: "Send the exact amount below. Your piece is revealed automatically once payment is detected.", zh: "请发送下方准确金额。检测到付款后将自动为你揭示作品。" },
+  "nftMint.waitingBody": { en: "Send the exact amount below. Your piece is revealed automatically once payment is detected — this can take 1 to 3 minutes, please don't close this page.", zh: "请发送下方准确金额。检测到付款后将自动为你揭示作品——最长可能需要1到3分钟，请不要关闭此页面。" },
   // Brai, 2026-09-19: "inclusive los que hacen free mint tienen que hacer
   // una tx con su wallet y cobrarle muy poco, que cubran la transaccion y
   // un poquito mas ... sino no tiene sentido solo son nfts en mi base de
@@ -524,7 +524,7 @@ export const translations = {
   // in the backend), so it can't stay fully silent about a fee existing.
   "nftMint.freeClaim.feeNote": { en: "A tiny network fee applies so your piece lives on-chain, not just in a database.", zh: "需支付极少的网络手续费，让你的作品真正上链，而不只是存在数据库里。" },
   "nftMint.freeClaim.badge": { en: "FREE MINT", zh: "免费铸造" },
-  "nftMint.freeClaim.waitingBody": { en: "Send the exact (tiny) amount below to put your free piece on-chain. It's revealed automatically once payment is detected.", zh: "请发送下方极少金额，让你的免费作品上链。检测到付款后将自动为你揭示作品。" },
+  "nftMint.freeClaim.waitingBody": { en: "Send the exact (tiny) amount below to put your free piece on-chain. It's revealed automatically once payment is detected — this can take 1 to 3 minutes, please don't close this page.", zh: "请发送下方极少金额，让你的免费作品上链。检测到付款后将自动为你揭示作品——最长可能需要1到3分钟，请不要关闭此页面。" },
   // Brai, 2026-09-24: "aunque sea FREE MINT pongas 0.001 ZEC (entre
   // parentesis el valor en dolar), (PLATFORM FEE) una (i) de informacion y
   // que explique que este fee es por los costos de mantenimiento de los

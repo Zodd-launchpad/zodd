@@ -140,11 +140,37 @@ export default function NftMarketPage() {
   const [forgeCraftingTier, setForgeCraftingTier] = useState<ForgeFromTier | null>(null);
   const [forgeMessage, setForgeMessage] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
 
+  // ZODD (2026-09-26, live launch incident, Brai: "hay veces que toco en NFT
+  // y me aparece en zodd.fun/nft un cartel que dicen COMING SOON"): under
+  // heavy load this fetch can transiently fail (timeout, 502, dropped
+  // connection) -- that used to fall straight into setCollection(null),
+  // which renders the permanent "not configured" / Coming Soon screen below
+  // (collection === null) with no way to recover short of a manual reload.
+  // The collection has been live and public since 2026-09-25 (see the
+  // 2026-09-25 comment above), so a fetch failure here is essentially always
+  // transient, never a real "not configured" state. Fix: keep retrying
+  // (collection stays undefined => renders null / a blank loading state,
+  // never the Coming Soon screen) instead of giving up after one failure.
   useEffect(() => {
-    api
-      .getNftCollection(COLLECTION_SLUG)
-      .then(setCollection)
-      .catch(() => setCollection(null));
+    let cancelled = false;
+    let attempt = 0;
+    function load() {
+      api
+        .getNftCollection(COLLECTION_SLUG)
+        .then((c) => {
+          if (!cancelled) setCollection(c);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          attempt++;
+          const delay = Math.min(2000 * attempt, 10000); // 2s, 4s, 6s, 8s, capped at 10s
+          setTimeout(load, delay);
+        });
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Brai, 2026-09-25: "a los menues MINT FORGE Y NFT MARKETPLACE, en el
