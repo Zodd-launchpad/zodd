@@ -2132,7 +2132,14 @@ export async function getForgeInventory(walletId: string, collectionId: string):
 // once the cap is hit the FRAGMENTO->RELIQUIA craft simply stops working --
 // nothing is burned, the wallet keeps its fragmentos, same as any other
 // "didn't work, nothing changed" rejection in this file.
-export const RELIQUIA_MAX_SUPPLY = 300;
+//
+// Brai, 2026-09-26: "saca el limite de 300 piezas tier 3" -- removed. No
+// cap on RELIQUIA supply anymore: forgeCraft's existingReliquias >=
+// RELIQUIA_MAX_SUPPLY check (and seedTieredNftCollection's tier3Count
+// validation, same constant) both become no-ops against Infinity, so
+// FRAGMENTO->RELIQUIA crafting never hits "cap_reached" and a future
+// reseed can ask for any tier3Count.
+export const RELIQUIA_MAX_SUPPLY = Infinity;
 
 export type ForgeCraftResult = { ok: true; item: NftItemView } | { ok: false; reason: "insufficient" | "cap_reached" };
 
