@@ -151,8 +151,21 @@ export async function ensureWalletReady() {
 // these two fields, which callers must treat as optional (see
 // generateOrderAddress in backend/src/lib/zcashReal.ts -- it falls back to
 // memo/amount matching for any order that doesn't have them).
+//
+// ZODD (2026-09-26, live launch incident): confirmed live today -- this
+// call is regularly taking 40-43+ seconds under current load (worker logs
+// showing "request completed" at ~42.6s/43.6s), well past the 30s this used
+// to be given. With no --waitsync this doesn't wait on chain sync, so
+// that budget assumed a near-instant local derivation; in practice it
+// isn't one anymore. Every time execFile's own timeout hit first, it
+// SIGTERM'd a zingo-cli that had often already printed a perfectly good
+// address to stdout a moment earlier -- runCliExclusive still throws on
+// that (the process didn't exit 0), so a real, valid, already-generated
+// address was being thrown away instead of ever reaching the pool. Bumped
+// well above the worst observed time; does not touch quicksend's own
+// (already separate, already generous) timeout below.
 export async function newAddress() {
-  const out = await runCli(["new_address", "oz"], { timeout: 30_000 });
+  const out = await runCli(["new_address", "oz"], { timeout: 90_000 });
   const { json, raw } = parseMaybeJson(out);
   // Confirmed live (2026-09-06) against this build: new_address returns a
   // JSON object shaped like { account, address_index, has_orchard,
