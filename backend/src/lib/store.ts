@@ -2883,15 +2883,12 @@ export interface PendingNftMintView {
   // mint, so the frontend can show "FREE MINT -- just cover the network
   // fee" instead of treating it like a normal purchase.
   freeClaim: boolean;
-  // Brai, 2026-09-25: "si estas comprando de manera publica nft que te
-  // cobra 0.0025 este qr tiene que decir 0.0025 ZEC + 0.001 ZEC platform
-  // FEE = TOTAL: 0.0035 ZEC" -- the flat NFT_FREE_MINT_FEE_ZEC is no
-  // longer just the whole amount on a free claim, it's now ALSO tacked on
-  // top of every paid mint's price (see the /api/nft/mint route's paid
-  // branch in server.ts). Always this same constant regardless of
-  // freeClaim/quantity/tier, so it's computed here rather than stored --
-  // exposed so the mint page can show the price/fee/total breakdown
-  // without hardcoding the fee amount itself.
+  // Brai, 2026-09-26: "el fee de 0.001 ZEC es solo para la gente de
+  // whitelist, la gente que paga el nft en la publica 0.0025 no paga mas
+  // que eso" -- NFT_FREE_MINT_FEE_ZEC only on a free whitelist claim
+  // (freeClaim true); 0 on a normal paid mint, which is just
+  // mintPriceZec * quantity with nothing added. Exposed so the mint page
+  // can show the price/fee/total breakdown without hardcoding the amount.
   platformFeeZec: number;
 }
 
@@ -2926,7 +2923,11 @@ function toPendingNftMintView(p: {
     resultItemIds: p.resultItemIds,
     createdAt: p.createdAt.toISOString(),
     freeClaim: !!p.freeClaimWhitelistEntryId,
-    platformFeeZec: NFT_FREE_MINT_FEE_ZEC,
+    // Brai, 2026-09-26: "el fee de 0.001 ZEC es solo para la gente de
+    // whitelist ... el fee de 0.001 ZEC no lo pagan" -- a PAID mint has no
+    // platform fee (see the /api/nft/mint route's paid branch), so this
+    // must only be NFT_FREE_MINT_FEE_ZEC for an actual free whitelist claim.
+    platformFeeZec: p.freeClaimWhitelistEntryId ? NFT_FREE_MINT_FEE_ZEC : 0,
   };
 }
 

@@ -719,21 +719,21 @@ export default function NftMintPage() {
         <div className="card">
           {freeClaim && <div className="badge" style={{ display: "block", textAlign: "center", marginBottom: 10 }}>{t("nftMint.freeClaim.badge")}</div>}
           {/* Brai, 2026-09-25: "que te explique porque te cobra 0.001 ZEC,
-              que es por los servidores y plataforma fee etc ... si estas
-              comprando de manera publica nft que te cobra 0.0025 este qr
-              tiene que decir 0.0025 ZEC + 0.001 ZEC platform FEE = TOTAL:
-              0.0035 ZEC" -- and later, for free mints specifically: "quiero
-              que cuando vayan a pagar diga 1 FREE MINT + 0.001 ZEC PLATFORM
-              FEE = 0.001 ZEC (...APROBBED) y 5 FREE MINT + 0.001 ZEC
-              PLATFORM FEE = 0.001 ZEC (...COLAB)" -- one shared
-              price/fee=total row for both cases now: a paid mint shows its
-              ZEC price as the first term, a free claim shows "{quantity}
-              FREE MINT" instead (mintedQuantity already holds 1 or 5
-              depending on tier, set from the free-claim response). Either
-              way exactZecAmount is the real on-chain total being requested
-              and platformFeeZec is never hardcoded here, always the mint
-              response's own value. */}
-          {platformFeeZec != null && exactZecAmount != null ? (
+              que es por los servidores y plataforma fee etc" -- and later,
+              for free mints specifically: "quiero que cuando vayan a pagar
+              diga 1 FREE MINT + 0.001 ZEC PLATFORM FEE = 0.001 ZEC
+              (...APROBBED) y 5 FREE MINT + 0.001 ZEC PLATFORM FEE = 0.001
+              ZEC (...COLAB)" -- price/fee=total breakdown row, but ONLY when
+              there's an actual fee to show.
+              Brai, 2026-09-26 (correction): "el fee de 0.001 ZEC es solo
+              para la gente de whitelist, la gente que paga el nft en la
+              publica 0.0025 no paga mas que eso, el fee de 0.001 ZEC no lo
+              pagan" -- a paid public mint has platformFeeZec: 0 now (see
+              the backend's /api/nft/mint route), so the truthy check below
+              (not just "!= null") makes it fall through to the plain price
+              display in the else branch -- only a free whitelist claim
+              (platformFeeZec > 0) ever shows the breakdown row. */}
+          {platformFeeZec && exactZecAmount != null ? (
             <div style={{ textAlign: "center" }}>
               <div
                 style={{
