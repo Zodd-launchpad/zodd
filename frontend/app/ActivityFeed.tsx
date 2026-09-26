@@ -30,8 +30,15 @@ import { useLanguage } from "@/lib/i18n";
 // service is doing during the drop, lines up with when this got bad.
 // Dialing back to 10s: still reads as live, cuts this endpoint's request
 // volume by ~3x from 3s, without reverting all the way to the pre-launch
-// 30s. Revisit once the launch traffic spike passes.
-const POLL_MS = 10000;
+// 30s.
+//
+// ZODD (2026-09-26, "OPERATIVO GASTO CERO", same day): Brai: "necesito
+// que... el live activity lo lleves a que refresque cada 1 minuto...
+// TODO LO QUE GASTE REPORTAMELO Y LO ELIMINAMOS O LO HACEMOS CON MAS
+// DELAY" -- cutting spend hard while traffic/infra is scaled down to one
+// worker. 60s still reads as "live" for an activity feed; cuts this
+// endpoint's request volume by another 6x from 10s.
+const POLL_MS = 60000;
 const MAX_ROWS = 18;
 
 // Brai, 2026-09-18 (v2, URGENT): "sacame del live activity todo lo

@@ -138,7 +138,10 @@ export default function MarketPage() {
       }
     }
     load();
-    const id = setInterval(load, 2000);
+    // ZODD (2026-09-26, "OPERATIVO GASTO CERO"): Brai: "el refresco de los
+    // tokens de compra y venta se vaya a 30 segundos" -- was 2s (every open
+    // tab hitting GET /api/tokens 30x/min). 30s cuts that ~15x.
+    const id = setInterval(load, 30000);
     return () => {
       stop = true;
       clearInterval(id);

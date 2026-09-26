@@ -4,7 +4,6 @@ import { LanguageProvider } from "@/lib/i18n";
 import { ZecPriceProvider } from "@/lib/zecPrice";
 import { TokenListProvider } from "@/lib/tokenList";
 import DemoBanner from "./DemoBanner";
-import TickerBar from "./TickerBar";
 import HeaderBar from "./HeaderBar";
 import DisclaimerBanner from "./DisclaimerBanner";
 import ActivityFeed from "./ActivityFeed";
@@ -21,8 +20,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <ZecPriceProvider>
             <TokenListProvider>
               <WalletProvider>
+                {/* ZODD (2026-09-26, "OPERATIVO GASTO CERO"): Brai: "la barra
+                    de arriba con los tokens que subio o bajo, lo borres
+                    totalmente" -- TickerBar removed site-wide. Component
+                    file (TickerBar.tsx) left in place, just unmounted, in
+                    case this gets turned back on later. */}
                 <DemoBanner />
-                <TickerBar />
                 <HeaderBar />
                 {/* Brai, 2026-09-08: "el live activity que este siempre
                     presente, en todas las... [paginas]" / "cuando estas en
