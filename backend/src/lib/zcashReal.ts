@@ -105,9 +105,28 @@ let nextAddressWorker = 0;
  * which must stay on the one wallet service that actually tracks funds.
  * Round-robins across WALLET_SERVICE_URL plus every configured address-only
  * worker, so address-generation throughput scales with how many workers are
- * deployed instead of being capped by the single shared zingo-cli queue. */
+ * deployed instead of being capped by the single shared zingo-cli queue.
+ *
+ * ZODD (2026-09-26, live launch incident, Brai: "puede ser que conectaste
+ * los pagos pero no el sistema de minteo... el dinero llega pero no estan
+ * llegando los nft"): confirmed live -- with WALLET_SERVICE_URL always in
+ * this pool, the main wallet kept getting 1/5 of every address-generation
+ * request, and since /wallet/address and /wallet/notes both funnel through
+ * that SAME serialized zingo-cli queue on that one service (see cli.js's
+ * runCli), a burst of address requests could starve /wallet/notes for
+ * minutes -- exactly what pollOnce needs to ever detect an incoming payment
+ * and complete an order. Confirmed in the logs: repeated "poll failed:
+ * ...timed out after 240s" right when address-generation traffic was
+ * heaviest. Money was never lost (it's sitting in the shielded wallet,
+ * unclaimed orders just weren't being matched to it yet), but from a buyer's
+ * side "paid, no NFT" is indistinguishable from a real loss, so this can't
+ * wait. Fix: once real address-only workers exist, keep ALL address
+ * generation off the main wallet entirely -- its queue is reserved for
+ * notes/balance/send, the things nothing else can do. Falls back to
+ * including WALLET_SERVICE_URL only when no workers are configured at all,
+ * so a deploy with zero workers still works exactly as before. */
 async function callAddressWorker(path: string, opts: RequestInit = {}) {
-  const pool = [WALLET_SERVICE_URL, ...ADDRESS_WORKER_URLS];
+  const pool = ADDRESS_WORKER_URLS.length > 0 ? ADDRESS_WORKER_URLS : [WALLET_SERVICE_URL];
   const url = pool[nextAddressWorker % pool.length];
   nextAddressWorker++;
   if (!INTERNAL_TOKEN) throw new Error("ZCASH_WALLET_SERVICE_TOKEN is not set");
