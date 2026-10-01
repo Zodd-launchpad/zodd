@@ -15,6 +15,14 @@ interface WalletData {
   // y (b) saber que puede ofrecer "pagar con Noir" en vez de (o ademas de)
   // escanear el QR en los modales de compra/mint.
   noirAddress?: string;
+  // Mismo patron que noirAddress, pero para las dos wallets conectadas por
+  // firma que se suman el 2026-09-30 (Brai: "que si conecta con metamask o
+  // rabby les cree la wallet automaticamente ... tambien con las wallets
+  // nativas de near"). A lo sumo una de las tres (noir/evm/near) esta
+  // presente en una wallet dada -- todas son formas alternativas de login,
+  // nunca se combinan.
+  evmAddress?: string;
+  nearAddress?: string;
 }
 
 interface WalletCtx {
@@ -25,6 +33,12 @@ interface WalletCtx {
   // Devuelve null si el usuario canceló la aprobación en la extensión
   // (no es un error real, solo "no eligió conectar todavía").
   connectNoir: () => Promise<void>;
+  // Tira Error("evm-not-installed") si no hay Metamask/Rabby (ni ningun
+  // otro window.ethereum) instalado.
+  connectEvm: () => Promise<void>;
+  // Tira Error("near-not-installed") si no hay extension de wallet NEAR
+  // detectada (ver connectNear() mas abajo para cual exactamente).
+  connectNear: () => Promise<void>;
   logout: () => void;
 }
 
@@ -118,8 +132,83 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  // Brai, 2026-09-30: "que si conecta con metamask o rabby les cree la
+  // wallet automaticamente, como pasa con la NOIR ahora". Mismo flujo que
+  // connectNoir arriba (challenge -> firma -> verificar -> find-or-create),
+  // pero con el estandar EIP-191 personal_sign que traen Metamask y Rabby
+  // (y cualquier otra que inyecte window.ethereum -- no hay nada especifico
+  // de una sola de las dos, por eso un solo boton cubre ambas).
+  async function connectEvm() {
+    const eth = (window as any).ethereum;
+    if (!eth) throw new Error("evm-not-installed");
+
+    const accounts: string[] = await eth.request({ method: "eth_requestAccounts" });
+    const address = accounts?.[0];
+    if (!address) throw new Error("evm-not-installed");
+
+    const { nonce, message } = await api.getEvmChallenge();
+    const signature: string = await eth.request({ method: "personal_sign", params: [message, address] });
+
+    const data = await api.connectEvm({ nonce, signature, address });
+    const walletData: WalletData = { walletId: data.walletId, walletTag: data.walletTag, words: [], evmAddress: data.evmAddress };
+    setWallet(walletData);
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(walletData));
+    } catch {
+      /* ignorar */
+    }
+  }
+
+  // Brai, 2026-09-30: "tambien con las wallets nativas de near". El
+  // backend verifica una firma NEP-413 (ver walletAuth.ts) -- el estandar
+  // de wallet-selector para "firma este mensaje". Nightly es la extension
+  // que integramos primero (inyecta window.nightly.near con signMessage()
+  // devolviendo {accountId, publicKey, signature} en el formato NEP-413
+  // exacto); si mas adelante queremos sumar MyNearWallet/Meteor/etc. hace
+  // falta @near-wallet-selector, que hoy no esta en el proyecto -- lo
+  // dejamos para cuando haga falta, no antes.
+  //
+  // El nonce que emite el backend son 32 caracteres hex (16 bytes, ver
+  // createNearWalletChallenge en store.ts) -- NEP-413 pide un nonce de 32
+  // BYTES exactos, asi que lo expandimos con SHA-256 (32 bytes, siempre) y
+  // mandamos de vuelta esos mismos bytes como nonceBase64 para que el
+  // backend reconstruya el payload firmado exactamente igual.
+  async function connectNear() {
+    const nightly = (window as any).nightly?.near;
+    if (!nightly || typeof nightly.signMessage !== "function") throw new Error("near-not-installed");
+
+    const { nonce, message } = await api.getNearChallenge();
+    const nonceDigest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(nonce));
+    const nonceBytes = new Uint8Array(nonceDigest);
+    let nonceBinary = "";
+    for (let i = 0; i < nonceBytes.length; i++) nonceBinary += String.fromCharCode(nonceBytes[i]);
+    const nonceBase64 = btoa(nonceBinary);
+    const recipient = "zodd.fun";
+
+    const signed = await nightly.signMessage({ message, nonce: nonceBytes, recipient });
+    if (!signed?.accountId || !signed?.publicKey || !signed?.signature) throw new Error("near-not-installed");
+
+    const data = await api.connectNear({
+      nonce,
+      nonceBase64,
+      recipient,
+      signature: signed.signature,
+      publicKey: signed.publicKey,
+      accountId: signed.accountId,
+    });
+    const walletData: WalletData = { walletId: data.walletId, walletTag: data.walletTag, words: [], nearAddress: data.nearAddress };
+    setWallet(walletData);
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(walletData));
+    } catch {
+      /* ignorar */
+    }
+  }
+
   return (
-    <Ctx.Provider value={{ wallet, loading, createWallet, importWallet, connectNoir, logout }}>{children}</Ctx.Provider>
+    <Ctx.Provider value={{ wallet, loading, createWallet, importWallet, connectNoir, connectEvm, connectNear, logout }}>
+      {children}
+    </Ctx.Provider>
   );
 }
 

@@ -134,6 +134,96 @@ export async function connectOrCreateNoirWallet(transparentAddress: string, shie
   return { id: created.id, walletTag: created.walletTag, createdAt: created.createdAt.toISOString() };
 }
 
+// ---------- EVM wallet connect (Metamask / Rabby) ----------
+// Brai, 2026-09-30: "que si conecta con metamask o rabby les cree la
+// wallet automaticamente, como pasa con la NOIR ahora" -- identical
+// pattern to Noir connect above, just with an EVM address + EIP-191
+// signature instead of a Zcash transparent address + Noir signature. See
+// walletAuth.ts for the actual signature verification and
+// POST /api/wallets/connect-evm in server.ts for how the pieces fit
+// together.
+
+export async function createEvmChallenge() {
+  const nonce = randomUUID().replace(/-/g, "");
+  const message = `Sign in to zodd.fun\n\nNonce: ${nonce}\nIssued: ${new Date().toISOString()}`;
+  await prisma.evmAuthChallenge.create({ data: { nonce, message } });
+  return { nonce, message };
+}
+
+export async function consumeEvmChallenge(nonce: string): Promise<{ message: string } | null> {
+  let row;
+  try {
+    row = await prisma.evmAuthChallenge.delete({ where: { nonce } });
+  } catch {
+    return null;
+  }
+  if (Date.now() - row.createdAt.getTime() > NOIR_CHALLENGE_TTL_MS) return null;
+  return { message: row.message };
+}
+
+export async function findWalletByEvmAddress(evmAddress: string) {
+  const wallet = await prisma.internalWallet.findUnique({ where: { evmAddress } });
+  return wallet ? { id: wallet.id, walletTag: wallet.walletTag, createdAt: wallet.createdAt.toISOString() } : null;
+}
+
+/** Same "reconnecting the same address always lands you back on the same
+ * wallet" behavior as connectOrCreateNoirWallet. No defaultRefundAddress
+ * equivalent here -- an EVM address isn't a Zcash payout address, so
+ * there's nothing to pre-fill; that field stays whatever it already was
+ * (null for a brand new wallet). */
+export async function connectOrCreateEvmWallet(evmAddress: string) {
+  const existing = await prisma.internalWallet.findUnique({ where: { evmAddress } });
+  if (existing) {
+    return { id: existing.id, walletTag: existing.walletTag, createdAt: existing.createdAt.toISOString() };
+  }
+  const created = await prisma.internalWallet.create({
+    data: { walletTag: newWalletTag(), seedHashHex: null, evmAddress },
+  });
+  return { id: created.id, walletTag: created.walletTag, createdAt: created.createdAt.toISOString() };
+}
+
+// ---------- Native NEAR wallet connect (Nightly, MyNearWallet, etc.) ----------
+// Brai, 2026-09-30: "tambien con las wallets nativas de near" -- same
+// pattern again, keyed by NEAR account id + a NEP-413 signature instead
+// of an address. See walletAuth.ts for the NEP-413 payload
+// reconstruction + the extra "is this public key really a full-access
+// key of that account" RPC check, which has no equivalent in the
+// Noir/EVM flows (those addresses ARE the key; a NEAR account id is not).
+
+export async function createNearWalletChallenge() {
+  const nonce = randomUUID().replace(/-/g, "");
+  const message = `Sign in to zodd.fun\n\nNonce: ${nonce}\nIssued: ${new Date().toISOString()}`;
+  await prisma.nearWalletAuthChallenge.create({ data: { nonce, message } });
+  return { nonce, message };
+}
+
+export async function consumeNearWalletChallenge(nonce: string): Promise<{ message: string } | null> {
+  let row;
+  try {
+    row = await prisma.nearWalletAuthChallenge.delete({ where: { nonce } });
+  } catch {
+    return null;
+  }
+  if (Date.now() - row.createdAt.getTime() > NOIR_CHALLENGE_TTL_MS) return null;
+  return { message: row.message };
+}
+
+export async function findWalletByNearAddress(nearAddress: string) {
+  const wallet = await prisma.internalWallet.findUnique({ where: { nearAddress } });
+  return wallet ? { id: wallet.id, walletTag: wallet.walletTag, createdAt: wallet.createdAt.toISOString() } : null;
+}
+
+export async function connectOrCreateNearWallet(nearAddress: string) {
+  const existing = await prisma.internalWallet.findUnique({ where: { nearAddress } });
+  if (existing) {
+    return { id: existing.id, walletTag: existing.walletTag, createdAt: existing.createdAt.toISOString() };
+  }
+  const created = await prisma.internalWallet.create({
+    data: { walletTag: newWalletTag(), seedHashHex: null, nearAddress },
+  });
+  return { id: created.id, walletTag: created.walletTag, createdAt: created.createdAt.toISOString() };
+}
+
 // ---------- Tokens ----------
 
 export interface TokenWithCurve {
@@ -4021,4 +4111,307 @@ export async function addPregeneratedZcashAddress(
  * the background top-up loop checks against its target stock level. */
 export async function countUnclaimedPregeneratedZcashAddresses(): Promise<number> {
   return prisma.pregeneratedZcashAddress.count({ where: { claimedAt: null } });
+}
+
+// ---------- NEAR launches ----------
+// See the big comment on PendingNearLaunch in schema.prisma, and
+// nearLaunch.ts for the orchestration loop that actually drives these
+// through their steps. This section is just the DB access, same split as
+// zcashReal.ts (chain work) vs the PendingTokenCreation functions above
+// (persistence) for the ZEC side.
+
+export type NearLaunchStatus = "PENDING" | "PAID" | "DEPLOYING" | "LIVE" | "FAILED" | "EXPIRED";
+export type NearLaunchStep =
+  | "NOT_STARTED"
+  | "TOKEN_ACCOUNT_CREATED"
+  | "TOKEN_CONTRACT_DEPLOYED"
+  | "TOKEN_DEPLOY_KEY_REVOKED"
+  | "POOL_CREATED"
+  | "LIQUIDITY_SEEDED"
+  | "POSITION_LOCKED";
+export type NearLaunchPaymentMethod = "ZEC" | "BASE_ETH" | "BASE_USDC" | "ROBINHOOD_ETH" | "ROBINHOOD_USDG" | "SOLANA_USDC";
+
+export interface PendingNearLaunchView {
+  id: string;
+  creatorWalletId: string;
+  /** The creator's own NEAR account id (InternalWallet.nearAddress),
+   * needed at POSITION_LOCKED so the locker's lock_position call can pay
+   * fees to the actual creator -- not the admin account -- once
+   * on_fees_collected is wired (see the locker's own TODO). Null when
+   * the creator connected with a non-NEAR wallet (Noir/EVM/12-word) and
+   * never linked a native NEAR wallet -- nearLaunch.ts's lock step
+   * requires this to be set, so a launch from such a creator needs a
+   * NEAR account collected some other way before it can reach
+   * POSITION_LOCKED (not yet designed -- see nearFees.ts's payment-
+   * collection TODO, which has the same "which wallet/currency" gap). */
+  creatorNearAccountId: string | null;
+  name: string;
+  symbol: string;
+  totalSupply: string;
+  decimals: number;
+  icon: string | null;
+  description: string | null;
+  status: NearLaunchStatus;
+  currentStep: NearLaunchStep;
+  stepAttempts: number;
+  lastError: string | null;
+  deploySecretKey: string | null;
+  tokenAccountId: string | null;
+  tokenDeployTxHash: string | null;
+  poolId: string | null;
+  poolCreateTxHash: string | null;
+  positionId: string | null;
+  lockTxHash: string | null;
+  createdAt: string;
+  completedAt: string | null;
+  // ---------- Payment (see the enum's comment in schema.prisma) ----------
+  paymentMethod: NearLaunchPaymentMethod | null;
+  paymentAmountExpected: string | null;
+  paymentUsdLocked: number | null;
+  paymentTxRef: string | null;
+  paymentVerifiedAt: string | null;
+  zecAddress: string | null;
+  zecSaplingDiversifierHex: string | null;
+  zecOrchardDiversifierHex: string | null;
+}
+
+function toPendingNearLaunchView(p: {
+  id: string;
+  creatorWalletId: string;
+  creatorWallet?: { nearAddress: string | null } | null;
+  name: string;
+  symbol: string;
+  totalSupply: string;
+  decimals: number;
+  icon: string | null;
+  description: string | null;
+  status: string;
+  currentStep: string;
+  stepAttempts: number;
+  lastError: string | null;
+  deploySecretKey: string | null;
+  tokenAccountId: string | null;
+  tokenDeployTxHash: string | null;
+  poolId: string | null;
+  poolCreateTxHash: string | null;
+  positionId: string | null;
+  lockTxHash: string | null;
+  createdAt: Date;
+  completedAt: Date | null;
+  paymentMethod: string | null;
+  paymentAmountExpected: string | null;
+  paymentUsdLocked: number | null;
+  paymentTxRef: string | null;
+  paymentVerifiedAt: Date | null;
+  zecAddress: string | null;
+  zecSaplingDiversifierHex: string | null;
+  zecOrchardDiversifierHex: string | null;
+}): PendingNearLaunchView {
+  return {
+    id: p.id,
+    creatorWalletId: p.creatorWalletId,
+    creatorNearAccountId: p.creatorWallet?.nearAddress ?? null,
+    name: p.name,
+    symbol: p.symbol,
+    totalSupply: p.totalSupply,
+    decimals: p.decimals,
+    icon: p.icon,
+    description: p.description,
+    status: p.status as NearLaunchStatus,
+    currentStep: p.currentStep as NearLaunchStep,
+    stepAttempts: p.stepAttempts,
+    lastError: p.lastError,
+    deploySecretKey: p.deploySecretKey,
+    tokenAccountId: p.tokenAccountId,
+    tokenDeployTxHash: p.tokenDeployTxHash,
+    poolId: p.poolId,
+    poolCreateTxHash: p.poolCreateTxHash,
+    positionId: p.positionId,
+    lockTxHash: p.lockTxHash,
+    createdAt: p.createdAt.toISOString(),
+    completedAt: p.completedAt ? p.completedAt.toISOString() : null,
+    paymentMethod: p.paymentMethod as NearLaunchPaymentMethod | null,
+    paymentAmountExpected: p.paymentAmountExpected,
+    paymentUsdLocked: p.paymentUsdLocked,
+    paymentTxRef: p.paymentTxRef,
+    paymentVerifiedAt: p.paymentVerifiedAt ? p.paymentVerifiedAt.toISOString() : null,
+    zecAddress: p.zecAddress,
+    zecSaplingDiversifierHex: p.zecSaplingDiversifierHex,
+    zecOrchardDiversifierHex: p.zecOrchardDiversifierHex,
+  };
+}
+
+export async function createPendingNearLaunch(input: {
+  creatorWalletId: string;
+  name: string;
+  symbol: string;
+  totalSupply: string;
+  decimals?: number;
+  icon?: string;
+  description?: string;
+}): Promise<PendingNearLaunchView> {
+  const p = await prisma.pendingNearLaunch.create({
+    data: {
+      creatorWalletId: input.creatorWalletId,
+      name: input.name,
+      symbol: input.symbol,
+      totalSupply: input.totalSupply,
+      decimals: input.decimals ?? 18,
+      icon: input.icon ?? null,
+      description: input.description ?? null,
+    },
+  });
+  return toPendingNearLaunchView(p);
+}
+
+export async function getPendingNearLaunch(id: string): Promise<PendingNearLaunchView | null> {
+  const p = await prisma.pendingNearLaunch.findUnique({
+    where: { id },
+    include: { creatorWallet: { select: { nearAddress: true } } },
+  });
+  return p ? toPendingNearLaunchView(p) : null;
+}
+
+/** Locks in how a launch will be paid -- called once, right after the
+ * creator picks a payment method (nearLaunchPayments.ts's
+ * quoteNearLaunchPayment). amountExpectedBaseUnits/usdLocked are frozen
+ * here so a price move between quote and payment never changes what's
+ * owed. The zec* fields are only meaningful when method === "ZEC" (see
+ * the ZEC-only comment on the schema fields themselves); pass them
+ * undefined for every other method. */
+export async function setNearLaunchPaymentQuote(
+  id: string,
+  quote: {
+    method: NearLaunchPaymentMethod;
+    amountExpectedBaseUnits: string;
+    usdLocked: number;
+    zecAddress?: string;
+    zecSaplingDiversifierHex?: string;
+    zecOrchardDiversifierHex?: string;
+  }
+): Promise<PendingNearLaunchView> {
+  const p = await prisma.pendingNearLaunch.update({
+    where: { id },
+    data: {
+      paymentMethod: quote.method,
+      paymentAmountExpected: quote.amountExpectedBaseUnits,
+      paymentUsdLocked: quote.usdLocked,
+      zecAddress: quote.zecAddress ?? null,
+      zecSaplingDiversifierHex: quote.zecSaplingDiversifierHex ?? null,
+      zecOrchardDiversifierHex: quote.zecOrchardDiversifierHex ?? null,
+    },
+    include: { creatorWallet: { select: { nearAddress: true } } },
+  });
+  return toPendingNearLaunchView(p);
+}
+
+/** A paymentTxRef already attached to some OTHER launch (any status) --
+ * the uniqueness guard against replaying the same EVM tx hash / Solana
+ * signature across two different launches. nearLaunchPayments.ts checks
+ * this BEFORE calling markNearLaunchPaid below, not as a DB constraint,
+ * because null paymentTxRef (every ZEC launch, and every launch that
+ * hasn't paid yet) must never collide with itself. */
+export async function getNearLaunchByPaymentTxRef(txRef: string): Promise<PendingNearLaunchView | null> {
+  const p = await prisma.pendingNearLaunch.findFirst({
+    where: { paymentTxRef: txRef },
+    include: { creatorWallet: { select: { nearAddress: true } } },
+  });
+  return p ? toPendingNearLaunchView(p) : null;
+}
+
+/** Marks a launch as paid (PENDING -> PAID). For the submitted-tx-hash
+ * methods (BASE_ETH, BASE_USDC, ROBINHOOD_ETH, ROBINHOOD_USDG, SOLANA_USDC) the caller
+ * (nearLaunchPayments.ts) must have already verified txRef on-chain via
+ * evmPayments.ts/solanaPayments.ts AND checked
+ * getNearLaunchByPaymentTxRef for a collision -- this function itself
+ * does neither, same "the caller already did the hard part" contract as
+ * completePendingTokenCreation above has for its own genesis-memo txid.
+ * For ZEC, txRef is the txid zcashReal.ts's poll loop already confirmed
+ * against this launch's own zecAddress, same trust level as any other
+ * real-ZEC payment in this codebase. Separate from the orchestration
+ * steps below: this is the one transition nearLaunch.ts's poll loop
+ * doesn't drive itself, it just picks up anything already sitting at
+ * PAID or later. */
+export async function markNearLaunchPaid(id: string, txRef?: string): Promise<PendingNearLaunchView> {
+  const p = await prisma.pendingNearLaunch.update({
+    where: { id },
+    data: { status: "PAID", paymentTxRef: txRef ?? undefined, paymentVerifiedAt: new Date() },
+    include: { creatorWallet: { select: { nearAddress: true } } },
+  });
+  return toPendingNearLaunchView(p);
+}
+
+/** Same restart-recovery need as getPendingTokenCreationsAwaitingPayment:
+ * the ZEC payment method's in-memory watcher (zcashReal.ts's `watchers`
+ * map) doesn't survive a backend restart -- see server.ts's boot-time
+ * resumeWatching block, which this feeds exactly like
+ * getPendingTokenCreationsAwaitingPayment feeds the token-creation side
+ * of the same block. */
+export async function getNearLaunchesAwaitingZecPayment(): Promise<PendingNearLaunchView[]> {
+  const rows = await prisma.pendingNearLaunch.findMany({
+    where: { status: "PENDING", paymentMethod: "ZEC", zecAddress: { not: null } },
+    include: { creatorWallet: { select: { nearAddress: true } } },
+  });
+  return rows.map(toPendingNearLaunchView);
+}
+
+/** Same restart-recovery need as getPendingTokenCreationsAwaitingPayment
+ * above, for the other end of a launch's life: anything PAID or DEPLOYING
+ * was mid-orchestration when the backend last stopped, and currentStep
+ * says exactly where to resume -- nothing here is re-done from scratch. */
+export async function getNearLaunchesToAdvance(): Promise<PendingNearLaunchView[]> {
+  const rows = await prisma.pendingNearLaunch.findMany({
+    where: { status: { in: ["PAID", "DEPLOYING"] } },
+    include: { creatorWallet: { select: { nearAddress: true } } },
+  });
+  return rows.map(toPendingNearLaunchView);
+}
+
+/** Records that one step just succeeded: advances currentStep, resets the
+ * per-step retry counter, and stores whatever that step produced (a tx
+ * hash, an account id, ...). Bumps status to DEPLOYING on the very first
+ * successful step (out of PAID) and to LIVE + completedAt on the last one. */
+export async function advanceNearLaunchStep(
+  id: string,
+  nextStep: NearLaunchStep,
+  fields: Partial<
+    Pick<
+      PendingNearLaunchView,
+      "deploySecretKey" | "tokenAccountId" | "tokenDeployTxHash" | "poolId" | "poolCreateTxHash" | "positionId" | "lockTxHash"
+    >
+  > = {}
+): Promise<PendingNearLaunchView> {
+  const isDone = nextStep === "POSITION_LOCKED";
+  const p = await prisma.pendingNearLaunch.update({
+    where: { id },
+    data: {
+      currentStep: nextStep,
+      stepAttempts: 0,
+      lastError: null,
+      status: isDone ? "LIVE" : "DEPLOYING",
+      completedAt: isDone ? new Date() : undefined,
+      ...fields,
+    },
+  });
+  return toPendingNearLaunchView(p);
+}
+
+/** One step's attempt just failed. Below MAX_STEP_ATTEMPTS (see
+ * nearLaunch.ts) this just records lastError and bumps stepAttempts so
+ * the SAME step is retried next poll tick -- currentStep does not move.
+ * At MAX_STEP_ATTEMPTS, nearLaunch.ts calls failNearLaunch instead. */
+export async function recordNearLaunchStepFailure(id: string, error: string): Promise<PendingNearLaunchView> {
+  const p = await prisma.pendingNearLaunch.update({
+    where: { id },
+    data: { lastError: error, stepAttempts: { increment: 1 } },
+  });
+  return toPendingNearLaunchView(p);
+}
+
+export async function failNearLaunch(id: string, error: string): Promise<PendingNearLaunchView> {
+  const p = await prisma.pendingNearLaunch.update({
+    where: { id },
+    data: { status: "FAILED", lastError: error },
+  });
+  return toPendingNearLaunchView(p);
 }

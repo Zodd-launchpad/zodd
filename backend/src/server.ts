@@ -7,9 +7,13 @@ import { simulatedInscriptionFor } from "./lib/simulatedChain.js";
 import { splitFee, TRADE_FEE_BPS, CREATOR_FEE_BPS, TOKEN_CREATE_FEE_ZEC, TOKEN_CREATE_FEE_YEC, createFeeFor, computeSellerPayout, NETWORK_FEE_ZEC, MAX_FIRST_BUY_ZEC, splitNftFee, isOwnerNftWallet, nftMintPriceZecFor, NFT_MAX_MINTS_PER_WALLET, NFT_HIGH_MAX_MINTS_PER_WALLET, maxMintsPerWalletFor, NFT_WHITELIST_FREE_MINT_LIMIT, NFT_FREE_MINT_FEE_ZEC, NFT_MIN_LISTING_PRICE_ZEC } from "./lib/fees.js";
 import { startFeeDistributor, runFeeDistributionOnce } from "./lib/feeDistributor.js";
 import { startZecPricePolling, getZecUsdPrice } from "./lib/zecPrice.js";
+import { startEthPricePolling } from "./lib/evmPrice.js";
 import { withTokenLock } from "./lib/mutex.js";
 import { checkOrderRateLimit } from "./lib/rateLimit.js";
 import { verifyMessageSignature } from "@noir-wallet/sdk";
+import { verifyEvmSignature, verifyNearWalletSignature } from "./lib/walletAuth.js";
+import { startNearLaunchPolling } from "./lib/nearLaunch.js";
+import { quoteNearLaunchPayment, verifyAndMarkNearLaunchPaid, getPaymentChainConfig } from "./lib/nearLaunchPayments.js";
 
 // ZCASH_MODE=real switches every ZEC payment/inscription in this service to
 // actually move ZEC through zcash-wallet-service, instead of the mock.
@@ -113,6 +117,9 @@ app.get("/api/mode", async (_req, reply) =>
 // just hides the USD figure until it has a real number.
 app.get("/api/zec-usd-price", async (_req, reply) => reply.send(getZecUsdPrice()));
 startZecPricePolling(app.log);
+// Same idea, ETH/USD -- only needed for the NEAR-launch BASE_ETH/
+// ROBINHOOD_ETH payment methods (nearLaunchPayments.ts), see evmPrice.ts.
+startEthPricePolling(app.log);
 
 // ---------- Wallets ----------
 
@@ -206,6 +213,96 @@ app.post("/api/wallets/connect-noir", async (req, reply) => {
 
   const wallet = await store.connectOrCreateNoirWallet(body.data.transparentAddress, body.data.shieldedAddress);
   return reply.send({ walletId: wallet.id, walletTag: wallet.walletTag, noirAddress: body.data.transparentAddress });
+});
+
+// ---------- EVM wallet connect (Metamask / Rabby) ----------
+// Same challenge -> sign -> verify -> find-or-create shape as Noir above,
+// see store.ts's createEvmChallenge/connectOrCreateEvmWallet and
+// walletAuth.ts's verifyEvmSignature for the pieces. Frontend flow:
+// 1) POST here to get {nonce, message}
+// 2) window.ethereum.request({ method: "personal_sign", params: [message, address] })
+// 3) POST the result to connect-evm below
+app.post("/api/wallets/evm-challenge", async (_req, reply) => {
+  const { nonce, message } = await store.createEvmChallenge();
+  return reply.send({ nonce, message });
+});
+
+const connectEvmSchema = z.object({
+  nonce: z.string().min(1),
+  signature: z.string().min(1),
+  address: z
+    .string()
+    .trim()
+    .regex(/^0x[a-fA-F0-9]{40}$/, "not a valid EVM address"),
+});
+
+app.post("/api/wallets/connect-evm", async (req, reply) => {
+  const body = connectEvmSchema.safeParse(req.body);
+  if (!body.success) return reply.code(400).send({ error: body.error.errors[0]?.message ?? "invalid request" });
+
+  const challenge = await store.consumeEvmChallenge(body.data.nonce);
+  if (!challenge) {
+    return reply.code(400).send({ error: "challenge expired or already used -- try connecting again" });
+  }
+
+  const valid = verifyEvmSignature(challenge.message, body.data.signature, body.data.address);
+  if (!valid) {
+    return reply.code(401).send({ error: "signature doesn't match that address -- connect your wallet again and try once more" });
+  }
+
+  const wallet = await store.connectOrCreateEvmWallet(body.data.address);
+  return reply.send({ walletId: wallet.id, walletTag: wallet.walletTag, evmAddress: body.data.address });
+});
+
+// ---------- Native NEAR wallet connect (Nightly, MyNearWallet, etc.) ----------
+// Same shape again. Frontend flow via @near-wallet-selector:
+// 1) POST here to get {nonce, message}
+// 2) wallet.signMessage({ message, recipient: "zodd.fun", nonce: Buffer.from(nonce, "hex") padded/derived to 32 bytes })
+//    -- wallet-selector returns { signature, publicKey, accountId }
+// 3) POST the result to connect-near below
+app.post("/api/wallets/near-challenge", async (_req, reply) => {
+  const { nonce, message } = await store.createNearWalletChallenge();
+  return reply.send({ nonce, message });
+});
+
+const connectNearSchema = z.object({
+  nonce: z.string().min(1),
+  nonceBase64: z.string().min(1), // the exact 32-byte nonce buffer (base64), as actually passed to wallet.signMessage()
+  recipient: z.string().min(1), // must match what was passed to wallet.signMessage() -- e.g. "zodd.fun"
+  signature: z.string().min(1), // base64
+  publicKey: z.string().min(1), // "ed25519:..."
+  accountId: z.string().trim().min(2),
+});
+
+app.post("/api/wallets/connect-near", async (req, reply) => {
+  const body = connectNearSchema.safeParse(req.body);
+  if (!body.success) return reply.code(400).send({ error: body.error.errors[0]?.message ?? "invalid request" });
+
+  const challenge = await store.consumeNearWalletChallenge(body.data.nonce);
+  if (!challenge) {
+    return reply.code(400).send({ error: "challenge expired or already used -- try connecting again" });
+  }
+
+  let valid = false;
+  try {
+    valid = await verifyNearWalletSignature({
+      message: challenge.message,
+      nonceBase64: body.data.nonceBase64,
+      recipient: body.data.recipient,
+      signatureBase64: body.data.signature,
+      publicKey: body.data.publicKey,
+      accountId: body.data.accountId,
+    });
+  } catch (err: any) {
+    app.log.warn(`near wallet signature verification threw: ${err?.message ?? err}`);
+    return reply.code(401).send({ error: "couldn't verify that signature" });
+  }
+  if (!valid) {
+    return reply.code(401).send({ error: "signature doesn't match that account -- connect your wallet again and try once more" });
+  }
+
+  const wallet = await store.connectOrCreateNearWallet(body.data.accountId);
+  return reply.send({ walletId: wallet.id, walletTag: wallet.walletTag, nearAddress: body.data.accountId });
 });
 
 app.get("/api/wallets/:id/portfolio", async (req, reply) => {
@@ -743,6 +840,28 @@ async function handlePaymentDetected(orderId: string, confirmedZecAmount: number
     return;
   }
 
+  // Brai, 2026-09-30: the ZEC leg of the multi-chain NEAR-launch fee
+  // (nearLaunchPayments.ts's quoteNearLaunchPayment) reuses this exact
+  // same dispatcher -- same generateOrderAddress(id, amount) mechanism,
+  // same reasoning as the NFT branches above. The EVM/Solana legs never
+  // reach this function at all (see nearLaunchPayments.ts's header):
+  // those are verified synchronously from a submitted tx hash, not
+  // detected by a poll loop.
+  const pendingNearLaunch = await store.getPendingNearLaunch(orderId).catch(() => null);
+  if (pendingNearLaunch) {
+    if (pendingNearLaunch.status !== "PENDING") {
+      if (isRepeat) app.log.warn(`repeat payment of ${confirmedZecAmount} ZEC landed on NEAR launch ${orderId} after it already ${pendingNearLaunch.status} -- left unclaimed (txid ${txid})`);
+      return;
+    }
+    try {
+      await store.markNearLaunchPaid(orderId, txid);
+      app.log.info(`NEAR launch ${orderId} (${pendingNearLaunch.symbol}) paid: ${confirmedZecAmount} ZEC (txid ${txid}) -- handed off to nearLaunch.ts's poll loop`);
+    } catch (err) {
+      app.log.error(err, `NEAR launch ${orderId} received its ZEC payment but failed to mark PAID`);
+    }
+    return;
+  }
+
   // When the zcash-service detects a buy order's payment, the order
   // executes against the bonding curve at that moment's price. A payer who
   // resends the exact same amount to the exact same order again (Brai:
@@ -810,13 +929,15 @@ ycashModule.onPaymentDetected(handlePaymentDetected);
 // and are still PENDING, and resume watching them.
 (async () => {
   try {
-    const [orders, creations, nftMints, nftPurchases] = await Promise.all([
+    const [orders, creations, nftMints, nftPurchases, nearLaunchesAwaitingZec] = await Promise.all([
       store.getPendingOrdersAwaitingPayment(),
       store.getPendingTokenCreationsAwaitingPayment(),
       // Brai, 2026-09-18: NFT mint/purchase payments need the exact same
       // restart-recovery as every other real-ZEC payment here.
       store.getPendingNftMintsAwaitingPayment(),
       store.getPendingNftPurchasesAwaitingPayment(),
+      // Brai, 2026-09-30: same for the ZEC leg of the NEAR-launch fee.
+      store.getNearLaunchesAwaitingZecPayment(),
     ]);
     // Brai, 2026-09-11: each order/creation now resumes against ITS OWN
     // currency's wallet service, not always the ZEC one -- see
@@ -829,6 +950,14 @@ ycashModule.onPaymentDetected(handlePaymentDetected);
       if (c.zecAddress)
         walletServiceFor(c.currency).resumeWatching(c.id, c.zecAddress, c.expectedZecAmount, new Date(c.createdAt).getTime(), c.zecSaplingDiversifierHex, c.zecOrchardDiversifierHex);
     }
+    // Brai, 2026-09-30: NEAR-launch ZEC payments always use the real ZEC
+    // module directly (zcashModule, same as every other branch here) --
+    // there's no YEC option for this fee, so walletServiceFor's
+    // currency dispatch doesn't apply.
+    for (const nl of nearLaunchesAwaitingZec) {
+      if (nl.zecAddress && nl.paymentAmountExpected)
+        zcashModule.resumeWatching(nl.id, nl.zecAddress, Number(nl.paymentAmountExpected), new Date(nl.createdAt).getTime(), nl.zecSaplingDiversifierHex, nl.zecOrchardDiversifierHex);
+    }
     for (const m of nftMints) {
       if (m.zecAddress)
         walletServiceFor(m.currency).resumeWatching(m.id, m.zecAddress, m.expectedZecAmount, new Date(m.createdAt).getTime(), m.zecSaplingDiversifierHex, m.zecOrchardDiversifierHex);
@@ -837,9 +966,9 @@ ycashModule.onPaymentDetected(handlePaymentDetected);
       if (p.zecAddress)
         walletServiceFor(p.currency).resumeWatching(p.id, p.zecAddress, p.expectedZecAmount, new Date(p.createdAt).getTime(), p.zecSaplingDiversifierHex, p.zecOrchardDiversifierHex);
     }
-    if (orders.length || creations.length || nftMints.length || nftPurchases.length) {
+    if (orders.length || creations.length || nftMints.length || nftPurchases.length || nearLaunchesAwaitingZec.length) {
       app.log.info(
-        `resumed watching ${orders.length} pending order(s), ${creations.length} pending token-creation(s), ${nftMints.length} pending NFT mint(s), and ${nftPurchases.length} pending NFT purchase(s) from before this restart`
+        `resumed watching ${orders.length} pending order(s), ${creations.length} pending token-creation(s), ${nftMints.length} pending NFT mint(s), ${nftPurchases.length} pending NFT purchase(s), and ${nearLaunchesAwaitingZec.length} pending NEAR-launch ZEC payment(s) from before this restart`
       );
     }
   } catch (err) {
@@ -2528,6 +2657,103 @@ async function handleNftPurchasePayment(purchase: store.NftPurchaseOrderView, co
     app.log.error(err, `NFT purchase ${purchase.id} failed to finalize`);
   }
 }
+
+// ---------- NEAR launch creation + payment ----------
+// Brai, 2026-10-01: "avancemos con lo que falta" -- the creation route
+// was the one piece missing before any of nearLaunchPayments.ts's routes
+// (added earlier the same week) were reachable from a frontend at all.
+// Same "creator pays a fee, the real thing only gets created once that
+// payment lands" shape as /api/tokens above, just against
+// PendingNearLaunch/nearLaunch.ts's orchestrator instead of a bonding-
+// curve Token -- so the validation below mirrors createTokenSchema
+// closely on purpose (icon-as-data-URL cap, name/symbol length limits),
+// not reinvented from scratch.
+const createNearLaunchSchema = z.object({
+  creatorWalletId: z.string(),
+  name: z.string().min(1).max(64),
+  symbol: z.string().min(1).max(12),
+  totalSupply: z.number().positive(),
+  // NEP-141 tokens commonly use 18 or 24; 0-24 covers every real token
+  // contract's own valid range without letting a typo create something
+  // absurd (see TOKEN_CONTRACT_STORAGE_NEAR_ESTIMATE's own caution in
+  // nearFees.ts about not guessing real-money-adjacent numbers).
+  decimals: z.number().int().min(0).max(24).default(18),
+  // Resized/encoded client-side before it ever reaches here, same as
+  // logoDataUrl on createTokenSchema -- this is just a last line of
+  // defense against an oversized payload.
+  icon: z
+    .string()
+    .max(400_000)
+    .regex(/^data:image\/(png|jpeg|jpg|webp|gif);base64,/, "icon must be a png/jpeg/webp/gif data URL")
+    .optional(),
+  description: z.string().max(500).optional(),
+});
+
+app.post("/api/near-launches", async (req, reply) => {
+  const parsed = createNearLaunchSchema.safeParse(req.body);
+  if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+  const body = parsed.data;
+
+  const creatorWallet = await store.getWallet(body.creatorWalletId);
+  if (!creatorWallet) return reply.code(400).send({ error: "invalid creatorWalletId" });
+
+  const launch = await store.createPendingNearLaunch({
+    creatorWalletId: body.creatorWalletId,
+    name: body.name,
+    symbol: body.symbol.toUpperCase(),
+    totalSupply: String(body.totalSupply),
+    decimals: body.decimals,
+    icon: body.icon,
+    description: body.description,
+  });
+  return reply.code(201).send(launch);
+});
+
+const nearLaunchPaymentMethodSchema = z.enum(["ZEC", "BASE_ETH", "BASE_USDC", "ROBINHOOD_ETH", "ROBINHOOD_USDG", "SOLANA_USDC"]);
+
+// Public, read-only chain constants (chain id, RPC, stablecoin contract +
+// decimals) the frontend needs to actually construct an EVM/Solana send --
+// see getPaymentChainConfig's own comment for why this isn't just
+// hardcoded a second time client-side.
+app.get("/api/near-launches/payment-config", async (_req, reply) => reply.send(getPaymentChainConfig()));
+
+app.post("/api/near-launches/:id/payment-quote", async (req, reply) => {
+  const { id } = req.params as { id: string };
+  const parsed = z.object({ method: nearLaunchPaymentMethodSchema }).safeParse(req.body);
+  if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+  try {
+    const quote = await quoteNearLaunchPayment(id, parsed.data.method);
+    return reply.send(quote);
+  } catch (err: any) {
+    return reply.code(400).send({ error: err?.message ?? String(err) });
+  }
+});
+
+app.post("/api/near-launches/:id/payment-proof", async (req, reply) => {
+  const { id } = req.params as { id: string };
+  const parsed = z.object({ txRef: z.string().min(1) }).safeParse(req.body);
+  if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+  try {
+    const launch = await verifyAndMarkNearLaunchPaid(id, parsed.data.txRef);
+    return reply.send(launch);
+  } catch (err: any) {
+    return reply.code(400).send({ error: err?.message ?? String(err) });
+  }
+});
+
+app.get("/api/near-launches/:id", async (req, reply) => {
+  const { id } = req.params as { id: string };
+  const launch = await store.getPendingNearLaunch(id);
+  if (!launch) return reply.code(404).send({ error: "NEAR launch not found" });
+  return reply.send(launch);
+});
+
+// ZODD (2026-09-30): "avanzamos" -- resumes any NEAR launch left mid-
+// orchestration by a previous restart, and drives new ones as they reach
+// PAID. Unlike startFeeDistributor above (deliberately left manual --
+// "quiero hacerlo manual yo"), this one is always on: a launch a creator
+// already paid for should keep moving without Brai having to trigger it.
+startNearLaunchPolling();
 
 const port = Number(process.env.PORT ?? 8787);
 app.listen({ port, host: "0.0.0.0" }).then(() => {

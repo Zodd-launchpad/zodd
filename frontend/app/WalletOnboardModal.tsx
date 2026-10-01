@@ -14,7 +14,9 @@ export default function WalletOnboardModal({ onClose }: { onClose: () => void })
   const [importText, setImportText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [noirConnecting, setNoirConnecting] = useState(false);
-  const { createWallet, importWallet, connectNoir } = useWallet();
+  const [evmConnecting, setEvmConnecting] = useState(false);
+  const [nearConnecting, setNearConnecting] = useState(false);
+  const { createWallet, importWallet, connectNoir, connectEvm, connectNear } = useWallet();
   const { t } = useLanguage();
 
   // Brai, 2026-09-18: "conectas la extension de la wallet NOIR ... ya te
@@ -43,6 +45,52 @@ export default function WalletOnboardModal({ onClose }: { onClose: () => void })
       }
     } finally {
       setNoirConnecting(false);
+    }
+  }
+
+  // Brai, 2026-09-30: "que si conecta con metamask o rabby les cree la
+  // wallet automaticamente, como pasa con la NOIR ahora" -- same
+  // not-installed / user-rejected shape as handleConnectNoir above (EIP-1193
+  // wallets throw code 4001 on rejection too, same as Noir's extension).
+  async function handleConnectEvm() {
+    setError(null);
+    setEvmConnecting(true);
+    try {
+      await connectEvm();
+      onClose();
+      location.reload();
+    } catch (e: any) {
+      if (e?.message === "evm-not-installed") {
+        setError(t("onboard.evm.notInstalled"));
+      } else if (e?.code === 4001 || /reject/i.test(e?.message ?? "")) {
+        setError(t("onboard.evm.rejected"));
+      } else {
+        setError(e?.message ?? t("onboard.error.generic"));
+      }
+    } finally {
+      setEvmConnecting(false);
+    }
+  }
+
+  // Brai, 2026-09-30: "tambien con las wallets nativas de near" -- same
+  // shape again, see connectNear() in wallet.tsx for which extension.
+  async function handleConnectNear() {
+    setError(null);
+    setNearConnecting(true);
+    try {
+      await connectNear();
+      onClose();
+      location.reload();
+    } catch (e: any) {
+      if (e?.message === "near-not-installed") {
+        setError(t("onboard.near.notInstalled"));
+      } else if (e?.code === 4001 || /reject/i.test(e?.message ?? "")) {
+        setError(t("onboard.near.rejected"));
+      } else {
+        setError(e?.message ?? t("onboard.error.generic"));
+      }
+    } finally {
+      setNearConnecting(false);
     }
   }
 
@@ -156,6 +204,25 @@ export default function WalletOnboardModal({ onClose }: { onClose: () => void })
                 onClick={handleConnectNoir}
               >
                 {noirConnecting ? t("onboard.noir.connecting") : t("onboard.noir.connectButton")}
+              </button>
+              {/* Brai, 2026-09-30: same card, two more "connect what you
+                  already have" options below Noir -- Metamask/Rabby (EVM)
+                  and native NEAR wallets. */}
+              <button
+                className="btn btn-outline"
+                style={{ width: "100%", marginTop: 8 }}
+                disabled={evmConnecting}
+                onClick={handleConnectEvm}
+              >
+                {evmConnecting ? t("onboard.evm.connecting") : t("onboard.evm.connectButton")}
+              </button>
+              <button
+                className="btn btn-outline"
+                style={{ width: "100%", marginTop: 8 }}
+                disabled={nearConnecting}
+                onClick={handleConnectNear}
+              >
+                {nearConnecting ? t("onboard.near.connecting") : t("onboard.near.connectButton")}
               </button>
               {error && <p style={{ color: "var(--red)", fontSize: 12, marginTop: 8, marginBottom: 0 }}>{error}</p>}
             </div>

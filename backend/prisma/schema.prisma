@@ -43,6 +43,35 @@ model InternalWallet {
   // te devuelva la MISMA InternalWallet en vez de crear una nueva cada vez.
   noirAddress   String?  @unique
 
+  // Brai, 2026-09-30: "si conecta con metamask o rabby les cree la wallet
+  // automaticamente, como pasa con la NOIR ahora" -- same idea as
+  // noirAddress above, for an EVM wallet (Metamask, Rabby -- both inject
+  // the same window.ethereum interface, so one flow covers both). We
+  // store the checksummed EVM address as the identity; login is proving
+  // control of it by signing a one-time challenge (EIP-191 personal_sign)
+  // instead of typing 12 words -- see EvmAuthChallenge below and
+  // POST /api/wallets/connect-evm in server.ts, which verifies that
+  // signature before creating or recognizing this wallet. This is also
+  // the wallet Add Funds (paying in from Base/Robinhood Chain with
+  // USDC/ETH) will credit once that lands -- see the note on
+  // EvmAuthChallenge for why identity and funding are kept as two
+  // separate concerns even though they'll share this same address field.
+  evmAddress    String?  @unique
+
+  // Brai, 2026-09-30: "tambien con las wallets nativas de near" -- same
+  // idea again, for a native NEAR wallet (Nightly, MyNearWallet, etc. via
+  // wallet-selector). We store the NEAR account id (e.g. "alice.near",
+  // not a public key -- an account can rotate keys) as the identity.
+  // Login proves control of it via NEP-413 message signing (the NEAR
+  // wallet-selector standard for "sign this arbitrary message", distinct
+  // from signing a transaction) -- see NearWalletAuthChallenge below and
+  // POST /api/wallets/connect-near in server.ts, which verifies the
+  // signature AND that the signing public key is actually a full-access
+  // key of the claimed account (via a view_access_key RPC call) before
+  // creating or recognizing this wallet -- a signature alone only proves
+  // control of some keypair, not that it belongs to the claimed account.
+  nearAddress   String?  @unique
+
   balances Balance[]
   orders   Order[]
   // Brai, 2026-09-18: "necesito habilitar el mercado NFT" -- same idea as
@@ -53,6 +82,7 @@ model InternalWallet {
   nftMints             PendingNftMint[]
   nftPurchasesAsBuyer  NftPurchaseOrder[] @relation("NftBuyer")
   nftPurchasesAsSeller NftPurchaseOrder[] @relation("NftSeller")
+  nearLaunches         PendingNearLaunch[]
 }
 
 // Brai, 2026-09-11: "quiero que puedas trabajar con Ycash y Zcash" -- each
@@ -314,6 +344,159 @@ model Order {
   token          Token          @relation(fields: [tokenId], references: [id])
 
   @@index([status])
+  @@index([zecAddress])
+}
+
+// ---------- NEAR token launches ----------
+// Brai, 2026-09-30: "avanzamos" -- backend-orchestrated NEAR launches
+// (mint a NEP-141 token, seed a Ref/Rhea DCL pool, lock the LP position in
+// the shared locker contract), instead of an on-chain launcher contract.
+// Same PENDING/CREATED-ish state-machine idea as PendingTokenCreation
+// above, but where that one waits for an INCOMING payment, this one
+// drives a SEQUENCE of our OWN outgoing NEAR transactions -- so it needs
+// a step cursor (currentStep), not just a status, to resume correctly
+// after a crash/restart mid-sequence. See backend/src/lib/nearLaunch.ts
+// for the code that actually walks this state machine, one step per poll
+// tick, exactly like zcashReal.ts's pollOnce() does for payments.
+//
+// Unlike Token/Order above (ZODD's own in-house bonding-curve ledger),
+// there is deliberately no Token row created for a NEAR launch: the
+// token trades on Ref/Rhea directly (any NEAR wallet, any frontend that
+// reads dclv2.ref-labs.near -- see nearbased.app), not on ZODD's own
+// curve. This table IS the full record of a NEAR launch.
+enum NearLaunchStatus {
+  PENDING     // esperando el pago del creador (aun no hay monto/moneda de cobro decidido -- ver nearFees.ts)
+  PAID        // pago confirmado, listo para orquestar en NEAR
+  DEPLOYING   // orquestacion en curso -- ver currentStep para el paso exacto
+  LIVE        // token deployado + pool creado + LP lockeado para siempre
+  FAILED      // un paso no se pudo completar tras reintentos -- ver lastError
+  EXPIRED
+}
+
+// Cada paso, una vez completado con éxito, nunca se vuelve a ejecutar --
+// el poll loop en nearLaunch.ts siempre retoma desde currentStep, nunca
+// desde el principio. El orden importa: cada paso asume que los
+// anteriores ya están confirmados on-chain.
+enum NearLaunchStep {
+  NOT_STARTED
+  TOKEN_ACCOUNT_CREATED       // sub-cuenta <slug>.<parent> creada + fondeada
+  TOKEN_CONTRACT_DEPLOYED     // wasm del token (Rust, ../near-zodd-launch-rust/token) deployado + new() llamado
+  TOKEN_DEPLOY_KEY_REVOKED    // la full-access key usada para deployar fue borrada -- contrato inmutable para siempre, nadie (ni nosotros) puede re-deployar encima
+  POOL_CREATED                // dclv2.ref-labs.near: create_pool para este token
+  LIQUIDITY_SEEDED            // deposito inicial de liquidez en el pool
+  POSITION_LOCKED             // posicion LP transferida y lock_position() llamado en el locker compartido -- ver ../near-zodd-launch-rust/locker
+}
+
+// Brai, 2026-09-30: "y eso te dije tiene que ser multiwallet, soportar evm
+// como pago, con eth y usdc de base y robinhood y tambien usdc de solana y
+// zec de la wallet de zec" -- corrected same day: "USDG dsde robinhood
+// perdon, me equivoque" -- the Robinhood Chain stablecoin leg is USDG
+// (Robinhood's own primary settlement stablecoin), not USDC, which isn't
+// even on Robinhood's own published contract list. The $8 fee
+// (nearFees.ts) can be paid in any of these six. ZEC reuses the EXACT
+// same diversified-address + poll mechanism
+// as every other real-ZEC payment in this codebase (see the
+// zecAddress/zecSaplingDiversifierHex/zecOrchardDiversifierHex/
+// expectedZecAmount fields below, and handlePaymentDetected's new branch
+// in server.ts) -- nothing bespoke for NEAR launches there. The EVM and
+// Solana methods are simpler and DON'T get a watched deposit address: the
+// creator already has a connected wallet (Metamask/Rabby/Phantom) for
+// these, so the flow is "creator sends it themselves, then hands us the
+// tx hash/signature", and we verify that specific transaction on-chain
+// ourselves before marking PAID -- see nearLaunchPayments.ts. That's the
+// standard pattern for this kind of one-shot EVM/Solana payment (no
+// custodial one-time keys to generate and later sweep, unlike a fresh
+// deposit address would need).
+enum NearLaunchPaymentMethod {
+  ZEC
+  BASE_ETH
+  BASE_USDC
+  ROBINHOOD_ETH
+  ROBINHOOD_USDG
+  SOLANA_USDC
+}
+
+model PendingNearLaunch {
+  id                  String            @id @default(cuid())
+  creatorWalletId     String
+  name                String
+  symbol              String
+  totalSupply         String            // string, no BigInt -- decimals variable hace que el valor pueda superar el rango seguro de JS number sin cuidado
+  decimals            Int               @default(18)
+  icon                String?           @db.Text
+  description         String?           @db.Text
+
+  status              NearLaunchStatus  @default(PENDING)
+  currentStep         NearLaunchStep    @default(NOT_STARTED)
+
+  // ---------- Payment (multi-chain, see the enum's comment above) ----------
+  // Chosen once, at quote time (nearLaunchPayments.ts's quoteNearLaunchPayment),
+  // and never changed after -- a creator who wants to pay a different way
+  // has to start a new launch. paymentAmountExpected/paymentUsdLocked are
+  // locked at that same moment so a price move between quote and payment
+  // never changes what's owed out from under the creator.
+  paymentMethod           NearLaunchPaymentMethod?
+  // Decimal string in the ASSET'S OWN base units: wei for BASE_ETH/
+  // ROBINHOOD_ETH, 6-decimal stablecoin units for BASE_USDC/ROBINHOOD_USDG/
+  // SOLANA_USDC -- EXCEPT for ZEC, which is stored as a plain ZEC amount
+  // (e.g. "0.00312345", matching what zcashReal.ts's generateOrderAddress
+  // returns and what Order.zecAmount/PendingTokenCreation.expectedZecAmount
+  // already use elsewhere), not zatoshi. Kept as a string here like
+  // totalSupply above for the same JS-number-range reason.
+  paymentAmountExpected   String?
+  paymentUsdLocked        Float?          // the USD amount this quote locked in, <= NEAR_LAUNCH_MAX_TOTAL_USD
+  // EVM tx hash / Solana tx signature, submitted by the frontend after the
+  // creator's wallet confirms the send, and verified on-chain (see
+  // verifyAndMarkNearLaunchPaid) before status ever moves to PAID. Null
+  // for ZEC, which instead uses zecAddress below exactly like every other
+  // real-ZEC flow in this codebase (poll-detected, not submitted).
+  paymentTxRef            String?
+  paymentVerifiedAt       DateTime?
+
+  // ZEC-only, populated when paymentMethod == ZEC: identical shape and
+  // semantics to Order.zecAddress/zecSaplingDiversifierHex/
+  // zecOrchardDiversifierHex above -- this table is deliberately just
+  // another row-type handlePaymentDetected (server.ts) and resumeWatching
+  // (also server.ts, on restart) already know how to deal with.
+  zecAddress               String?
+  zecSaplingDiversifierHex String?
+  zecOrchardDiversifierHex String?
+  // Por qué currentStep se re-intenta en vez de abortar de una: un solo
+  // fallo de red/RPC no debe tirar un launch entero a FAILED -- ver
+  // MAX_STEP_ATTEMPTS en nearLaunch.ts. FAILED es solo para cuando se
+  // agotan los reintentos de UN paso.
+  stepAttempts        Int               @default(0)
+  lastError           String?           @db.Text
+
+  // Ed25519 secret key (as "ed25519:...") for the THROWAWAY full-access
+  // key created for tokenAccountId at TOKEN_ACCOUNT_CREATED -- needed to
+  // sign the deploy + init transaction at TOKEN_CONTRACT_DEPLOYED and the
+  // DeleteKey transaction at TOKEN_DEPLOY_KEY_REVOKED, then set back to
+  // null the moment that DeleteKey lands on-chain. Deliberately plaintext
+  // here (unlike InternalWallet.seedHashHex, which is a hash of a real
+  // user's login phrase): this key's only power is to deploy/re-deploy
+  // code on one brand-new, still-empty token subaccount, it lives for
+  // minutes, and the actual security boundary is the on-chain key
+  // revocation, not DB secrecy -- a DB read after that step is harmless
+  // because the key no longer exists on-chain at all.
+  deploySecretKey     String?           @db.Text
+
+  // Se completan a medida que cada paso avanza -- null hasta entonces.
+  tokenAccountId      String?           @unique // ej. "abc123.launches.zodd.near"
+  tokenDeployTxHash   String?
+  poolId              String?
+  poolCreateTxHash    String?
+  positionId          String?
+  lockTxHash          String?
+
+  createdAt           DateTime          @default(now())
+  updatedAt            DateTime         @updatedAt
+  completedAt         DateTime?
+
+  creatorWallet InternalWallet @relation(fields: [creatorWalletId], references: [id])
+
+  @@index([status])
+  @@index([creatorWalletId])
   @@index([zecAddress])
 }
 
@@ -633,6 +816,28 @@ model NftPurchaseOrder {
 // si fuera suya y quedarse con el InternalWallet (y el saldo) que ya
 // estuviera asociado a esa dirección -- por eso esto no es opcional.
 model NoirAuthChallenge {
+  id        String   @id @default(cuid())
+  nonce     String   @unique
+  message   String
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+// Same one-time-nonce pattern as NoirAuthChallenge above, for the EVM
+// (Metamask/Rabby) connect flow -- see InternalWallet.evmAddress.
+model EvmAuthChallenge {
+  id        String   @id @default(cuid())
+  nonce     String   @unique
+  message   String
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+// Same pattern again, for the native NEAR wallet connect flow -- see
+// InternalWallet.nearAddress.
+model NearWalletAuthChallenge {
   id        String   @id @default(cuid())
   nonce     String   @unique
   message   String

@@ -9,6 +9,8 @@
   },
   "dependencies": {
     "@noir-wallet/sdk": "^0.1.9",
+    "@solana/spl-token": "^0.4.15",
+    "@solana/web3.js": "^1.99.0",
     "lightweight-charts": "^5.2.0",
     "next": "14.2.35",
     "qrcode": "^1.5.4",

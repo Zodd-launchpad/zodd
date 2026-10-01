@@ -13,9 +13,20 @@
   },
   "dependencies": {
     "@fastify/cors": "^9.0.1",
+    "@near-js/accounts": "^2.5.1",
+    "@near-js/crypto": "^2.5.1",
+    "@near-js/providers": "^2.5.1",
+    "@near-js/signers": "^2.5.1",
+    "@near-js/transactions": "^2.5.1",
+    "@near-js/types": "^2.5.1",
+    "@near-js/utils": "^2.5.1",
     "@noir-wallet/sdk": "^0.1.9",
     "@prisma/client": "^5.20.0",
+    "@solana/web3.js": "^1.99.0",
+    "bs58": "^6.0.0",
+    "ethers": "^6.17.0",
     "fastify": "^4.28.1",
+    "tweetnacl": "^1.0.3",
     "zod": "^3.23.8"
   },
   "devDependencies": {

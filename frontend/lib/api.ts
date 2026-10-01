@@ -171,6 +171,36 @@ export const api = {
     shieldedAddress: string;
   }): Promise<{ walletId: string; walletTag: string; noirAddress: string }> =>
     req("/api/wallets/connect-noir", { method: "POST", body: JSON.stringify(data) }),
+  // Brai, 2026-09-30: "que si conecta con metamask o rabby les cree la
+  // wallet automaticamente, como pasa con la NOIR ahora" -- same
+  // challenge/sign/verify shape as Noir above, but EIP-191 personal_sign
+  // over window.ethereum (Metamask and Rabby both inject the same
+  // provider, so one flow covers both). See POST /api/wallets/evm-challenge
+  // and /connect-evm in server.ts.
+  getEvmChallenge: (): Promise<{ nonce: string; message: string }> =>
+    req("/api/wallets/evm-challenge", { method: "POST" }),
+  connectEvm: (data: {
+    nonce: string;
+    signature: string;
+    address: string;
+  }): Promise<{ walletId: string; walletTag: string; evmAddress: string }> =>
+    req("/api/wallets/connect-evm", { method: "POST", body: JSON.stringify(data) }),
+  // Brai, 2026-09-30: "tambien con las wallets nativas de near" -- NEP-413
+  // message signing. nonceBase64/recipient must be the exact bytes/string
+  // actually passed to the wallet's signMessage() call, see
+  // connectNear()/wallet.tsx for how those are derived. See POST
+  // /api/wallets/near-challenge and /connect-near in server.ts.
+  getNearChallenge: (): Promise<{ nonce: string; message: string }> =>
+    req("/api/wallets/near-challenge", { method: "POST" }),
+  connectNear: (data: {
+    nonce: string;
+    nonceBase64: string;
+    recipient: string;
+    signature: string;
+    publicKey: string;
+    accountId: string;
+  }): Promise<{ walletId: string; walletTag: string; nearAddress: string }> =>
+    req("/api/wallets/connect-near", { method: "POST", body: JSON.stringify(data) }),
   // Cached for the life of the page load: this never changes mid-session,
   // and every "is this simulated?" note (and the create-fee display) needs it.
   getMode: (): Promise<ModeResponse> => {
@@ -391,6 +421,35 @@ export const api = {
   // createToken's isPyramidToken and the backend's POST /api/tokens).
   checkPyramidAccess: (walletId: string): Promise<{ hasAccess: boolean }> =>
     req(`/api/pyramid/access?walletId=${encodeURIComponent(walletId)}`),
+
+  // ---------- NEAR launches ----------
+  // Brai, 2026-09-30: "avanzamos" (backend orchestration) then "tiene que
+  // ser multiwallet ... eth y usdc de base y robinhood y tambien usdc de
+  // solana y zec de la wallet de zec" (multi-chain fee payment) -- backend
+  // in nearLaunch.ts/nearLaunchPayments.ts. Real on-chain tokens on
+  // Ref/Rhea (dclv2.ref-labs.near), not ZODD's own bonding curve, so this
+  // is deliberately a separate flow from createToken()/buy()/sell() above.
+  createNearLaunch: (data: {
+    creatorWalletId: string;
+    name: string;
+    symbol: string;
+    totalSupply: number;
+    decimals?: number;
+    icon?: string;
+    description?: string;
+  }): Promise<NearLaunchView> => req("/api/near-launches", { method: "POST", body: JSON.stringify(data) }),
+  getNearLaunch: (id: string): Promise<NearLaunchView> => req(`/api/near-launches/${id}`),
+  // Public chain constants (chain id, RPC, stablecoin contract + decimals,
+  // Solana USDC mint) needed to actually construct the EVM/Solana send --
+  // see lib/nearPayments.ts, which is the only caller of this.
+  getNearLaunchPaymentConfig: (): Promise<NearLaunchPaymentChainConfig> => req("/api/near-launches/payment-config"),
+  quoteNearLaunchPayment: (id: string, method: NearLaunchPaymentMethod): Promise<NearLaunchPaymentQuote> =>
+    req(`/api/near-launches/${id}/payment-quote`, { method: "POST", body: JSON.stringify({ method }) }),
+  // txRef is an EVM tx hash or a Solana tx signature -- never called for
+  // ZEC, which is detected automatically by the backend's poll loop
+  // instead (same as every other real-ZEC payment in this codebase).
+  submitNearLaunchPaymentProof: (id: string, txRef: string): Promise<NearLaunchView> =>
+    req(`/api/near-launches/${id}/payment-proof`, { method: "POST", body: JSON.stringify({ txRef }) }),
 };
 
 export interface NftWhitelistEntry {
@@ -601,4 +660,79 @@ export interface NftActivity {
   priceZec: number;
   currency: Currency;
   createdAt: string;
+}
+
+// ---------- NEAR launches ----------
+export type NearLaunchPaymentMethod = "ZEC" | "BASE_ETH" | "BASE_USDC" | "ROBINHOOD_ETH" | "ROBINHOOD_USDG" | "SOLANA_USDC";
+export type NearLaunchStatus = "PENDING" | "PAID" | "DEPLOYING" | "LIVE" | "FAILED" | "EXPIRED";
+export type NearLaunchStep =
+  | "NOT_STARTED"
+  | "TOKEN_ACCOUNT_CREATED"
+  | "TOKEN_CONTRACT_DEPLOYED"
+  | "TOKEN_DEPLOY_KEY_REVOKED"
+  | "POOL_CREATED"
+  | "LIQUIDITY_SEEDED"
+  | "POSITION_LOCKED";
+
+export interface NearLaunchView {
+  id: string;
+  creatorWalletId: string;
+  creatorNearAccountId: string | null;
+  name: string;
+  symbol: string;
+  totalSupply: string;
+  decimals: number;
+  icon: string | null;
+  description: string | null;
+  status: NearLaunchStatus;
+  currentStep: NearLaunchStep;
+  stepAttempts: number;
+  lastError: string | null;
+  tokenAccountId: string | null;
+  tokenDeployTxHash: string | null;
+  poolId: string | null;
+  poolCreateTxHash: string | null;
+  positionId: string | null;
+  lockTxHash: string | null;
+  createdAt: string;
+  completedAt: string | null;
+  paymentMethod: NearLaunchPaymentMethod | null;
+  paymentAmountExpected: string | null;
+  paymentUsdLocked: number | null;
+  paymentTxRef: string | null;
+  paymentVerifiedAt: string | null;
+  // ZEC-only -- present once quoteNearLaunchPayment(id, "ZEC") has run.
+  zecAddress: string | null;
+}
+
+export interface NearLaunchPaymentQuote {
+  method: NearLaunchPaymentMethod;
+  /** Where the creator sends the payment -- a one-time address for ZEC,
+   * our fixed treasury address for every other method. */
+  address: string;
+  /** Rounded, human-readable amount for display -- e.g. "0.0019" ETH. */
+  amountDisplay: string;
+  /** The EXACT amount to actually send, in the asset's own base units
+   * (wei / 6-decimal stablecoin units) -- see nearLaunchPayments.ts's own
+   * comment on why this isn't the same as amountDisplay. Irrelevant for
+   * ZEC (send amountDisplay there, same as every other ZEC payment flow
+   * in this app). */
+  amountBaseUnits: string;
+  usdLocked: number;
+}
+
+export interface NearLaunchEvmChainConfig {
+  chainId: number;
+  chainIdHex: string;
+  chainName: string;
+  rpcUrl: string;
+  explorerBaseUrl: string;
+  stablecoinSymbol: "USDC" | "USDG";
+  stablecoinAddress: string;
+  stablecoinDecimals: number;
+}
+
+export interface NearLaunchPaymentChainConfig {
+  evm: { BASE: NearLaunchEvmChainConfig; ROBINHOOD: NearLaunchEvmChainConfig };
+  solana: { usdcMint: string; usdcDecimals: number };
 }

@@ -768,6 +768,23 @@ export const translations = {
     zh: "未安装 Noir 钱包。请从 Chrome 网上应用店安装扩展程序后重试。",
   },
   "onboard.noir.rejected": { en: "Connection request was closed before approving — try again when you're ready.", zh: "连接请求在批准前被关闭——准备好后请重试。" },
+  // Brai, 2026-09-30: "que si conecta con metamask o rabby les cree la
+  // wallet automaticamente, como pasa con la NOIR ahora ... tambien con
+  // las wallets nativas de near" -- two more connect options, same card.
+  "onboard.evm.connectButton": { en: "Connect Metamask / Rabby", zh: "连接 Metamask / Rabby" },
+  "onboard.evm.connecting": { en: "Connecting…", zh: "连接中…" },
+  "onboard.evm.notInstalled": {
+    en: "No EVM wallet found. Install Metamask or Rabby, then try again.",
+    zh: "未检测到以太坊钱包。请安装 Metamask 或 Rabby 后重试。",
+  },
+  "onboard.evm.rejected": { en: "Connection request was closed before approving — try again when you're ready.", zh: "连接请求在批准前被关闭——准备好后请重试。" },
+  "onboard.near.connectButton": { en: "Connect NEAR Wallet", zh: "连接 NEAR 钱包" },
+  "onboard.near.connecting": { en: "Connecting…", zh: "连接中…" },
+  "onboard.near.notInstalled": {
+    en: "No NEAR wallet extension found (Nightly). Install it, then try again.",
+    zh: "未检测到 NEAR 钱包扩展程序（Nightly）。请安装后重试。",
+  },
+  "onboard.near.rejected": { en: "Connection request was closed before approving — try again when you're ready.", zh: "连接请求在批准前被关闭——准备好后请重试。" },
 
   // ---------- Wallet detail modal ----------
   "detail.badge": { en: "ZODD WALLET", zh: "ZODD 钱包" },
