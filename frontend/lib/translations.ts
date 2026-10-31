@@ -68,6 +68,7 @@ export const translations = {
   "launchpad.nav.market": { en: "Market", zh: "市场" },
   "launchpad.nav.create": { en: "Create", zh: "创建" },
   "launchpad.nav.pyramid": { en: "THE PYRAMID", zh: "金字塔" },
+  "launchpad.nav.elysium": { en: "Elysium", zh: "Elysium" },
   "launchpad.nav.portfolio": { en: "Portfolio", zh: "持仓" },
 
   // ---------- Market page ----------

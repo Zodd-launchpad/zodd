@@ -6,6 +6,8 @@ import { useLanguage } from "@/lib/i18n";
 const TABS = [
   { href: "/launchpad", key: "launchpad.nav.market" as const },
   { href: "/launchpad/create", key: "launchpad.nav.create" as const },
+  // Brai, 2026-10-31: trading y lanzamiento en Elysium (HYPE) via el RPC de BOXA.
+  { href: "/launchpad/elysium", key: "launchpad.nav.elysium" as const },
   // Brai, 2026-09-19: "LA PIRAMIDE... tener la reliquia hace que tengas el
   // privilegio de entrar a esa pestaña" -- the tab itself is always visible
   // (so people know it exists and go craft a reliquia for it); the gate is
